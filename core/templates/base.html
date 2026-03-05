@@ -1,0 +1,663 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>EasyMentor</title>
+    <link rel="icon" type="image/png" href="{% static 'logo.png' %}">
+    <link rel="shortcut icon" type="image/x-icon" href="{% static 'lj.ico' %}">
+
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="{% static 'css/theme.css' %}" rel="stylesheet">
+
+    <style>
+        :root {
+            --nav-h: 70px;
+        }
+
+        body {
+            background: #f5f7fb;
+            padding-top: env(safe-area-inset-top);
+            color: #111827;
+        }
+
+        /* Keep classic LJ header + sidebar look even if static CSS cache misses */
+        .lj-navbar {
+            background: linear-gradient(90deg, #0b3d6d, #114f8e);
+            color: #ffffff;
+            min-height: var(--nav-h);
+            padding: 0 16px;
+        }
+
+        .lj-navbar .brand-block strong,
+        .lj-navbar .brand-block small {
+            color: #ffffff;
+        }
+
+        .lj-sidebar a {
+            display: block;
+            padding: 10px 12px;
+            color: #1f2937;
+            text-decoration: none;
+            border-radius: 6px;
+            margin-bottom: 6px;
+            transition: background-color 0.15s ease, color 0.15s ease;
+        }
+
+        .lj-sidebar a:hover {
+            background: #0b3d6d;
+            color: #ffffff;
+        }
+
+        .logout-btn {
+            background: #b91c1c;
+            border-color: #b91c1c;
+            color: #fff !important;
+        }
+        .logout-btn:hover {
+            background: #991b1b;
+            border-color: #991b1b;
+            color: #fff !important;
+        }
+
+        .theme-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            user-select: none;
+        }
+        .theme-icon {
+            font-size: 14px;
+            line-height: 1;
+        }
+        .theme-switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+        .theme-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .theme-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #cbd5e1;
+            transition: .2s;
+            border-radius: 999px;
+        }
+        .theme-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            top: 3px;
+            background-color: white;
+            transition: .2s;
+            border-radius: 50%;
+        }
+        .theme-switch input:checked + .theme-slider {
+            background-color: #2563eb;
+        }
+        .theme-switch input:checked + .theme-slider:before {
+            transform: translateX(20px);
+        }
+
+        body.dark-mode {
+            background: #0b1220;
+            color: #e5e7eb;
+        }
+        body.dark-mode .lj-navbar {
+            background: linear-gradient(90deg, #020617, #0f172a);
+            border-bottom: 1px solid #334155;
+            box-shadow: 0 2px 0 rgba(30, 41, 59, 0.7);
+        }
+        body.dark-mode .lj-card,
+        body.dark-mode .card {
+            background: #111827 !important;
+            color: #e5e7eb !important;
+            border-color: #334155 !important;
+        }
+        body.dark-mode .lj-sidebar {
+            background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
+            border-right: 2px solid #334155;
+            box-shadow: inset -1px 0 0 #1f2937;
+        }
+        body.dark-mode .lj-sidebar h6 {
+            color: #93c5fd !important;
+        }
+        body.dark-mode .menu-group {
+            background: #1e293b;
+            color: #bfdbfe;
+        }
+        body.dark-mode .lj-sidebar a {
+            color: #dbeafe;
+        }
+        body.dark-mode .lj-sidebar a:hover {
+            background: #1d4ed8;
+            color: #ffffff;
+        }
+        body.dark-mode .table,
+        body.dark-mode .table-sm,
+        body.dark-mode .table-bordered {
+            --bs-table-bg: #0f172a;
+            --bs-table-color: #e5e7eb;
+            --bs-table-border-color: #334155;
+            --bs-table-accent-bg: #0f172a;
+            --bs-table-striped-bg: #111827;
+            --bs-table-striped-color: #e5e7eb;
+            --bs-table-hover-bg: #1e293b;
+            --bs-table-hover-color: #ffffff;
+            color: #e5e7eb;
+        }
+        body.dark-mode .table thead th {
+            background: #1e293b;
+            color: #e2e8f0;
+            border-color: #334155;
+        }
+        body.dark-mode .table td,
+        body.dark-mode .table th {
+            border-color: #334155;
+        }
+        body.dark-mode .form-control,
+        body.dark-mode .form-select {
+            background: #0f172a;
+            color: #e5e7eb;
+            border-color: #334155;
+        }
+        body.dark-mode .form-control::placeholder {
+            color: #94a3b8;
+        }
+        body.dark-mode .theme-slider {
+            background-color: #334155;
+        }
+        body.dark-mode .theme-switch input:checked + .theme-slider {
+            background-color: #3b82f6;
+        }
+        body.dark-mode .alert-info {
+            background: #10243f;
+            color: #dbeafe;
+            border-color: #1e3a5f;
+        }
+        body.dark-mode .alert-warning {
+            background: #3a2a06;
+            color: #fde68a;
+            border-color: #7c5f13;
+        }
+        body.dark-mode .badge.bg-secondary {
+            background-color: #334155 !important;
+        }
+
+        .lj-sidebar h6 {
+            color: #4b5563 !important;
+            margin-bottom: 10px;
+            font-size: 1.35rem;
+        }
+
+        .table-responsive {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .lj-sidebar {
+            display: flex;
+            flex-direction: column;
+            min-height: calc(100vh - 96px);
+            background: linear-gradient(180deg, #f7fbff 0%, #edf4ff 100%);
+            border-right: 2px solid #d6e4ff;
+            box-shadow: inset -1px 0 0 #c8dafc;
+        }
+
+        .lj-main {
+            min-width: 0;
+        }
+
+        .brand-block {
+            min-width: 0;
+        }
+
+        /* Prevent oversized logo assets from breaking the full layout */
+        .lj-logo {
+            height: 44px;
+            width: auto;
+            max-width: 56px;
+            object-fit: contain;
+            flex: 0 0 auto;
+        }
+
+        .brand-block strong,
+        .brand-block small {
+            display: block;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 360px;
+        }
+
+        .top-actions,
+        .module-form {
+            min-width: 0;
+        }
+
+        .module-select {
+            min-width: 260px;
+        }
+
+        .menu-bottom {
+            margin-top: auto;
+            padding-top: 12px;
+            border-top: 1px solid #d9e0ea;
+        }
+
+        .menu-group {
+            margin-top: 8px;
+            margin-bottom: 4px;
+            padding: 4px 8px;
+            border-radius: 7px;
+            background: #d6e4ff;
+            color: #173a70;
+            font-size: 0.7rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .lj-sidebar a.d-block.mb-2 {
+            margin-bottom: 2px !important;
+            padding-top: 4px;
+            padding-bottom: 4px;
+        }
+
+        .mobile-view {
+            display: none;
+        }
+
+        .footer-wrap {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 2.5rem;
+            flex-wrap: wrap;
+        }
+
+        .footer-note {
+            margin: 0;
+            color: #334155;
+            font-weight: 500;
+        }
+
+        .footer-name {
+            color: #111111;
+            font-weight: 700;
+        }
+
+        .footer-name-ai {
+            color: #dc2626;
+            font-weight: 800;
+        }
+
+        .chai-btn {
+            display: inline-block;
+            background: #ff813f;
+            color: #fff;
+            padding: 10px 18px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .suggest-btn {
+            display: inline-block;
+            background: #16a34a;
+            color: #fff;
+            padding: 10px 18px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .mobile-backdrop {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(13, 24, 35, 0.45);
+            z-index: 1030;
+        }
+
+        @media (max-width:768px) {
+            .lj-navbar {
+                height: auto;
+                min-height: var(--nav-h);
+                padding: 10px 12px;
+                gap: 8px;
+                align-items: flex-start !important;
+                flex-wrap: wrap;
+            }
+
+            .lj-logo {
+                height: 34px;
+                margin-right: 8px;
+            }
+
+            .brand-block {
+                flex: 1;
+            }
+
+            .brand-block strong {
+                font-size: 0.95rem;
+                line-height: 1.1;
+                max-width: 100%;
+            }
+
+            .brand-block small {
+                font-size: 0.78rem;
+                line-height: 1.05;
+                max-width: 100%;
+            }
+
+            .top-actions {
+                width: 100%;
+                justify-content: flex-end;
+                flex-wrap: wrap;
+                gap: 8px !important;
+            }
+
+            .module-form {
+                width: 100%;
+                order: 1;
+            }
+
+            .module-select {
+                width: 100%;
+                min-width: 0 !important;
+            }
+
+            .mobile-menu {
+                display: block;
+                order: 2;
+            }
+
+            .lj-sidebar {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: min(86vw, 320px);
+                height: 100dvh;
+                min-height: 100dvh;
+                z-index: 1040;
+                display: flex;
+                transform: translateX(-105%);
+                transition: transform 0.22s ease;
+                border-right: 2px solid #f4b400;
+                box-shadow: 0 8px 30px rgba(5, 17, 31, 0.25);
+                overflow-y: auto;
+                overscroll-behavior: contain;
+                padding-top: max(12px, env(safe-area-inset-top));
+            }
+
+            body.menu-open .lj-sidebar {
+                transform: translateX(0);
+            }
+
+            body.menu-open .mobile-backdrop {
+                display: block;
+            }
+
+            table,
+            .table {
+                font-size: 12.5px;
+            }
+
+            .btn {
+                padding: 8px 10px;
+                font-size: 14px;
+            }
+
+            h3,
+            h4 {
+                font-size: 18px;
+            }
+
+            .lj-card {
+                padding: 12px !important;
+                border-radius: 10px;
+            }
+
+            .lj-main {
+                padding-top: 10px;
+            }
+
+            .form-control,
+            .form-select,
+            .btn {
+                min-height: 40px;
+            }
+
+            .desktop-view {
+                display: none;
+            }
+
+            .mobile-view {
+                display: block;
+            }
+
+            .footer-wrap {
+                flex-direction: column;
+                align-items: center;
+                gap: 0.75rem;
+            }
+
+            .modal-dialog {
+                margin: 0.6rem;
+            }
+
+            .modal-content {
+                border-radius: 12px;
+            }
+        }
+
+        @media (min-width:769px) {
+            .mobile-menu {
+                display: none;
+            }
+
+            .mobile-backdrop {
+                display: none !important;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <nav class="lj-navbar d-flex align-items-center">
+        <a href="{{ home_url }}"
+            class="d-flex align-items-center text-decoration-none text-white">
+            <img src="{% static 'logo.png' %}" class="lj-logo">
+            <div class="ms-2 brand-block">
+                <strong>L.J. Institute of Engineering & Technology</strong><br>
+                <small>Attendance Follow-up ERP</small>
+            </div>
+        </a>
+
+        <div class="ms-auto d-flex gap-2 align-items-center top-actions">
+            {% if current_module and module_list %}
+            <form method="post" action="/switch-module/" class="d-flex align-items-center gap-2 mb-0 module-form">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <select name="module_id" class="form-select form-select-sm module-select"
+                    onchange="this.form.submit()">
+                    {% for m in module_list %}
+                    <option value="{{m.id}}" {% if m.is_current %}selected{% endif %}>
+                        {{m.name}}</option>
+                    {% endfor %}
+                </select>
+            </form>
+            {% if can_manage_modules %}
+            <a href="/modules/" class="btn btn-light btn-sm">Add New Module</a>
+            {% endif %}
+            {% endif %}
+
+            <button class="btn btn-light btn-sm mobile-menu" onclick="toggleMenu()">Menu</button>
+            <div class="theme-toggle" title="Light / Dark mode">
+                <span class="theme-icon">☀</span>
+                <label class="theme-switch mb-0">
+                    <input type="checkbox" id="themeSwitch" onchange="toggleTheme()">
+                    <span class="theme-slider"></span>
+                </label>
+                <span class="theme-icon">🌙</span>
+            </div>
+            <a href="/" class="btn btn-sm logout-btn">Logout</a>
+        </div>
+    </nav>
+    <div class="mobile-backdrop" id="mobileBackdrop" onclick="closeMenu()"></div>
+
+    <div class="container-fluid">
+        <div class="row">
+
+            <div class="col-md-2 lj-sidebar p-3" id="sidebar">
+                <h6 class="text-muted">MENU</h6>
+
+                {% if request.session.mentor %}
+                <a href="/home/" class="menu-group d-block text-decoration-none">Home</a>
+
+                <div class="menu-group">Calls</div>
+                <a href="/mentor-dashboard/" class="d-block mb-2">Attendance Calls</a>
+                <a href="/mentor-result-calls/" class="d-block mb-2">Result Calls</a>
+                <a href="/mentor-other-calls/" class="d-block mb-2">Direct Calls</a>
+                <a href="/live-followup-sheet/" class="d-block mb-2">View All Calls</a>
+
+                <div class="menu-group">SIF</div>
+                <a href="/mentor-sif-marks/" class="d-block mb-2">Marks Entry</a>
+                <a href="/mentor-view-sif/" class="d-block mb-2">View SIF</a>
+                <a href="/mentor-print-sif/" class="d-block mb-2">Print SIF</a>
+
+                <div class="menu-group">Whatsapp</div>
+                <a href="/mentor-report/" class="d-block mb-2">Attendance Report</a>
+                <a href="/mentor-result-report/" class="d-block mb-2">Result Report</a>
+                <a href="/mentor-whatsapp/" class="d-block mb-2">Message to Mentees</a>
+
+                <div class="menu-group">Other</div>
+                <a href="/mentor-student-data/" class="d-block mb-2">All Students Data</a>
+                {% else %}
+                <a href="/home/" class="menu-group d-block text-decoration-none">Home</a>
+
+                <div class="menu-group">Attendance</div>
+                <a href="/view-attendance/" class="d-block mb-2">View Attendance</a>
+                <a href="/upload-attendance/" class="d-block mb-2">Upload Attendance</a>
+                <a href="/delete-week/" class="d-block mb-2">Delete Attendance</a>
+                <a href="/reports/" class="d-block mb-2">Attendance Reports</a>
+
+                <div class="menu-group">Result</div>
+                <a href="/subjects/" class="d-block mb-2">Manage Subjects</a>
+                <a href="/upload-results/" class="d-block mb-2">Upload TH Results</a>
+                <a href="/view-results/" class="d-block mb-2">View TH Result</a>
+                <a href="/view-practical-marks/" class="d-block mb-2">Upload / View PR Result</a>
+                <a href="/sif-marks-template/" class="d-block mb-2">SIF Marks Filling</a>
+                <a href="/delete-results/" class="d-block mb-2">Delete Results</a>
+                <a href="/result-reports/" class="d-block mb-2">Result Reports</a>
+
+                <div class="menu-group">Phonecall</div>
+                <a href="/live-followup-sheet/" class="d-block mb-2">Live Followup Sheet</a>
+
+                <div class="menu-group">Other</div>
+                <a href="/upload-students/" class="d-block mb-2">Student Master</a>
+                <a href="/control-panel/" class="d-block mb-2">Control Panel</a>
+                <a href="/manage-mentors/" class="d-block mb-2">Manage Mentor</a>
+                {% endif %}
+                <div class="menu-bottom">
+                    <a href="upi://pay?pa=8866749627@upi&pn=Hardik%20Shah&am=15&cu=INR&tn=Cutting%20Chai"
+                        class="chai-btn w-100 text-center">
+                        &#9749; Buy Me a Chai
+                    </a>
+                    <a href="https://wa.me/918866749627?text=HDS%2C%20aavu%20thai%20shake%3F"
+                        class="suggest-btn w-100 text-center mt-2" target="_blank" rel="noopener noreferrer">
+                        Suggest Improvements
+                    </a>
+                </div>
+            </div>
+
+            <div class="col-md-10 col-12 p-2 p-md-4 lj-main">
+                <div class="lj-card">
+                    {% block content %}{% endblock %}
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <div class="lj-footer mt-4 text-center">
+        <div class="footer-wrap">
+            <p class="footer-note">
+                Crafted with &#9749; and code by
+                <span class="footer-name">H<span class="footer-name-ai">A</span>rd<span class="footer-name-ai">I</span>k
+                    Shah</span>
+            </p>
+        </div>
+    </div>
+
+    <script>
+        function applyTheme(mode) {
+            const sw = document.getElementById("themeSwitch");
+            if (mode === "dark") {
+                document.body.classList.add("dark-mode");
+                if (sw) sw.checked = true;
+            } else {
+                document.body.classList.remove("dark-mode");
+                if (sw) sw.checked = false;
+            }
+        }
+
+        function toggleTheme() {
+            const current = localStorage.getItem("theme_mode") || "light";
+            const next = current === "dark" ? "light" : "dark";
+            localStorage.setItem("theme_mode", next);
+            applyTheme(next);
+        }
+
+        (function initTheme(){
+            const saved = localStorage.getItem("theme_mode") || "light";
+            applyTheme(saved);
+        })();
+
+        function toggleMenu() {
+            document.body.classList.toggle("menu-open");
+        }
+
+        function closeMenu() {
+            document.body.classList.remove("menu-open");
+        }
+
+        document.addEventListener("click", function (e) {
+            if (window.innerWidth > 768) return;
+            const sidebar = document.getElementById("sidebar");
+            const menuBtn = e.target.closest(".mobile-menu");
+            if (menuBtn) return;
+            if (!sidebar.contains(e.target) && document.body.classList.contains("menu-open")) {
+                closeMenu();
+            }
+        });
+
+        document.querySelectorAll("#sidebar a").forEach(function (a) {
+            a.addEventListener("click", function () {
+                if (window.innerWidth <= 768) closeMenu();
+            });
+        });
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+
+</html>

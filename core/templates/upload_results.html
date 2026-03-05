@@ -1,0 +1,300 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+body.dark-mode .upload-result-card,
+body.dark-mode .upload-result-card.card{
+    background: #0f172a !important;
+    border-color: #334155 !important;
+    color: #e5e7eb !important;
+}
+body.dark-mode #statusText .alert-success{
+    background: #0f2a1f;
+    color: #bbf7d0;
+    border-color: #166534;
+}
+body.dark-mode #statusText .alert-danger{
+    background: #2c1115;
+    color: #fecdd3;
+    border-color: #7f1d1d;
+}
+body.dark-mode #statusText .alert-warning{
+    background: #3a2a06;
+    color: #fde68a;
+    border-color: #7c5f13;
+}
+body.dark-mode #mentorStats .card{
+    background: #0f172a !important;
+    border: 1px solid #334155;
+}
+</style>
+
+<h3>Upload Result Sheet</h3>
+
+<form id="resultUploadForm" method="post" enctype="multipart/form-data" class="upload-result-card card p-3">
+    {% csrf_token %}
+
+    <label>Test Name</label>
+    <select name="test_name" class="form-control mb-2" required>
+        <option value="">Select Test</option>
+        <option value="ALL_EXAMS">ALL EXAMS</option>
+        {% for t in tests %}
+            <option value="{{t}}">{{t}}</option>
+        {% endfor %}
+    </select>
+
+    <label>Subject Name</label>
+    <div class="d-flex gap-2 mb-2">
+        <select name="subject_id" class="form-control" required>
+            <option value="">Select Subject</option>
+            <option value="ALL">ALL subjects</option>
+            {% for s in subjects %}
+                <option value="{{s.id}}">{{s.name}}</option>
+            {% endfor %}
+        </select>
+        <a href="/subjects/" class="btn btn-outline-secondary">Edit Subjects</a>
+    </div>
+
+    <label>Upload Type</label>
+    <div class="mb-2">
+        <div class="form-check">
+            <input class="form-check-input" type="radio" name="upload_mode" id="mode_subject" value="subject" checked>
+            <label class="form-check-label" for="mode_subject">Subject-only sheet</label>
+        </div>
+        <div class="form-check">
+            <input class="form-check-input" type="radio" name="upload_mode" id="mode_compiled" value="compiled">
+            <label class="form-check-label" for="mode_compiled">Compiled sheet</label>
+        </div>
+    </div>
+
+    <label>Result File</label>
+    <input type="file" name="result_file" class="form-control mb-2" required accept=".xlsx,.xls">
+
+    <button type="submit" class="btn btn-lj">Upload Result</button>
+</form>
+
+<br>
+<div class="progress" style="height:25px; display:none;" id="progressBox">
+    <div class="progress-bar progress-bar-striped progress-bar-animated bg-info"
+         id="progressBar" style="width:0%">0%</div>
+</div>
+
+<div id="statusText" class="mt-3"></div>
+<div class="mt-2" id="cancelWrap" style="display:none;">
+    <button type="button" class="btn btn-danger btn-sm" id="cancelUploadBtn">Cancel Upload</button>
+</div>
+<div id="mentorStats" class="mt-3"></div>
+
+<script>
+let currentJobId = null;
+let pollTimer = null;
+
+function toggleBulkMode(){
+    const testSelect = document.querySelector('select[name="test_name"]');
+    const subjectSelect = document.querySelector('select[name="subject_id"]');
+    const modeSubject = document.getElementById("mode_subject");
+    const modeCompiled = document.getElementById("mode_compiled");
+    const isBulk = (testSelect.value || "").toUpperCase() === "ALL_EXAMS";
+
+    const allSubjectOpt = subjectSelect.querySelector('option[value="ALL"]');
+    const normalSubjectOpts = Array.from(subjectSelect.querySelectorAll("option")).filter(o => o.value !== "ALL" && o.value !== "");
+
+    if(isBulk){
+        subjectSelect.value = "ALL";
+        modeCompiled.checked = true;
+        modeSubject.checked = false;
+
+        normalSubjectOpts.forEach(o => o.setAttribute("disabled", "disabled"));
+        if(allSubjectOpt){ allSubjectOpt.removeAttribute("disabled"); }
+
+        subjectSelect.onchange = function(){ this.value = "ALL"; };
+        modeSubject.onclick = function(e){ e.preventDefault(); return false; };
+        modeCompiled.onclick = function(){ this.checked = true; };
+
+        subjectSelect.style.opacity = "0.65";
+        modeSubject.parentElement.style.opacity = "0.5";
+        modeSubject.parentElement.style.filter = "blur(0.4px)";
+    }else{
+        normalSubjectOpts.forEach(o => o.removeAttribute("disabled"));
+        if(allSubjectOpt){ allSubjectOpt.removeAttribute("disabled"); }
+        subjectSelect.onchange = null;
+        modeSubject.onclick = null;
+        modeCompiled.onclick = null;
+        subjectSelect.style.opacity = "1";
+        modeSubject.parentElement.style.opacity = "1";
+        modeSubject.parentElement.style.filter = "none";
+    }
+}
+
+document.querySelector('select[name="test_name"]').addEventListener("change", toggleBulkMode);
+document.addEventListener("DOMContentLoaded", toggleBulkMode);
+
+document.getElementById("resultUploadForm").onsubmit = function(e){
+    e.preventDefault();
+
+    let formData = new FormData(this);
+    const selectedTest = (formData.get("test_name") || "").toUpperCase();
+    const selectedSubject = (formData.get("subject_id") || "").toUpperCase();
+    const selectedMode = (formData.get("upload_mode") || "").toLowerCase();
+    if (selectedTest === "ALL_EXAMS" && selectedSubject === "ALL") {
+        const yes = confirm("Attention: Delete all old uploads and replace with new data?\nPress OK for YES, Cancel for NO.");
+        if(!yes){
+            return;
+        }
+        formData.append("bulk_confirm", "yes");
+    }
+    if (selectedTest === "ALL_EXAMS" && selectedSubject === "ALL" && selectedMode !== "compiled"){
+        alert("ALL EXAMS + ALL subjects is supported only in Compiled sheet mode.");
+        return;
+    }
+    let xhr = new XMLHttpRequest();
+
+    let bar = document.getElementById("progressBar");
+    let box = document.getElementById("progressBox");
+    let status = document.getElementById("statusText");
+    let cancelWrap = document.getElementById("cancelWrap");
+    let cancelBtn = document.getElementById("cancelUploadBtn");
+
+    box.style.display="block";
+    bar.className="progress-bar progress-bar-striped progress-bar-animated bg-info";
+    status.innerHTML="Uploading result file...";
+    cancelWrap.style.display="none";
+    currentJobId = null;
+    if(pollTimer){ clearInterval(pollTimer); pollTimer = null; }
+
+    xhr.upload.addEventListener("progress", function(e){
+        if(e.lengthComputable){
+            let percent = Math.round((e.loaded/e.total)*100);
+            bar.style.width=percent+"%";
+            bar.innerText=percent+"%";
+        }
+    });
+
+    xhr.onload = function(){
+        let res = JSON.parse(xhr.responseText || "{}");
+        if(!res.ok || !res.job_id){
+            bar.className="progress-bar bg-danger";
+            bar.innerText="Failed";
+            status.innerHTML = `<div class="alert alert-danger">${res.msg || "Upload failed"}</div>`;
+            return;
+        }
+        currentJobId = res.job_id;
+        bar.style.width="100%";
+        bar.innerText="Processing...";
+        bar.className="progress-bar progress-bar-striped progress-bar-animated bg-warning";
+        status.innerHTML="Reading marks and preparing result call list...";
+        cancelWrap.style.display="block";
+        cancelBtn.disabled = false;
+        startJobPolling();
+    };
+
+    xhr.open("POST","/upload-results/");
+    xhr.setRequestHeader("X-CSRFToken", document.querySelector('[name=csrfmiddlewaretoken]').value);
+    xhr.send(formData);
+};
+
+function startJobPolling(){
+    if(!currentJobId){ return; }
+    const bar = document.getElementById("progressBar");
+    const status = document.getElementById("statusText");
+    const cancelWrap = document.getElementById("cancelWrap");
+    const poll = () => {
+        fetch(`/upload-results/progress/${currentJobId}/`)
+            .then(r => r.json())
+            .then(p => {
+                if(!p.ok){ return; }
+                const c = Number(p.progress_current || 0);
+                const t = Number(p.progress_total || 0);
+                if(t > 0){
+                    let percent = Math.max(1, Math.min(99, Math.round((c / t) * 100)));
+                    bar.style.width = percent + "%";
+                    bar.innerText = percent + "%";
+                }
+                const curr = [p.current_enrollment, p.current_student_name].filter(Boolean).join(" - ");
+                status.innerHTML = `
+                    <div>${p.message || "Processing..."}</div>
+                    <div class="small text-muted">Current: ${curr || "-"}</div>
+                `;
+
+                if(p.status === "completed"){
+                    if(pollTimer){ clearInterval(pollTimer); pollTimer = null; }
+                    cancelWrap.style.display="none";
+                    bar.className="progress-bar bg-success";
+                    bar.style.width="100%";
+                    bar.innerText="Completed";
+                    renderUploadSuccess(p.result || {});
+                } else if(p.status === "failed"){
+                    if(pollTimer){ clearInterval(pollTimer); pollTimer = null; }
+                    cancelWrap.style.display="none";
+                    bar.className="progress-bar bg-danger";
+                    bar.innerText="Failed";
+                    status.innerHTML = `<div class="alert alert-danger">${p.message || "Upload failed"}</div>`;
+                } else if(p.status === "cancelled"){
+                    if(pollTimer){ clearInterval(pollTimer); pollTimer = null; }
+                    cancelWrap.style.display="none";
+                    bar.className="progress-bar bg-secondary";
+                    bar.innerText="Cancelled";
+                    status.innerHTML = `<div class="alert alert-warning">${p.message || "Upload cancelled."}</div>`;
+                }
+            });
+    };
+    poll();
+    pollTimer = setInterval(poll, 1200);
+}
+
+function renderUploadSuccess(res){
+    const status = document.getElementById("statusText");
+    status.innerHTML = `
+        <div class="alert alert-success">
+            <h5>Result Upload Completed</h5>
+            <p>${res.msg || ""}</p>
+            <p><b>Test:</b> ${res.test_name || "-"} | <b>Subject:</b> ${res.subject_name || "-"}</p>
+            ${res.upload_mode === "compiled" ? `<p><b>Compiled Subject Used:</b> ${res.used_subject || "-"}</p>` : ""}
+            ${res.upload_mode === "compiled" && (res.found_subjects || []).length ? `<p><b>Found Subjects:</b> ${(res.found_subjects || []).join(", ")}</p>` : ""}
+            ${res.upload_id ? `<a href="/result-reports/?upload=${res.upload_id}" class="btn btn-lj">Open Result Report</a>` : ""}
+        </div>
+    `;
+    showMentorStats(res);
+}
+
+document.getElementById("cancelUploadBtn").addEventListener("click", function(){
+    if(!currentJobId){ return; }
+    this.disabled = true;
+    fetch(`/upload-results/cancel/${currentJobId}/`, {
+        method: "POST",
+        headers: { "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]').value }
+    }).then(r => r.json()).then(res => {
+        const status = document.getElementById("statusText");
+        if(res.ok){
+            status.innerHTML = `<div class="alert alert-warning">Cancel requested. Stopping upload...</div>`;
+        }else{
+            status.innerHTML = `<div class="alert alert-danger">${res.msg || "Cancel failed"}</div>`;
+        }
+    });
+});
+
+function showMentorStats(res){
+    let div = document.getElementById("mentorStats");
+    div.innerHTML = `
+        <div class="card p-3">
+            <h5>Result Call Distribution (${res.test_name} - ${res.subject_name})</h5>
+            <div id="badges" style="display:flex;gap:12px;flex-wrap:wrap;"></div>
+        </div>
+    `;
+    let badgeBox = document.getElementById("badges");
+    (res.mentor_stats || []).forEach(m=>{
+        badgeBox.innerHTML += `
+            <span class="badge bg-primary" style="font-size:15px;padding:10px;">
+                ${m.student__mentor__name} : ${m.total}
+            </span>
+        `;
+    });
+    badgeBox.innerHTML += `
+        <span class="badge bg-dark" style="font-size:16px;padding:10px;">
+            TOTAL : ${res.total_calls || 0}
+        </span>
+    `;
+}
+</script>
+
+{% endblock %}

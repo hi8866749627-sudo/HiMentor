@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "EasyMentor",
+    "slug": "easymentor",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "platforms": [
+      "android",
+      "web"
+    ],
+    "android": {
+      "package": "com.easymonitor.mentorapp"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "80d693e5-f85d-4e9d-8eaa-de89d860e81e"
+      }
+    },
+    "plugins": [
+      "expo-asset"
+    ]
+  }
+}

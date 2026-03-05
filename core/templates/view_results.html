@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+body.dark-mode .result-card,
+body.dark-mode .result-card.card{
+    background: #0f172a !important;
+    border-color: #334155 !important;
+    color: #e5e7eb !important;
+}
+body.dark-mode .result-table{
+    --bs-table-bg: #0f172a;
+    --bs-table-color: #e5e7eb;
+    --bs-table-border-color: #334155;
+    --bs-table-striped-bg: #111827;
+    --bs-table-hover-bg: #1e293b;
+    --bs-table-hover-color: #ffffff;
+}
+body.dark-mode .result-table thead th{
+    background: #1e293b;
+    color: #e2e8f0;
+}
+body.dark-mode .result-table a{
+    color: #bfdbfe !important;
+}
+body.dark-mode .badge.bg-info{
+    background-color: #1d4ed8 !important;
+    color: #ffffff !important;
+}
+body.dark-mode .badge.bg-secondary{
+    background-color: #334155 !important;
+}
+</style>
+
+<h3>View Result</h3>
+<div class="mb-2">
+    <a href="/view-practical-marks/" class="btn btn-outline-primary btn-sm">View Practical Marks</a>
+</div>
+
+{% if matrix_rows and subjects %}
+<div class="card p-3 mb-3 result-card">
+    <h5 class="mb-2">Uploaded Result Matrix</h5>
+    <div class="table-responsive">
+        <table class="table table-bordered table-sm align-middle result-table">
+            <thead class="table-dark text-center">
+                <tr>
+                    <th>Test</th>
+                    {% for s in subjects %}
+                    <th>{{s.name}}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody class="text-center">
+                {% for row in matrix_rows %}
+                <tr>
+                    <td><b>{{row.test}}</b></td>
+                    {% for cell in row.cells %}
+                    <td>
+                        {% if not cell.applicable %}
+                            <button class="btn btn-sm btn-secondary" disabled>Not applicable</button>
+                        {% elif cell.upload %}
+                            <a class="btn btn-sm btn-success"
+                               href="?test={{row.test}}&subject={{cell.subject.id}}&filter={{filter}}">
+                                Uploaded
+                            </a>
+                        {% else %}
+                            <span class="badge bg-secondary">Upload Waiting</span>
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<div class="card p-3 mb-3 result-card">
+    <div class="d-flex gap-2 flex-wrap align-items-end">
+        <form method="get" class="d-flex gap-2 flex-wrap align-items-end">
+            <div>
+                <label>Test</label>
+                <select name="test" class="form-control">
+                    {% for t in tests %}
+                    <option value="{{t}}" {% if selected_test == t %}selected{% endif %}>{{t}}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label>Subject</label>
+                <select name="subject" class="form-control">
+                    {% for s in subjects %}
+                    <option value="{{s.id}}" {% if selected_subject == s.id|stringformat:"s" %}selected{% endif %}>{{s.name}}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button class="btn btn-lj">View</button>
+        </form>
+    </div>
+</div>
+
+{% if selected_upload %}
+<div class="card p-3 mb-3 border-info">
+    <div class="row g-2">
+        <div class="col-md-4">
+            <div><b>Uploaded On</b></div>
+            <div>{{ selected_upload.uploaded_at|date:"d-m-Y h:i A" }}</div>
+        </div>
+        <div class="col-md-4">
+            <div><b>Rows Matched</b></div>
+            <div>{{ selected_upload.rows_matched }}</div>
+        </div>
+        <div class="col-md-4">
+            <div><b>Failed Calls</b></div>
+            <div>{{ selected_upload.rows_failed }}</div>
+        </div>
+    </div>
+</div>
+
+<div class="mb-3 d-flex gap-2 flex-wrap">
+    <a class="btn {% if filter == 'all' %}btn-dark{% else %}btn-outline-dark{% endif %}"
+       href="?test={{selected_test}}&subject={{selected_subject}}&filter=all{% if mentor_filter %}&mentor={{mentor_filter}}{% endif %}">All</a>
+    <a class="btn {% if filter == filter_current_key %}btn-danger{% else %}btn-outline-danger{% endif %}"
+       href="?test={{selected_test}}&subject={{selected_subject}}&filter={{filter_current_key}}{% if mentor_filter %}&mentor={{mentor_filter}}{% endif %}">{{filter_current_label}}</a>
+    <a class="btn {% if filter == filter_total_key %}btn-warning{% else %}btn-outline-warning{% endif %}"
+       href="?test={{selected_test}}&subject={{selected_subject}}&filter={{filter_total_key}}{% if mentor_filter %}&mentor={{mentor_filter}}{% endif %}">{{filter_total_label}}</a>
+    <a class="btn {% if filter == filter_either_key %}btn-primary{% else %}btn-outline-primary{% endif %}"
+       href="?test={{selected_test}}&subject={{selected_subject}}&filter={{filter_either_key}}{% if mentor_filter %}&mentor={{mentor_filter}}{% endif %}">{{filter_either_label}}</a>
+</div>
+
+<h5>
+    {{selected_upload.test_name}} - {{selected_upload.subject.name}}
+    <span class="badge bg-primary ms-2">Total: {{total_count}}</span>
+</h5>
+
+{% if mentor_counts %}
+<div class="mb-2">
+    {% for m in mentor_counts %}
+    <a href="?test={{selected_test}}&subject={{selected_subject}}&filter={{filter}}&mentor={{m.student__mentor__name}}"
+       class="badge text-decoration-none me-1 {% if mentor_filter == m.student__mentor__name %}bg-danger{% else %}bg-info text-dark{% endif %}">
+        {{m.student__mentor__name}} : {{m.c}}
+    </a>
+    {% endfor %}
+    <a href="?test={{selected_test}}&subject={{selected_subject}}&filter={{filter}}"
+       class="badge text-decoration-none {% if not mentor_filter %}bg-danger{% else %}bg-dark{% endif %}">
+        ALL : {{total_count_all}}
+    </a>
+</div>
+{% endif %}
+
+<div class="table-responsive">
+    <table class="table table-bordered table-hover align-middle result-table">
+        <thead class="table-dark text-center">
+            <tr>
+                <th><a class="text-white text-decoration-none" href="?test={{selected_test}}&subject={{selected_subject}}&filter={{filter}}{% if mentor_filter %}&mentor={{mentor_filter}}{% endif %}&sort=roll&dir={{dir_roll}}">Roll ↑↓</a></th>
+                <th><a class="text-white text-decoration-none" href="?test={{selected_test}}&subject={{selected_subject}}&filter={{filter}}{% if mentor_filter %}&mentor={{mentor_filter}}{% endif %}&sort=enroll&dir={{dir_enroll}}">Enrollment ↑↓</a></th>
+                <th><a class="text-white text-decoration-none" href="?test={{selected_test}}&subject={{selected_subject}}&filter={{filter}}{% if mentor_filter %}&mentor={{mentor_filter}}{% endif %}&sort=name&dir={{dir_name}}">Name ↑↓</a></th>
+                <th><a class="text-white text-decoration-none" href="?test={{selected_test}}&subject={{selected_subject}}&filter={{filter}}{% if mentor_filter %}&mentor={{mentor_filter}}{% endif %}&sort=mentor&dir={{dir_mentor}}">Mentor ↑↓</a></th>
+                {% for c in display_columns %}
+                {% if forloop.first %}
+                <th style="white-space:normal;min-width:120px;"><a class="text-white text-decoration-none d-inline-block" style="white-space:normal;line-height:1.2;" href="?test={{selected_test}}&subject={{selected_subject}}&filter={{filter}}{% if mentor_filter %}&mentor={{mentor_filter}}{% endif %}&sort=exam&dir={{dir_exam}}">{{c.label}} ↑↓</a></th>
+                {% elif forloop.last %}
+                <th style="white-space:normal;min-width:140px;"><a class="text-white text-decoration-none d-inline-block" style="white-space:normal;line-height:1.2;" href="?test={{selected_test}}&subject={{selected_subject}}&filter={{filter}}{% if mentor_filter %}&mentor={{mentor_filter}}{% endif %}&sort=total&dir={{dir_total}}">{{c.label}} ↑↓</a></th>
+                {% else %}
+                <th style="white-space:normal;min-width:105px;line-height:1.2;">{{c.label}}</th>
+                {% endif %}
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rows %}
+            <tr>
+                <td>{{r.roll_no}}</td>
+                <td>{{r.enrollment}}</td>
+                <td>{{r.name}}</td>
+                <td>{{r.mentor}}</td>
+                {% for cell in r.cells %}
+                <td
+                  {% if cell.hover %}title="{{cell.hover}}"{% endif %}
+                  class="
+                    {% if cell.key == 'marks_current' and cell.value is not None and cell.value < current_threshold %}text-danger fw-bold{% endif %}
+                    {% if cell.key == 'marks_total' and cell.value is not None and cell.value < total_threshold %}text-danger fw-bold{% endif %}
+                  "
+                  {% if cell.is_changed %}style="color:#6f42c1;font-weight:700;"{% endif %}
+                >
+                  {{cell.value|default_if_none:"-"}}
+                </td>
+                {% endfor %}
+            </tr>
+            {% empty %}
+            <tr><td colspan="{{table_colspan}}" class="text-center">No data found.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% elif upload_waiting %}
+<div class="alert alert-warning">
+    Upload waiting for selected Test + Subject.
+</div>
+{% else %}
+<div class="alert alert-info">
+    Select test and subject to view result.
+</div>
+{% endif %}
+
+{% endblock %}

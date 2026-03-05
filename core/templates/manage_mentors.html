@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h3>Manage Mentor</h3>
+<div class="mb-2 text-muted">Module: {{ module.name }}</div>
+
+{% if rows %}
+<div class="table-responsive">
+    <table class="table table-bordered table-sm align-middle">
+        <thead class="table-dark">
+            <tr>
+                <th>Mentor Code</th>
+                <th>Mentor Name</th>
+                <th>Students</th>
+                <th>Password Mode</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rows %}
+            <tr>
+                <td>{{ r.mentor.name }}</td>
+                <td>{{ r.mentor.full_name|default:"-" }}</td>
+                <td>{{ r.student_count }}</td>
+                <td>
+                    {% if r.has_custom_password %}
+                        <span class="badge bg-warning text-dark">Custom</span>
+                    {% else %}
+                        <span class="badge bg-secondary">Default (shortname@LJ123)</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <form method="post" class="d-flex gap-2 flex-wrap align-items-center">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="update_password">
+                        <input type="hidden" name="mentor_id" value="{{ r.mentor.id }}">
+                        <input type="password" name="new_password" class="form-control form-control-sm" style="max-width:220px;" placeholder="Set new password">
+                        <button class="btn btn-sm btn-primary">Save Password</button>
+                    </form>
+                    <form method="post" class="mt-2" onsubmit="return confirm('Reset to default password rule for {{ r.mentor.name }}?');">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="reset_default">
+                        <input type="hidden" name="mentor_id" value="{{ r.mentor.id }}">
+                        <button class="btn btn-sm btn-outline-danger">Reset Default</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="alert alert-info">No mentors found in current module.</div>
+{% endif %}
+
+{% endblock %}

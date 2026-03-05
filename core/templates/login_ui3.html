@@ -1,0 +1,133 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EasyMentor Login - UI 3</title>
+    <title>EasyMentor</title>
+    <link rel="icon" type="image/png" href="{% static 'logo.png' %}">
+    <link rel="shortcut icon" type="image/x-icon" href="{% static 'lj.ico' %}">
+    <style>
+        :root{
+            --bg:#050b17;
+            --card:#0c162a;
+            --line:#294365;
+            --text:#eef5ff;
+            --muted:#97afcf;
+            --accent:#2d8bff;
+            --accent2:#6be8ff;
+            --danger:#ff718c;
+        }
+        *{box-sizing:border-box}
+        body{
+            margin:0; min-height:100vh; padding:22px;
+            font-family:"Segoe UI",Tahoma,sans-serif; color:var(--text);
+            background:
+                linear-gradient(130deg,#050b17,#08152a),
+                repeating-linear-gradient(90deg,#ffffff05 0,#ffffff05 1px,transparent 1px,transparent 18px);
+            display:flex; align-items:center; justify-content:center;
+        }
+        .shell{
+            width:min(980px,100%);
+            border:1px solid var(--line); border-radius:18px; overflow:hidden;
+            background:linear-gradient(180deg,#0a1326,#081224);
+            box-shadow:0 22px 56px #00000078;
+        }
+        .top{
+            display:flex; justify-content:space-between; align-items:center;
+            padding:12px 18px; border-bottom:1px solid var(--line);
+            background:#0c1931;
+        }
+        .brand{display:flex;align-items:center;gap:9px;font-weight:700}
+        .brand img{width:30px;height:30px;object-fit:contain}
+        .ui-links{display:flex;gap:8px}
+        .ui-links a{
+            text-decoration:none;color:#b7d5ff;border:1px solid #3c5f8d;padding:4px 9px;border-radius:999px;font-size:.78rem;background:#102345
+        }
+        .grid{display:grid;grid-template-columns:1fr 400px}
+        .left{padding:28px 30px}
+        .left h1{margin:0 0 10px;font-size:2rem;line-height:1.1}
+        .left h1 b{color:#7adbff}
+        .left p{margin:0;color:var(--muted);line-height:1.6;max-width:54ch}
+        .rows{margin-top:18px;display:grid;gap:10px}
+        .row{
+            display:flex; align-items:center; gap:10px;
+            border:1px solid #284464; border-radius:10px; padding:10px 12px; background:#0b1c37;
+            color:#d7e8ff; font-size:.92rem;
+        }
+        .idx{
+            width:24px;height:24px;display:grid;place-items:center;border-radius:50%;
+            background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#04213d; font-weight:800; font-size:.76rem; flex:0 0 auto;
+        }
+        .right{
+            border-left:1px solid var(--line); padding:28px 22px; background:#0a162d;
+        }
+        .chip{display:inline-block;padding:5px 10px;border-radius:999px;font-size:.76rem;border:1px solid #3f648f;background:#0d284d;color:#c7e0ff;margin-bottom:10px}
+        h2{margin:0;font-size:1.45rem}
+        .sub{margin:8px 0 18px;color:var(--muted);font-size:.9rem}
+        label{display:block;margin-bottom:6px;font-size:.84rem;color:#c8dcfa;font-weight:600}
+        .f{margin-bottom:12px}
+        input{
+            width:100%;padding:11px 12px;border-radius:9px;border:1px solid #35567f;background:#08152c;color:#edf5ff;outline:none
+        }
+        input:focus{border-color:#6aaeff;box-shadow:0 0 0 3px #6aaeff2a}
+        button{
+            width:100%;padding:11px;border:0;border-radius:9px;cursor:pointer;font-weight:700;font-size:.98rem;color:#fff;
+            background:linear-gradient(135deg,#1f79ff,#33b5ff);
+        }
+        .err{margin-top:12px;padding:9px 11px;border-radius:9px;border:1px solid #a4475a;background:#381521;color:#ffc9d3;font-size:.88rem}
+        .help{margin-top:12px;color:#8eabd2;font-size:.82rem}
+        @media(max-width:920px){
+            .grid{grid-template-columns:1fr}
+            .right{border-left:0;border-top:1px solid var(--line)}
+        }
+    </style>
+</head>
+<body>
+<main class="shell">
+    <div class="top">
+        <div class="brand">
+            <img src="{% static 'logo.png' %}" alt="Logo">
+            <span>EasyMentor Access Gateway</span>
+        </div>
+        <div class="ui-links">
+            <a href="/?ui=1">UI 1</a>
+            <a href="/?ui=2">UI 2</a>
+            <a href="/?ui=3">UI 3</a>
+        </div>
+    </div>
+    <div class="grid">
+        <section class="left">
+            <h1>Digital Follow-up for <b>Real Mentoring</b></h1>
+            <p>Track attendance risk, result risk, and parent communication in one flow so mentors spend more time on student learning outcomes.</p>
+            <div class="rows">
+                <div class="row"><span class="idx">1</span><span>Reduce manual Excel lookups and repeated copy-paste work</span></div>
+                <div class="row"><span class="idx">2</span><span>Standardized call notes with fewer documentation gaps</span></div>
+                <div class="row"><span class="idx">3</span><span>Fast escalation visibility for coordinator action</span></div>
+                <div class="row"><span class="idx">4</span><span>Print-ready SIF support from live call records</span></div>
+            </div>
+        </section>
+        <section class="right">
+            <span class="chip">Secure Role Login</span>
+            <h2>Sign In</h2>
+            <div class="sub">Mentor / Coordinator / SuperAdmin</div>
+            <form method="post">
+                {% csrf_token %}
+                <div class="f">
+                    <label for="id_username">Username</label>
+                    <input id="id_username" type="text" name="username" autocomplete="username" required>
+                </div>
+                <div class="f">
+                    <label for="id_password">Password</label>
+                    <input id="id_password" type="password" name="password" autocomplete="current-password" required>
+                </div>
+                <button type="submit">Login</button>
+            </form>
+            {% if error %}<div class="err">{{ error }}</div>{% endif %}
+            <div class="help">If login fails, contact your system admin for credential reset.</div>
+        </section>
+    </div>
+</main>
+</body>
+</html>

@@ -1,0 +1,69 @@
+<!-- CALL MODAL -->
+<div class="modal fade" id="callModal">
+<div class="modal-dialog">
+<div class="modal-content">
+
+<div class="modal-header">
+<h5 id="studentName">Call Student</h5>
+<button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+</div>
+
+<div class="modal-body">
+
+<input type="hidden" id="callId">
+
+<label>Status</label>
+<select id="status" class="form-control mb-2">
+    <option value="received">Received</option>
+    <option value="not_received">Not Received</option>
+</select>
+
+<label>Talked With</label>
+<select id="talked" class="form-control mb-2">
+    <option value="father">Father</option>
+    <option value="mother">Mother</option>
+    <option value="guardian">Guardian</option>
+</select>
+
+<label>Duration (minutes)</label>
+<input id="duration" class="form-control mb-2">
+
+<label>Parent Remark</label>
+<textarea id="reason" class="form-control"></textarea>
+
+</div>
+
+<div class="modal-footer">
+<button class="btn btn-success" onclick="saveCall()">Save</button>
+</div>
+
+</div>
+</div>
+</div>
+
+<script>
+function openCall(id,name){
+    document.getElementById("callId").value=id;
+    document.getElementById("studentName").innerText=name;
+    new bootstrap.Modal(document.getElementById('callModal')).show();
+}
+
+function saveCall(){
+
+fetch("/save-call/",{
+method:"POST",
+headers:{'X-CSRFToken':'{{ csrf_token }}'},
+body:new URLSearchParams({
+id:callId.value,
+status:status.value,
+talked:talked.value,
+duration:duration.value,
+reason:reason.value
+})
+})
+.then(r=>r.json())
+.then(()=>{
+location.reload();
+});
+}
+</script>

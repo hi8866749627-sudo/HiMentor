@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block content %}
+<h4>Manage Modules</h4>
+{% if messages %}
+    {% for m in messages %}
+    <div class="alert alert-{{ m.tags|default:'info' }}">{{ m }}</div>
+    {% endfor %}
+{% endif %}
+
+<div class="card p-3 mb-3">
+    <h6 class="mb-3">Create Module</h6>
+    <form method="post" class="row g-2">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="create">
+        <div class="col-md-3">
+            <label class="form-label">Batch</label>
+            <input type="text" name="academic_batch" class="form-control" placeholder="2026-29" required>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">Year</label>
+            <select name="year_level" class="form-select">
+                {% for v,l in year_choices %}
+                <option value="{{v}}">{{l}}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Variant</label>
+            <select name="variant" class="form-select">
+                {% for v,l in variant_choices %}
+                <option value="{{v}}" {% if v == "FY2-CE" %}selected{% endif %}>{{l}}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">Semester</label>
+            <select name="semester" class="form-select">
+                {% for v,l in sem_choices %}
+                <option value="{{v}}">{{l}}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">Status</label>
+            <select name="is_active" class="form-select">
+                <option value="1" selected>Active</option>
+                <option value="0">Inactive</option>
+            </select>
+        </div>
+        <div class="col-md-2 d-flex align-items-end">
+            <button class="btn btn-lj w-100">Create Module</button>
+        </div>
+    </form>
+</div>
+
+<div class="card p-3">
+    <h6 class="mb-2">Module Details</h6>
+    <div class="table-responsive">
+        <table class="table table-sm table-bordered align-middle">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Batch</th>
+                    <th>Year</th>
+                    <th>Variant</th>
+                    <th>Semester</th>
+                    <th>Status</th>
+                    <th style="width: 310px;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for m in modules %}
+                <tr>
+                    <td>
+                        <span id="name-text-{{ m.id }}">{{m.name}}</span>
+                    </td>
+                    <td>
+                        <span id="batch-text-{{ m.id }}">{{m.academic_batch}}</span>
+                        <input id="batch-input-{{ m.id }}" class="form-control form-control-sm d-none"
+                            form="module-form-{{ m.id }}" name="academic_batch" value="{{ m.academic_batch }}">
+                    </td>
+                    <td>
+                        <span id="year-text-{{ m.id }}">{{m.year_level}}</span>
+                        <select id="year-input-{{ m.id }}" class="form-select form-select-sm d-none"
+                            form="module-form-{{ m.id }}" name="year_level">
+                            {% for v,l in year_choices %}
+                            <option value="{{v}}" {% if m.year_level == v %}selected{% endif %}>{{l}}</option>
+                            {% endfor %}
+                        </select>
+                    </td>
+                    <td>
+                        <span id="variant-text-{{ m.id }}">{{m.variant}}</span>
+                        <select id="variant-input-{{ m.id }}" class="form-select form-select-sm d-none"
+                            form="module-form-{{ m.id }}" name="variant">
+                            {% for v,l in variant_choices %}
+                            <option value="{{v}}" {% if m.variant == v %}selected{% endif %}>{{l}}</option>
+                            {% endfor %}
+                        </select>
+                    </td>
+                    <td>
+                        <span id="sem-text-{{ m.id }}">{{m.semester}}</span>
+                        <select id="sem-input-{{ m.id }}" class="form-select form-select-sm d-none"
+                            form="module-form-{{ m.id }}" name="semester">
+                            {% for v,l in sem_choices %}
+                            <option value="{{v}}" {% if m.semester == v %}selected{% endif %}>{{l}}</option>
+                            {% endfor %}
+                        </select>
+                    </td>
+                    <td>
+                        <span id="status-text-{{ m.id }}">{% if m.is_active %}Active{% else %}Inactive{% endif %}</span>
+                        <select id="status-input-{{ m.id }}" class="form-select form-select-sm d-none"
+                            form="module-form-{{ m.id }}" name="is_active">
+                            <option value="1" {% if m.is_active %}selected{% endif %}>Active</option>
+                            <option value="0" {% if not m.is_active %}selected{% endif %}>Inactive</option>
+                        </select>
+                    </td>
+                    <td>
+                        <form id="module-form-{{ m.id }}" method="post" class="d-flex gap-2 flex-wrap align-items-center">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="update">
+                            <input type="hidden" name="module_id" value="{{ m.id }}">
+                            <button type="button" id="edit-btn-{{ m.id }}" class="btn btn-sm btn-info"
+                                onclick="enableModuleInlineEdit('{{ m.id }}')">Edit</button>
+                            <button id="save-btn-{{ m.id }}" class="btn btn-sm btn-warning d-none">Save</button>
+                            <button type="button" class="btn btn-sm btn-danger"
+                                onclick="deleteModule('{{ m.id }}','{{ m.name|escapejs }}')">Delete</button>
+                        </form>
+                        <form id="module-delete-form-{{ m.id }}" method="post" class="d-none">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="module_id" value="{{ m.id }}">
+                        </form>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="7">No modules found.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+function enableModuleInlineEdit(id){
+    const hide = function(el){ if(el){ el.classList.add("d-none"); } };
+    const show = function(el){ if(el){ el.classList.remove("d-none"); } };
+    hide(document.getElementById("batch-text-" + id));
+    hide(document.getElementById("year-text-" + id));
+    hide(document.getElementById("variant-text-" + id));
+    hide(document.getElementById("sem-text-" + id));
+    hide(document.getElementById("status-text-" + id));
+    show(document.getElementById("batch-input-" + id));
+    show(document.getElementById("year-input-" + id));
+    show(document.getElementById("variant-input-" + id));
+    show(document.getElementById("sem-input-" + id));
+    show(document.getElementById("status-input-" + id));
+    hide(document.getElementById("edit-btn-" + id));
+    show(document.getElementById("save-btn-" + id));
+}
+
+function deleteModule(id, name){
+    if(confirm("Delete module '" + name + "'? Click OK to delete or Cancel to keep.")){
+        const form = document.getElementById("module-delete-form-" + id);
+        if(form){ form.submit(); }
+    }
+}
+</script>
+{% endblock %}

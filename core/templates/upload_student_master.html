@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Upload Student Master</title>
+</head>
+<body>
+    <h2>Upload Student Master</h2>
+
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <input type="file" name="file" required>
+        <br><br>
+        <button type="submit">Upload</button>
+    </form>
+</body>
+</html>

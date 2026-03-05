@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h3>Delete Attendance Weeks</h3>
+
+{% if message %}
+<div class="alert alert-warning">{{message}}</div>
+{% endif %}
+
+<!-- DELETE ALL -->
+<div class="card p-3 mb-4 border-danger">
+    <h5 class="text-danger">Danger Zone</h5>
+    <form method="post">
+        {% csrf_token %}
+        <input type="password" name="password" placeholder="Coordinator Password" class="form-control mb-2" required>
+        <button class="btn btn-danger" name="delete_all">Delete ALL Weeks</button>
+    </form>
+</div>
+
+<!-- SINGLE DELETE -->
+<h5>Uploaded Weeks</h5>
+
+{% for w in weeks %}
+<div class="d-flex align-items-center mb-2">
+
+    <div style="width:120px;font-weight:bold">
+        Week-{{w}}
+    </div>
+
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="week" value="{{w}}">
+        <button class="btn btn-outline-danger btn-sm" name="delete_week">
+            Delete
+        </button>
+    </form>
+
+</div>
+{% empty %}
+<p>No weeks uploaded</p>
+{% endfor %}
+
+{% endblock %}

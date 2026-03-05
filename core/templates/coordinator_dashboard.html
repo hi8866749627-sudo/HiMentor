@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="container-fluid">
+
+    <!-- PAGE TITLE -->
+    <div class="card p-3 mb-3">
+        <h3 class="mb-0">Mentor Performance Dashboard</h3>
+        <small class="text-muted">Coordinator Control Panel</small>
+    </div>
+
+
+    <!-- REPORTS MENU -->
+    <div class="card p-3 mb-3">
+
+        <h5 class="mb-3">Reports</h5>
+
+        <div class="d-flex flex-wrap gap-2">
+
+            <!-- Weekwise report -->
+            <form method="get" action="/reports/" class="d-flex align-items-center gap-2">
+                <label class="mb-0">Select Week</label>
+                <input type="number" name="week" class="form-control" style="width:120px" required>
+                <button class="btn btn-primary">View Week Report</button>
+            </form>
+
+            <!-- Overall semester register -->
+            <a href="/semester-register/" class="btn btn-success">
+                📘 Overall Attendance Register
+            </a>
+
+        </div>
+    </div>
+
+
+    {% if week %}
+
+    <!-- WEEK TITLE -->
+    <div class="card p-3 mb-3">
+        <h4 class="mb-0">Week-{{week}} Summary</h4>
+    </div>
+
+
+    <!-- MENTOR PERFORMANCE TABLE -->
+    <div class="card p-3">
+
+        <div class="table-responsive">
+
+            <table class="table table-bordered table-hover align-middle">
+
+                <thead class="table-dark text-center">
+                    <tr>
+                        <th>Mentor</th>
+                        <th>Total Students</th>
+                        <th>Need Call</th>
+                        <th>Call Done</th>
+                        <th>Call Received</th>
+                        <th>Call Not Received</th>
+                        <th>Call Not Done</th>
+                        <th>Message Sent</th>
+                        <th>Completion %</th>
+                    </tr>
+                </thead>
+
+                <tbody class="text-center">
+
+                    {% for r in data %}
+                    <tr>
+
+                        <td><b>{{r.mentor}}</b></td>
+
+                        <td>{{r.students}}</td>
+
+                        <td class="text-danger fw-bold">
+                            {{r.need_call}}
+                        </td>
+
+                        <td class="text-success fw-bold">
+                            {{r.done}}
+                        </td>
+
+                        <td class="text-success fw-bold">
+                            {{r.received}}
+                        </td>
+
+                        <td class="text-warning fw-bold">
+                            {{r.not_received}}
+                        </td>
+
+                        <td class="text-primary fw-bold">
+                            {{r.not_done}}
+                        </td>
+
+                        <td class="text-dark fw-bold">
+                            {{r.msg_sent}}
+                        </td>
+
+                        <td>
+                            {% if r.percent < 50 %}
+                                <span class="badge bg-danger">{{r.percent}}%</span>
+                            {% elif r.percent < 80 %}
+                                <span class="badge bg-warning text-dark">{{r.percent}}%</span>
+                            {% else %}
+                                <span class="badge bg-success">{{r.percent}}%</span>
+                            {% endif %}
+                        </td>
+
+                    </tr>
+                    {% endfor %}
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    </div>
+
+    {% endif %}
+
+</div>
+
+{% endblock %}

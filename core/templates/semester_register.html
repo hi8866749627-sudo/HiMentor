@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% load get_dynamic %}
+{% block content %}
+
+<h3>{{ title|default:"Overall Attendance Register" }}</h3>
+
+<div class="table-responsive">
+<table class="table table-bordered table-hover">
+
+<thead class="table-dark">
+<tr>
+    <th>Roll</th>
+    <th>Enrollment</th>
+    <th>Name</th>
+    <th>Mentor</th>
+
+    {% for w in weeks %}
+        <th>Week {{w}} %</th>
+    {% endfor %}
+
+    <th>Overall %</th>
+</tr>
+</thead>
+
+<tbody>
+
+{% for r in rows %}
+<tr>
+    <td>{{r.roll}}</td>
+    <td>{{r.enrollment}}</td>
+    <td>{{r.name}}</td>
+    <td>{{r.mentor}}</td>
+
+    {% for w in weeks %}
+        <td>
+            {% with val=r|get_week:w %}
+                {% if val %}
+                    <span class="{% if val < 80 %}text-danger fw-bold{% endif %}">{{val}}%</span>
+                {% else %}
+                    -
+                {% endif %}
+            {% endwith %}
+        </td>
+    {% endfor %}
+
+    <td><b class="{% if r.overall and r.overall < 80 %}text-danger{% endif %}">{{r.overall}}%</b></td>
+</tr>
+{% endfor %}
+
+</tbody>
+</table>
+</div>
+
+{% endblock %}

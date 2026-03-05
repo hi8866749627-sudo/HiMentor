@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% load phone_filters %}
+{% block content %}
+
+<h3>Student Data (Module-wise)</h3>
+
+<div class="table-responsive">
+    <table class="table table-bordered table-hover align-middle">
+        <thead class="table-dark text-center">
+            <tr>
+                <th><a class="text-white text-decoration-none" href="?sort=roll&dir={{dir_roll}}&f_roll={{filters.roll|urlencode}}&f_batch={{filters.batch|urlencode}}&f_division={{filters.division|urlencode}}&f_enrollment={{filters.enrollment|urlencode}}&f_name={{filters.name|urlencode}}&f_mentor={{filters.mentor|urlencode}}&f_student_mobile={{filters.student_mobile|urlencode}}&f_father_mobile={{filters.father_mobile|urlencode}}">Roll ↑↓</a></th>
+                <th><a class="text-white text-decoration-none" href="?sort=batch&dir={{dir_batch}}&f_roll={{filters.roll|urlencode}}&f_batch={{filters.batch|urlencode}}&f_division={{filters.division|urlencode}}&f_enrollment={{filters.enrollment|urlencode}}&f_name={{filters.name|urlencode}}&f_mentor={{filters.mentor|urlencode}}&f_student_mobile={{filters.student_mobile|urlencode}}&f_father_mobile={{filters.father_mobile|urlencode}}">Branch ↑↓</a></th>
+                <th><a class="text-white text-decoration-none" href="?sort=division&dir={{dir_division}}&f_roll={{filters.roll|urlencode}}&f_batch={{filters.batch|urlencode}}&f_division={{filters.division|urlencode}}&f_enrollment={{filters.enrollment|urlencode}}&f_name={{filters.name|urlencode}}&f_mentor={{filters.mentor|urlencode}}&f_student_mobile={{filters.student_mobile|urlencode}}&f_father_mobile={{filters.father_mobile|urlencode}}">Division ↑↓</a></th>
+                <th><a class="text-white text-decoration-none" href="?sort=enrollment&dir={{dir_enrollment}}&f_roll={{filters.roll|urlencode}}&f_batch={{filters.batch|urlencode}}&f_division={{filters.division|urlencode}}&f_enrollment={{filters.enrollment|urlencode}}&f_name={{filters.name|urlencode}}&f_mentor={{filters.mentor|urlencode}}&f_student_mobile={{filters.student_mobile|urlencode}}&f_father_mobile={{filters.father_mobile|urlencode}}">Enrollment ↑↓</a></th>
+                <th><a class="text-white text-decoration-none" href="?sort=name&dir={{dir_name}}&f_roll={{filters.roll|urlencode}}&f_batch={{filters.batch|urlencode}}&f_division={{filters.division|urlencode}}&f_enrollment={{filters.enrollment|urlencode}}&f_name={{filters.name|urlencode}}&f_mentor={{filters.mentor|urlencode}}&f_student_mobile={{filters.student_mobile|urlencode}}&f_father_mobile={{filters.father_mobile|urlencode}}">Name ↑↓</a></th>
+                <th><a class="text-white text-decoration-none" href="?sort=mentor&dir={{dir_mentor}}&f_roll={{filters.roll|urlencode}}&f_batch={{filters.batch|urlencode}}&f_division={{filters.division|urlencode}}&f_enrollment={{filters.enrollment|urlencode}}&f_name={{filters.name|urlencode}}&f_mentor={{filters.mentor|urlencode}}&f_student_mobile={{filters.student_mobile|urlencode}}&f_father_mobile={{filters.father_mobile|urlencode}}">Mentor ↑↓</a></th>
+                <th><a class="text-white text-decoration-none" href="?sort=student_mobile&dir={{dir_student_mobile}}&f_roll={{filters.roll|urlencode}}&f_batch={{filters.batch|urlencode}}&f_division={{filters.division|urlencode}}&f_enrollment={{filters.enrollment|urlencode}}&f_name={{filters.name|urlencode}}&f_mentor={{filters.mentor|urlencode}}&f_student_mobile={{filters.student_mobile|urlencode}}&f_father_mobile={{filters.father_mobile|urlencode}}">Student Mobile ↑↓</a></th>
+                <th><a class="text-white text-decoration-none" href="?sort=father_mobile&dir={{dir_father_mobile}}&f_roll={{filters.roll|urlencode}}&f_batch={{filters.batch|urlencode}}&f_division={{filters.division|urlencode}}&f_enrollment={{filters.enrollment|urlencode}}&f_name={{filters.name|urlencode}}&f_mentor={{filters.mentor|urlencode}}&f_student_mobile={{filters.student_mobile|urlencode}}&f_father_mobile={{filters.father_mobile|urlencode}}">Father Mobile ↑↓</a></th>
+            </tr>
+            <tr>
+                <th><input id="f_roll" value="{{filters.roll}}" class="form-control form-control-sm"></th>
+                <th><input id="f_batch" value="{{filters.batch}}" class="form-control form-control-sm"></th>
+                <th><input id="f_division" value="{{filters.division}}" class="form-control form-control-sm"></th>
+                <th><input id="f_enrollment" value="{{filters.enrollment}}" class="form-control form-control-sm"></th>
+                <th><input id="f_name" value="{{filters.name}}" class="form-control form-control-sm"></th>
+                <th><input id="f_mentor" value="{{filters.mentor}}" class="form-control form-control-sm"></th>
+                <th><input id="f_student_mobile" value="{{filters.student_mobile}}" class="form-control form-control-sm"></th>
+                <th>
+                    <div class="d-flex gap-1">
+                        <input id="f_father_mobile" value="{{filters.father_mobile}}" class="form-control form-control-sm">
+                        <a href="/mentor-student-data/" class="btn btn-sm btn-secondary">Clear</a>
+                    </div>
+                </th>
+            </tr>
+        </thead>
+        <tbody id="studentDataBody">
+            {% for s in students %}
+            <tr>
+                <td>{{s.roll_no}}</td>
+                <td>{{s.batch|default:"-"}}</td>
+                <td>{{s.division|default:"-"}}</td>
+                <td>{{s.enrollment}}</td>
+                <td>{{s.name}}</td>
+                <td>{{s.mentor.name}}</td>
+                <td>{{s.student_mobile|e164_in|default:"-"}}</td>
+                <td>{{s.father_mobile|e164_in|default:"-"}}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="8" class="text-center">No students found.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<script>
+(function(){
+    const body = document.getElementById("studentDataBody");
+    if(!body){ return; }
+    const rows = Array.from(body.querySelectorAll("tr"));
+    const inputs = {
+        roll: document.getElementById("f_roll"),
+        batch: document.getElementById("f_batch"),
+        division: document.getElementById("f_division"),
+        enrollment: document.getElementById("f_enrollment"),
+        name: document.getElementById("f_name"),
+        mentor: document.getElementById("f_mentor"),
+        student_mobile: document.getElementById("f_student_mobile"),
+        father_mobile: document.getElementById("f_father_mobile"),
+    };
+
+    const norm = (v) => (v || "").toString().toLowerCase().trim();
+
+    function filterRows(){
+        const q = {
+            roll: norm(inputs.roll.value),
+            batch: norm(inputs.batch.value),
+            division: norm(inputs.division.value),
+            enrollment: norm(inputs.enrollment.value),
+            name: norm(inputs.name.value),
+            mentor: norm(inputs.mentor.value),
+            student_mobile: norm(inputs.student_mobile.value),
+            father_mobile: norm(inputs.father_mobile.value),
+        };
+
+        rows.forEach(function(row){
+            const cols = row.querySelectorAll("td");
+            if(cols.length < 8){ return; }
+            const data = {
+                roll: norm(cols[0].innerText),
+                batch: norm(cols[1].innerText),
+                division: norm(cols[2].innerText),
+                enrollment: norm(cols[3].innerText),
+                name: norm(cols[4].innerText),
+                mentor: norm(cols[5].innerText),
+                student_mobile: norm(cols[6].innerText),
+                father_mobile: norm(cols[7].innerText),
+            };
+            const ok =
+                (!q.roll || data.roll.includes(q.roll)) &&
+                (!q.batch || data.batch.includes(q.batch)) &&
+                (!q.division || data.division.includes(q.division)) &&
+                (!q.enrollment || data.enrollment.includes(q.enrollment)) &&
+                (!q.name || data.name.includes(q.name)) &&
+                (!q.mentor || data.mentor.includes(q.mentor)) &&
+                (!q.student_mobile || data.student_mobile.includes(q.student_mobile)) &&
+                (!q.father_mobile || data.father_mobile.includes(q.father_mobile));
+            row.style.display = ok ? "" : "none";
+        });
+    }
+
+    Object.values(inputs).forEach(function(el){
+        if(!el){ return; }
+        el.addEventListener("input", filterRows);
+    });
+    filterRows();
+})();
+</script>
+
+{% endblock %}

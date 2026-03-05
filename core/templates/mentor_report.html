@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h4>Weekly WhatsApp Report</h4>
+
+<form method="get">
+    <label>Enter Week Number</label>
+    <input type="number" name="week" class="form-control mb-2" required>
+    <button class="btn btn-lj">Generate</button>
+</form>
+
+{% if report %}
+<hr>
+<label>Copy Message:</label>
+<textarea class="form-control" rows="12" id="reportText">{{ report }}</textarea>
+
+<button class="btn btn-success mt-2" onclick="copyText()">Copy</button>
+{% endif %}
+
+<script>
+function copyText(){
+    let t=document.getElementById("reportText");
+    t.select();
+    document.execCommand("copy");
+    alert("Copied for WhatsApp");
+}
+</script>
+
+{% endblock %}

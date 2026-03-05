@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card p-3 mb-3">
+    <h4 class="mb-1">Live Followup Sheet</h4>
+    <small class="text-muted">Module: {{ module.name }}</small>
+</div>
+
+<div class="card p-3 mb-3">
+    {% with base_q='mentor='|add:selected_mentor|urlencode|add:'&type='|add:selected_type|add:'&week='|add:selected_week_q|add:'&exam='|add:selected_exam %}
+    <div class="d-flex flex-wrap gap-2 mb-3">
+        <a class="btn btn-success btn-sm" href="/live-followup-sheet/excel/?{{ base_q }}">Export as Excel</a>
+        <a class="btn btn-danger btn-sm" href="/live-followup-sheet/pdf/?{{ base_q }}">Export as PDF</a>
+        {% if is_superadmin_view %}
+        <a class="btn btn-dark btn-sm" href="/live-followup-sheet/db-backup-json/">Download DB Backup (JSON)</a>
+        {% endif %}
+    </div>
+
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="fw-semibold">Week:</span>
+        <a class="btn btn-sm {% if not selected_week %}btn-primary{% else %}btn-outline-primary{% endif %}"
+           href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week=ALL&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">All Weeks</a>
+        {% for w in attendance_weeks %}
+        <a class="btn btn-sm {% if selected_week == w %}btn-primary{% else %}btn-outline-primary{% endif %}"
+           href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ w }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">Week-{{ w }}</a>
+        {% endfor %}
+    </div>
+
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="fw-semibold">Exam:</span>
+        <a class="btn btn-sm {% if selected_exam == 'ALL' %}btn-secondary{% else %}btn-outline-secondary{% endif %}"
+           href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam=ALL&sort={{ selected_sort }}&dir={{ selected_dir }}">All Exams</a>
+        <a class="btn btn-sm {% if selected_exam == 'T1' %}btn-secondary{% else %}btn-outline-secondary{% endif %}"
+           href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam=T1&sort={{ selected_sort }}&dir={{ selected_dir }}">T1</a>
+        <a class="btn btn-sm {% if selected_exam == 'T2' %}btn-secondary{% else %}btn-outline-secondary{% endif %}"
+           href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam=T2&sort={{ selected_sort }}&dir={{ selected_dir }}">T2/T1+T2</a>
+        <a class="btn btn-sm {% if selected_exam == 'T3' %}btn-secondary{% else %}btn-outline-secondary{% endif %}"
+           href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam=T3&sort={{ selected_sort }}&dir={{ selected_dir }}">T3/T1+T2+T3</a>
+        <a class="btn btn-sm {% if selected_exam == 'T4' %}btn-secondary{% else %}btn-outline-secondary{% endif %}"
+           href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam=T4&sort={{ selected_sort }}&dir={{ selected_dir }}">T4/TOTAL</a>
+    </div>
+
+    {% if not mentor_mode %}
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+        <span class="fw-semibold">Mentor:</span>
+        <a class="btn btn-sm {% if not selected_mentor %}btn-primary{% else %}btn-outline-primary{% endif %}"
+           href="?type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">All Mentors</a>
+        {% for m in mentor_names %}
+        <a class="btn btn-sm {% if selected_mentor == m %}btn-primary{% else %}btn-outline-primary{% endif %}"
+           href="?mentor={{ m|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">{{ m }}</a>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="d-flex flex-wrap align-items-center gap-2">
+        <span class="fw-semibold">Followup Type:</span>
+        <a class="btn btn-sm {% if selected_type == 'all' %}btn-dark{% else %}btn-outline-dark{% endif %}"
+           href="?mentor={{ selected_mentor|urlencode }}&type=all&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">All</a>
+        <a class="btn btn-sm {% if selected_type == 'less_attendance' %}btn-danger{% else %}btn-outline-danger{% endif %}"
+           href="?mentor={{ selected_mentor|urlencode }}&type=less_attendance&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">Less Attendance</a>
+        <a class="btn btn-sm {% if selected_type == 'poor_result' %}btn-warning{% else %}btn-outline-warning{% endif %}"
+           href="?mentor={{ selected_mentor|urlencode }}&type=poor_result&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">Poor Result</a>
+        <a class="btn btn-sm {% if selected_type == 'other_direct' %}btn-info{% else %}btn-outline-info{% endif %}"
+           href="?mentor={{ selected_mentor|urlencode }}&type=other_direct&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">Other (Direct)</a>
+        <a class="btn btn-sm {% if selected_type == 'mentor_intro' %}btn-success{% else %}btn-outline-success{% endif %}"
+           href="?mentor={{ selected_mentor|urlencode }}&type=mentor_intro&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">Mentor Intro Call</a>
+    </div>
+    {% endwith %}
+</div>
+
+<div class="card p-3">
+    <div class="table-responsive">
+        <table class="table table-bordered table-hover align-middle">
+            <thead class="table-dark">
+                <tr>
+                    <th><a class="text-white text-decoration-none" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=mentor&dir={% if selected_sort == 'mentor' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Mentor ↑↓</a></th>
+                    <th><a class="text-white text-decoration-none" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=roll&dir={% if selected_sort == 'roll' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Roll No. ↑↓</a></th>
+                    <th><a class="text-white text-decoration-none" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=enrollment&dir={% if selected_sort == 'enrollment' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Enrollment No. ↑↓</a></th>
+                    <th><a class="text-white text-decoration-none" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=name&dir={% if selected_sort == 'name' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Name of Students ↑↓</a></th>
+                    <th><a class="text-white text-decoration-none" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=type&dir={% if selected_sort == 'type' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Followup Type ↑↓</a></th>
+                    <th><a class="text-white text-decoration-none" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=status&dir={% if selected_sort == 'status' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Status ↑↓</a></th>
+                    <th><a class="text-white text-decoration-none" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=date&dir={% if selected_sort == 'date' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Date of Phone Call ↑↓</a></th>
+                    <th><a class="text-white text-decoration-none" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=duration&dir={% if selected_sort == 'duration' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Call Duration (Mins) ↑↓</a></th>
+                    <th><a class="text-white text-decoration-none" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=reason&dir={% if selected_sort == 'reason' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Reason of Phone Call ↑↓</a></th>
+                    <th><a class="text-white text-decoration-none" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=remarks&dir={% if selected_sort == 'remarks' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Remarks by Parents ↑↓</a></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr>
+                    <td>{{ r.mentor }}</td>
+                    <td>{{ r.roll_no }}</td>
+                    <td>{{ r.enrollment }}</td>
+                    <td>{{ r.student_name }}</td>
+                    <td>{{ r.followup_label }}</td>
+                    <td>{{ r.status }}</td>
+                    <td>{{ r.date_text }} {{ r.time_text }}</td>
+                    <td>{{ r.duration }}</td>
+                    <td>{{ r.reason }}</td>
+                    <td>{{ r.remarks|linebreaksbr }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="10" class="text-center text-muted">No call records for selected filters.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if page_obj and page_obj.paginator.num_pages > 1 %}
+    <nav class="mt-3">
+        <ul class="pagination pagination-sm mb-0">
+            {% if page_obj.has_previous %}
+            <li class="page-item">
+                <a class="page-link" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}&page={{ page_obj.previous_page_number }}">Prev</a>
+            </li>
+            {% else %}
+            <li class="page-item disabled"><span class="page-link">Prev</span></li>
+            {% endif %}
+
+            <li class="page-item disabled">
+                <span class="page-link">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+            </li>
+
+            {% if page_obj.has_next %}
+            <li class="page-item">
+                <a class="page-link" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}&page={{ page_obj.next_page_number }}">Next</a>
+            </li>
+            {% else %}
+            <li class="page-item disabled"><span class="page-link">Next</span></li>
+            {% endif %}
+        </ul>
+    </nav>
+    {% endif %}
+</div>
+
+{% endblock %}

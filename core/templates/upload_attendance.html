@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h3>Upload Weekly Attendance</h3>
+
+<form id="uploadForm" method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+
+    <label>Week Number</label>
+    <input type="number" name="week" id="weekInput" class="form-control mb-2" required>
+
+    <label>Rule</label>
+    <select name="rule" class="form-control mb-2">
+        <option value="both">Weekly OR Overall &lt; 80%</option>
+        <option value="week">Only Weekly &lt; 80%</option>
+        <option value="overall">Only Overall &lt; 80%</option>
+    </select>
+
+    <label>Weekly Sheet</label>
+    <input type="file" name="weekly_file" class="form-control mb-2" required accept=".xlsx,.xls">
+
+    <label>Overall Sheet</label>
+    <input type="file" name="overall_file" class="form-control mb-2" accept=".xlsx,.xls">
+
+    <button type="submit" class="btn btn-lj">Upload</button>
+</form>
+
+<br>
+
+<!-- Progress bar -->
+<div class="progress" style="height:25px; display:none;" id="progressBox">
+    <div class="progress-bar progress-bar-striped progress-bar-animated bg-info"
+         id="progressBar" style="width:0%">0%</div>
+</div>
+
+
+<div id="statusText" class="mt-3"></div>
+
+<!-- Mentor distribution placeholder -->
+<div id="mentorStats" class="mt-3"></div>
+
+<script>
+document.getElementById("uploadForm").onsubmit = function(e){
+    e.preventDefault();
+
+    let formData = new FormData(this);
+    let xhr = new XMLHttpRequest();
+    let week = document.getElementById("weekInput").value;
+
+    let bar = document.getElementById("progressBar");
+    let box = document.getElementById("progressBox");
+    let status = document.getElementById("statusText");
+
+    box.style.display="block";
+    bar.className="progress-bar progress-bar-striped progress-bar-animated bg-info";
+    status.innerHTML="Uploading file...";
+
+    // -------- Upload progress --------
+    xhr.upload.addEventListener("progress", function(e){
+        if(e.lengthComputable){
+            let percent = Math.round((e.loaded/e.total)*100);
+            bar.style.width=percent+"%";
+            bar.innerText=percent+"%";
+        }
+    });
+
+    // -------- Upload finished (now server processing) --------
+    xhr.onloadstart = function(){
+        // nothing here
+    }
+
+    xhr.onload = function(){
+
+        // change to processing state
+        bar.style.width="100%";
+        bar.innerText="Processing...";
+        bar.className="progress-bar progress-bar-striped progress-bar-animated bg-warning";
+        status.innerHTML="Reading Excel & preparing call list... ⏳";
+
+        // small delay so user sees processing stage
+        setTimeout(()=>{
+            let res = JSON.parse(xhr.responseText);
+
+            if(res.ok){
+
+                bar.className="progress-bar bg-success";
+                bar.innerText="Completed ✔";
+
+                status.innerHTML = `
+                    <div class="alert alert-success">
+                        <h5>Upload Completed ✔</h5>
+                        <p>${res.msg}</p>
+
+                        <a href="/view-attendance/?week=${res.week}" class="btn btn-info">
+                            View Imported Attendance
+                        </a>
+
+                        <a href="/reports/?week=${res.week}" class="btn btn-lj">
+                            Go to Dashboard
+                        </a>
+                    </div>
+                `;
+
+                showMentorStats(res);
+
+            } else {
+
+                bar.className="progress-bar bg-danger";
+                bar.innerText="Failed";
+
+                status.innerHTML =
+                    `<div class="alert alert-danger">${res.msg}</div>`;
+            }
+        }, 600); // lets user visually see "processing"
+    };
+
+    xhr.open("POST","/upload-attendance/");
+    xhr.setRequestHeader("X-CSRFToken", document.querySelector('[name=csrfmiddlewaretoken]').value);
+    xhr.send(formData);
+};
+
+
+// ---------- SHOW MENTOR COUNTS ----------
+function showMentorStats(res){
+
+    let div = document.getElementById("mentorStats");
+
+    div.innerHTML = `
+        <div class="card p-3">
+            <h5>Call Distribution (Week-${res.week})</h5>
+            <div id="badges" style="display:flex;gap:12px;flex-wrap:wrap;"></div>
+        </div>
+    `;
+
+    let badgeBox = document.getElementById("badges");
+
+    res.mentor_stats.forEach(m=>{
+        badgeBox.innerHTML += `
+            <span class="badge bg-primary" style="font-size:15px;padding:10px;">
+                ${m.student__mentor__name} : ${m.total}
+            </span>
+        `;
+    });
+
+    badgeBox.innerHTML += `
+        <span class="badge bg-dark" style="font-size:16px;padding:10px;">
+            TOTAL : ${res.total_calls}
+        </span>
+    `;
+}
+</script>
+
+
+{% endblock %}

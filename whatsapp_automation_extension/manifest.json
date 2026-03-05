@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "EasyMentor WhatsApp Auto Sender",
+  "version": "1.0.0",
+  "description": "Reads EasyMentor queue from window.name and sends WhatsApp messages sequentially.",
+  "permissions": [],
+  "host_permissions": [
+    "https://web.whatsapp.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://web.whatsapp.com/*"
+      ],
+      "js": [
+        "whatsapp_content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

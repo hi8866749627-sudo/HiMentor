@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h3>Upload Student Master</h3>
+
+<form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    {{ form.file }}
+    <button class="btn btn-success mt-2">Upload</button>
+</form>
+
+{% if message %}
+<div class="alert alert-info mt-3">{{ message }}</div>
+{% endif %}
+
+{% endblock %}

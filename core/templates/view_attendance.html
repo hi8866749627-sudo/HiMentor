@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h4>Attendance Viewer</h4>
+
+<!-- Week buttons -->
+<div class="mb-3">
+{% for w in weeks %}
+
+    {% if w == selected_week %}
+        <a class="btn btn-sm btn-dark" href="?week={{w}}">
+            Week-{{w}}
+        </a>
+    {% else %}
+        <a class="btn btn-sm btn-primary" href="?week={{w}}">
+            Week-{{w}}
+        </a>
+    {% endif %}
+
+{% endfor %}
+</div>
+
+
+{% if selected_week %}
+{% if records %}
+<div class="card mb-3 p-3">
+
+    <h5>Student Count (Mentor Wise) : 
+	{% if selected_week %}
+			<span class="text-danger fw-bold"> Week-{{selected_week}}</span>
+	{% endif %}
+	</h5>
+    <div style="display:flex; gap:20px; flex-wrap:wrap;">
+
+        {% for m in mentor_counts %}
+
+		<a href="?week={{selected_week}}&filter={{filter}}&mentor={{m.student__mentor__name}}"
+		   class="badge {% if mentor_filter == m.student__mentor__name %}bg-danger{% else %}bg-primary{% endif %} text-decoration-none"
+		   style="font-size:15px;padding:10px;">
+
+			{{m.student__mentor__name}} : {{m.c}}
+
+		</a>
+
+		{% endfor %}
+
+
+
+        <a href="?week={{selected_week}}&filter={{filter}}"
+		   class="badge {% if not mentor_filter %}bg-danger{% else %}bg-dark{% endif %} text-decoration-none"
+		   style="font-size:16px;padding:10px;">
+			TOTAL : {{total_count}}
+		</a>
+
+
+
+    </div>
+
+</div>
+{% endif %}
+
+
+
+<!-- Filters -->
+<div class="mb-3">
+<a class="btn btn-secondary" href="?week={{selected_week}}&filter=all">All</a>
+<a class="btn btn-warning" href="?week={{selected_week}}&filter=weekly">Weekly <80</a>
+<a class="btn btn-warning" href="?week={{selected_week}}&filter=overall">Overall <80</a>
+<a class="btn btn-danger" href="?week={{selected_week}}&filter=either">Either <80</a>
+</div>
+
+<table class="table table-bordered table-sm">
+<thead>
+<tr>
+
+<th><a href="?week={{selected_week}}&filter={{filter}}&sort=roll&dir={{dir_roll}}">Roll ↑↓</a></th>
+<th><a href="?week={{selected_week}}&filter={{filter}}&sort=enroll&dir={{dir_enroll}}">Enrollment ↑↓</a></th>
+<th><a href="?week={{selected_week}}&filter={{filter}}&sort=name&dir={{dir_name}}">Name ↑↓</a></th>
+<th><a href="?week={{selected_week}}&filter={{filter}}&sort=mentor&dir={{dir_mentor}}">Mentor ↑↓</a></th>
+<th><a href="?week={{selected_week}}&filter={{filter}}&sort=week&dir={{dir_week}}">Weekly % ↑↓</a></th>
+<th><a href="?week={{selected_week}}&filter={{filter}}&sort=overall&dir={{dir_overall}}">Overall % ↑↓</a></th>
+
+
+</tr>
+</thead>
+
+
+<tbody>
+{% for r in records %}
+<tr>
+<td>{{r.student.roll_no}}</td>
+<td>{{r.student.enrollment}}</td>
+<td>{{r.student.name}}</td>
+<td>{{r.student.mentor.name}}</td>
+
+<td>
+{% if r.week_percentage < 80 %}
+<span style="color:red;font-weight:bold">{{r.week_percentage}}%</span>
+{% else %}
+<span style="color:green">{{r.week_percentage}}%</span>
+{% endif %}
+</td>
+
+<td>
+{% if r.overall_percentage < 80 %}
+<span style="color:red;font-weight:bold">{{r.overall_percentage}}%</span>
+{% else %}
+<span style="color:green">{{r.overall_percentage}}%</span>
+{% endif %}
+</td>
+
+</tr>
+{% endfor %}
+</tbody>
+</table>
+
+{% endif %}
+
+{% endblock %}

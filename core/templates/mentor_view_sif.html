@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h3>Mentor Followup Sheet</h3>
+
+<form method="get" action="/mentor-view-sif/" class="row g-2 align-items-end mb-3">
+    <div class="col-md-6">
+        <label class="form-label">Student</label>
+        <select name="enrollment" class="form-select" onchange="this.form.submit()">
+            {% for s in students %}
+            <option value="{{ s.enrollment }}" {% if selected_student and s.enrollment == selected_student.enrollment %}selected{% endif %}>
+                {{ s.roll_no }} - {{ s.name }} ({{ s.enrollment }})
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-md-2">
+        <button class="btn btn-primary w-100" type="submit">View</button>
+    </div>
+    {% if selected_student %}
+    <div class="col-md-2">
+        <a href="/mentor-prefilled-sif/{{ selected_student.enrollment }}/" class="btn btn-primary w-100">Download PDF</a>
+    </div>
+    <div class="col-md-2">
+        <a href="/mentor-prefilled-sif-all/" class="btn btn-success w-100">Download All Student PDF</a>
+    </div>
+    {% endif %}
+</form>
+
+{% if selected_student %}
+<h4 class="text-center mb-3">Pre-filled SIF - {{ selected_student.name }} ({{ selected_student.enrollment }})</h4>
+
+<h4 class="text-center mt-4">Telephonic Interaction with Institute for Less Attendance</h4>
+<div class="table-responsive mb-4">
+    <table class="table table-bordered table-sm">
+        <thead class="table-dark text-center">
+            <tr>
+                <th>Sr No</th>
+                <th>Sem</th>
+                <th>Status</th>
+                <th>Date</th>
+                <th>Time & Duration</th>
+                <th>Discussed With</th>
+                <th>Week No</th>
+                <th>% of Attend.</th>
+                <th>Parents Remarks</th>
+                <th>Faculty Remarks</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in attendance_rows %}
+            <tr>
+                <td>{{ r.sr }}</td>
+                <td>{{ r.sem }}</td>
+                <td>{{ r.status }}</td>
+                <td>{{ r.date }}</td>
+                <td>{{ r.time_duration }}</td>
+                <td>{{ r.discussed }}</td>
+                <td>{{ r.week_no }}</td>
+                <td>{{ r.attend_text }}</td>
+                <td>{{ r.parent_remark }}</td>
+                <td>{{ r.faculty_remark }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="10" class="text-center">No less-attendance call rows found.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<h4 class="text-center mt-4">Telephonic Interaction with Institute for Poor Result</h4>
+<div class="table-responsive mb-4">
+    <table class="table table-bordered table-sm">
+        <thead class="table-dark text-center">
+            <tr>
+                <th>Sr No</th>
+                <th>Sem</th>
+                <th>Status</th>
+                <th>Date</th>
+                <th>Time & Duration</th>
+                <th>Discussed With</th>
+                <th>Name of Exam</th>
+                <th>Subject (Secured / Total)</th>
+                <th>Parents / Faculty Remarks</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in result_rows %}
+            <tr>
+                <td>{{ r.sr }}</td>
+                <td>{{ r.sem }}</td>
+                <td>{{ r.status }}</td>
+                <td>{{ r.date }}</td>
+                <td>{{ r.time_duration }}</td>
+                <td>{{ r.discussed }}</td>
+                <td>{{ r.exam }}</td>
+                <td>{{ r.subject }}</td>
+                <td>{{ r.remark }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="9" class="text-center">No poor-result call rows found.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<h4 class="text-center mt-4">Telephonic Interaction with Institute for Direct Calls</h4>
+<div class="table-responsive mb-2">
+    <table class="table table-bordered table-sm">
+        <thead class="table-dark text-center">
+            <tr>
+                <th>Sr No</th>
+                <th>Sem</th>
+                <th>Status</th>
+                <th>Date</th>
+                <th>Time & Duration</th>
+                <th>Discussed With</th>
+                <th>Reason for Phone Call</th>
+                <th>Parents / Faculty Remarks</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in other_rows %}
+            <tr>
+                <td>{{ r.sr }}</td>
+                <td>{{ r.sem }}</td>
+                <td>{{ r.status }}</td>
+                <td>{{ r.date }}</td>
+                <td>{{ r.time_duration }}</td>
+                <td>{{ r.discussed }}</td>
+                <td>{{ r.reason }}</td>
+                <td>{{ r.remark }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="8" class="text-center">No direct-call rows found.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="alert alert-info">No students found under your mentorship in this module.</div>
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,83 @@
+/* ===== LJ THEME COLORS ===== */
+:root{
+    --lj-blue:#0b3d6d;
+    --lj-light-blue:#114f8e;
+    --lj-gold:#f4b400;
+    --lj-bg:#f2f5f9;
+    --lj-card:#ffffff;
+}
+
+/* BODY */
+body{
+    background:var(--lj-bg);
+    font-family: "Segoe UI", Tahoma, sans-serif;
+}
+
+/* HEADER */
+.lj-navbar{
+    background:linear-gradient(90deg,var(--lj-blue),var(--lj-light-blue));
+    color:white;
+    height:70px;
+    display:flex;
+    align-items:center;
+    padding:0 20px;
+}
+
+.lj-logo{
+    height:48px;
+    margin-right:15px;
+}
+
+/* SIDEBAR */
+.lj-sidebar{
+    background:white;
+    border-right:3px solid var(--lj-gold);
+    min-height:calc(100vh - 70px);
+}
+
+.lj-sidebar a{
+    display:block;
+    padding:12px 15px;
+    color:#333;
+    text-decoration:none;
+    border-radius:6px;
+    margin-bottom:6px;
+    transition:0.2s;
+}
+
+.lj-sidebar a:hover{
+    background:var(--lj-blue);
+    color:white;
+}
+
+/* CARD */
+.lj-card{
+    background:var(--lj-card);
+    border-radius:12px;
+    box-shadow:0 4px 18px rgba(0,0,0,0.08);
+    padding:20px;
+}
+
+/* BUTTONS */
+.btn-lj{
+    background:var(--lj-blue);
+    color:white;
+    border:none;
+}
+.btn-lj:hover{
+    background:var(--lj-light-blue);
+}
+
+.btn-lj-danger{
+    background:#c0392b;
+    color:white;
+}
+
+/* FOOTER */
+.lj-footer{
+    text-align:center;
+    padding:10px;
+    color:#777;
+    border-top:1px solid #ddd;
+    margin-top:20px;
+}

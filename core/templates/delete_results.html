@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h3>Delete Uploaded Results</h3>
+
+{% if message %}
+<div class="alert alert-warning">{{message}}</div>
+{% endif %}
+
+<div class="card p-3 mb-4 border-danger">
+    <h5 class="text-danger">Danger Zone</h5>
+    <form method="post">
+        {% csrf_token %}
+        <input type="password" name="password" placeholder="Coordinator Password" class="form-control mb-2" required>
+        <button class="btn btn-danger" name="delete_all">Delete ALL Results</button>
+    </form>
+</div>
+
+<h5>Uploaded Result Entries</h5>
+
+{% for u in uploads %}
+<div class="d-flex align-items-center mb-2 justify-content-between flex-wrap gap-2">
+    <div>
+        <b>{{u.test_name}} - {{u.subject.name}}</b>
+        <small class="text-muted ms-2">Uploaded: {{u.uploaded_at|date:"d-m-Y h:i A"}} | Matched: {{u.rows_matched}} | Failed calls: {{u.rows_failed}}</small>
+    </div>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="upload_id" value="{{u.id}}">
+        <button class="btn btn-outline-danger btn-sm" name="delete_upload">Delete</button>
+    </form>
+</div>
+{% empty %}
+<p>No result uploads found.</p>
+{% endfor %}
+
+{% endblock %}

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h3>Mentor SIF Marks ENTRY</h3>
+
+{% if not locked %}
+<div class="alert alert-warning">Marks not yet Locked.</div>
+{% else %}
+
+<div class="mb-3 d-flex gap-2 flex-wrap">
+    <form method="get" id="mentorStudentSelectForm" class="d-flex gap-2 flex-wrap">
+        <select name="enrollment" id="mentorStudentSelect" class="form-control">
+            {% for s in students %}
+            <option value="{{s.enrollment}}" {% if s.enrollment == selected_enrollment %}selected{% endif %}>
+                {{ s.roll_no }} - {{ s.name }} ({{ s.enrollment }})
+            </option>
+            {% endfor %}
+        </select>
+        <button class="btn btn-lj">View</button>
+    </form>
+    {% if selected_student %}
+    <a href="/mentor-sif-marks-pdf/{{selected_student.enrollment}}/" class="btn btn-primary">Download PDF</a>
+    {% endif %}
+    <a href="/mentor-sif-marks-pdf-all/" class="btn btn-success">Download All Student PDF</a>
+</div>
+
+{% if selected_student %}
+<div class="card p-3">
+    <h5>{{ selected_student.name }} ({{ selected_student.enrollment }})</h5>
+    <div class="table-responsive">
+        <table class="table table-bordered text-center align-middle">
+            <thead class="table-dark">
+                <tr>
+                    <th>Sub Name</th>
+                    <th>T1 (25)</th>
+                    <th>T2 (25)</th>
+                    <th>T3 (25)</th>
+                    <th>T4 (50)</th>
+                    <th>Final Total (100)</th>
+                    <th>Attendance %</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in marks_rows %}
+                <tr>
+                    <td class="text-start"><b>{{ r.label }}</b></td>
+                    <td>{{ r.t1 }}</td>
+                    <td>{{ r.t2 }}</td>
+                    <td>{{ r.t3 }}</td>
+                    <td>{{ r.t4 }}</td>
+                    <td>{{ r.total }}</td>
+                    {% if r.label|slice:"-3:" == "-TH" %}
+                    <td rowspan="2" class="align-middle">{{ r.attendance }}</td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% endif %}
+
+<script>
+document.addEventListener("DOMContentLoaded", function(){
+    const sel = document.getElementById("mentorStudentSelect");
+    const form = document.getElementById("mentorStudentSelectForm");
+    if(sel && form){
+        sel.addEventListener("change", function(){
+            form.submit();
+        });
+    }
+});
+</script>
+
+{% endblock %}

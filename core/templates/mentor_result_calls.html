@@ -1,0 +1,259 @@
+{% extends "base.html" %}
+{% load phone_filters %}
+{% block content %}
+
+<style>
+body.dark-mode .result-calls-table{
+    --bs-table-bg: #0f172a;
+    --bs-table-color: #e5e7eb;
+    --bs-table-border-color: #334155;
+    --bs-table-striped-bg: #111827;
+    --bs-table-hover-bg: #1e293b;
+    --bs-table-hover-color: #ffffff;
+}
+body.dark-mode .result-calls-table thead th{
+    background: #1e293b;
+    color: #e2e8f0;
+}
+body.dark-mode .result-calls-card.card{
+    background: #0f172a !important;
+    border-color: #334155 !important;
+    color: #e5e7eb !important;
+}
+body.dark-mode .modal-content{
+    background: #0f172a;
+    color: #e5e7eb;
+    border-color: #334155;
+}
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3 class="mb-0">Result Calls - {{mentor.name}}</h3>
+    {% if selected_upload %}
+        <span class="badge bg-danger fs-6">{{selected_upload.test_name}} | {{selected_upload.subject.name}}</span>
+    {% endif %}
+</div>
+
+<div class="mb-3 d-flex flex-wrap gap-2">
+{% for u in uploads %}
+    {% if selected_upload and u.id == selected_upload.id %}
+        <a href="?upload={{u.id}}" class="btn btn-dark btn-sm">{{u.test_name}} - {{u.subject.name}}</a>
+    {% else %}
+        <a href="?upload={{u.id}}" class="btn btn-outline-primary btn-sm">{{u.test_name}} - {{u.subject.name}}</a>
+    {% endif %}
+{% endfor %}
+</div>
+
+{% if not records %}
+<div class="alert alert-success">No failed students for selected result upload.</div>
+{% endif %}
+
+<div class="desktop-view">
+<div class="table-responsive">
+<table class="table table-bordered table-hover align-middle result-calls-table">
+<thead class="table-dark text-center">
+<tr>
+<th>Roll</th>
+<th>Enrollment</th>
+<th>Name</th>
+<th>Current Marks</th>
+<th>Total</th>
+<th>Rule</th>
+<th>Call</th>
+</tr>
+</thead>
+<tbody>
+{% for c in records %}
+<tr>
+<td>{{c.student.roll_no}}</td>
+<td>{{c.student.enrollment}}</td>
+<td>{{c.student.name}}</td>
+<td class="text-center">{{c.marks_current}}</td>
+<td class="text-center">{{c.marks_total|default:"-"}}</td>
+<td>{{c.fail_reason}}</td>
+<td class="text-center">
+    <button class="btn btn-success call-btn"
+        data-id="{{c.id}}"
+        data-phone="{{c.student.father_mobile|default:c.student.mother_mobile|e164_in}}">
+        CALL
+    </button>
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+
+<div class="mobile-view">
+{% for c in records %}
+<div class="card shadow-sm mb-3">
+    <div class="card-body p-3">
+        <div class="fw-bold fs-6">{{c.student.roll_no}} - {{c.student.name}}</div>
+        <div class="text-muted small mb-2">{{c.student.enrollment}}</div>
+        <div class="small mb-2">Marks: {{c.marks_current}} | Total: {{c.marks_total|default:"-"}}</div>
+        <div class="small text-danger mb-2">{{c.fail_reason}}</div>
+        <button class="btn btn-success w-100 call-btn"
+                data-id="{{c.id}}"
+                data-phone="{{c.student.father_mobile|default:c.student.mother_mobile|e164_in}}">
+            Call Parent
+        </button>
+    </div>
+</div>
+{% endfor %}
+</div>
+
+{% if all_done and not_connected %}
+<div class="card p-3 mt-3 border-warning result-calls-card">
+    <h5>Retry List</h5>
+    {% for c in not_connected %}
+    <div class="border-top pt-2 mt-2">
+        <div><b>{{c.student.roll_no}}</b> - {{c.student.name}}</div>
+        <div class="small text-muted">{{c.fail_reason}}</div>
+        <div class="mt-2 d-flex gap-2 flex-wrap">
+            <a class="btn btn-sm btn-outline-primary" href="tel:{{c.student.father_mobile|default:c.student.mother_mobile|e164_in}}">Call</a>
+            <a class="btn btn-sm btn-outline-success"
+               href="https://wa.me/{{c.student.father_mobile|default:c.student.mother_mobile|wa_in}}?text=Dear%20Parent,%20your%20ward%20{{c.student.name|urlencode}}%20is%20failed.%20{{c.fail_reason|urlencode}}"
+               target="_blank">WhatsApp</a>
+            {% if not c.message_sent %}
+            <button class="btn btn-sm btn-warning" onclick="markSent('{{c.id}}')">Mark Sent</button>
+            {% else %}
+            <span class="badge bg-success">Sent</span>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<script>
+const PENDING_RESULT_CALL_KEY = "pending_result_call";
+let modalShownForPending = false;
+
+function getPendingCall(){
+    try{
+        return JSON.parse(localStorage.getItem(PENDING_RESULT_CALL_KEY) || "null");
+    }catch(e){
+        return null;
+    }
+}
+function setPendingCall(data){
+    localStorage.setItem(PENDING_RESULT_CALL_KEY, JSON.stringify(data));
+    modalShownForPending = false;
+}
+function clearPendingCall(){
+    localStorage.removeItem(PENDING_RESULT_CALL_KEY);
+    modalShownForPending = false;
+}
+function openCallResultModalIfPending(){
+    const pending = getPendingCall();
+    if(!pending || modalShownForPending){
+        return;
+    }
+    if(!pending.id){
+        clearPendingCall();
+        return;
+    }
+    const startedAt = Number(pending.started_at || 0);
+    const elapsedSec = startedAt ? Math.max(0, Math.round((Date.now() - startedAt) / 1000)) : 0;
+    const estimatedMinutes = elapsedSec ? Math.max(1, Math.round(elapsedSec / 60)) : "";
+    document.getElementById("call_id").value = pending.id;
+    document.getElementById("duration").value = estimatedMinutes;
+    document.getElementById("autoDurationNote").innerText =
+        elapsedSec ? `Auto-estimated duration: ${elapsedSec}s (editable)` : "";
+    modalShownForPending = true;
+    new bootstrap.Modal(document.getElementById("callResultModal")).show();
+}
+document.querySelectorAll(".call-btn").forEach(btn => {
+    btn.addEventListener("click", function(){
+        const phone = (this.dataset.phone || "").trim();
+        const callId = this.dataset.id;
+        if(!phone){
+            alert("Parent number not available");
+            return;
+        }
+        setPendingCall({ id: callId, phone: phone, started_at: Date.now() });
+        window.location.href = "tel:" + phone;
+    });
+});
+window.addEventListener("focus", function(){ setTimeout(openCallResultModalIfPending, 350); });
+window.addEventListener("pageshow", function(){ setTimeout(openCallResultModalIfPending, 350); });
+document.addEventListener("visibilitychange", function(){
+    if(document.visibilityState === "visible"){
+        setTimeout(openCallResultModalIfPending, 350);
+    }
+});
+
+function markReceived(){
+    let id = document.getElementById("call_id").value;
+    let talked = document.getElementById("talked").value;
+    let duration = document.getElementById("duration").value;
+    let reason = document.getElementById("reason").value;
+    fetch("/save-result-call/",{
+        method:"POST",
+        headers:{
+            "Content-Type":"application/x-www-form-urlencoded",
+            "X-CSRFToken":"{{csrf_token}}"
+        },
+        body:`id=${id}&status=received&talked=${talked}&duration=${duration}&reason=${reason}`
+    }).then(()=>{ clearPendingCall(); location.reload(); });
+}
+
+function markNotReceived(){
+    let id = document.getElementById("call_id").value;
+    fetch("/save-result-call/",{
+        method:"POST",
+        headers:{
+            "Content-Type":"application/x-www-form-urlencoded",
+            "X-CSRFToken":"{{csrf_token}}"
+        },
+        body:`id=${id}&status=not_received`
+    }).then(()=>{ clearPendingCall(); location.reload(); });
+}
+
+function markSent(id){
+    fetch("/mark-result-message/",{
+        method:"POST",
+        headers:{
+            "Content-Type":"application/x-www-form-urlencoded",
+            "X-CSRFToken":"{{csrf_token}}"
+        },
+        body:`id=${id}`
+    }).then(()=>location.reload());
+}
+</script>
+
+<div class="modal fade" id="callResultModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Call Result</h5>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="call_id">
+        <div class="mb-2">
+            <label>Talked With</label>
+            <select id="talked" class="form-control">
+                <option value="father">Father</option>
+                <option value="mother">Mother</option>
+                <option value="guardian">Guardian</option>
+            </select>
+        </div>
+        <div class="mb-2">
+            <label>Duration (minutes)</label>
+            <input type="number" id="duration" class="form-control" min="1">
+            <small id="autoDurationNote" class="text-muted"></small>
+        </div>
+        <div class="mb-2">
+            <label>Parent Remark</label>
+            <input type="text" id="reason" class="form-control">
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-success w-100" onclick="markReceived()">Received</button>
+            <button class="btn btn-danger w-100" onclick="markNotReceived()">Not Received</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

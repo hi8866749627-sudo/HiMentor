@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h3>View Practical Marks</h3>
+
+{% if message %}
+<div class="alert {% if 'failed' in message|lower %}alert-danger{% else %}alert-info{% endif %}">{{ message }}</div>
+{% endif %}
+
+<div class="card p-3 mb-3">
+    <h5>Upload Practical + Subject Attendance File</h5>
+    <form method="post" enctype="multipart/form-data" class="d-flex gap-2 flex-wrap align-items-end">
+        {% csrf_token %}
+        <div>
+            <input type="file" name="practical_file" class="form-control" accept=".xlsx,.xls" required>
+        </div>
+        <button class="btn btn-lj">Upload Practical Marks</button>
+    </form>
+    {% if latest_upload %}
+    <small class="text-muted d-block mt-2">
+        Last upload: {{ latest_upload.uploaded_at|date:"d-m-Y h:i A" }} | Rows matched: {{ latest_upload.rows_matched }}
+    </small>
+    {% endif %}
+</div>
+
+<div class="table-responsive">
+    <table class="table table-bordered table-sm align-middle">
+        <thead class="table-dark text-center">
+            <tr>
+                <th>Roll</th>
+                <th>Enrollment</th>
+                <th>Name</th>
+                <th>Mentor</th>
+                {% for s in subjects %}
+                    <th>{{ s.short_name|default:s.name }}-PR</th>
+                {% endfor %}
+                {% for s in subjects %}
+                    <th>{{ s.short_name|default:s.name }}-%</th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rows %}
+            <tr>
+                <td>{{ r.student.roll_no }}</td>
+                <td>{{ r.student.enrollment }}</td>
+                <td>{{ r.student.name }}</td>
+                <td>{{ r.student.mentor.name }}</td>
+                {% for c in r.cells %}
+                    <td class="text-center">{{ c.pr }}</td>
+                {% endfor %}
+                {% for c in r.cells %}
+                    <td class="text-center">{{ c.att }}</td>
+                {% endfor %}
+            </tr>
+            {% empty %}
+            <tr><td colspan="99" class="text-center">No data available.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% endblock %}

@@ -1,0 +1,129 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EasyMentor Login - UI 2</title>
+    <title>EasyMentor</title>
+    <link rel="icon" type="image/png" href="{% static 'logo.png' %}">
+    <link rel="shortcut icon" type="image/x-icon" href="{% static 'lj.ico' %}">
+    <style>
+        :root{
+            --bg:#eaf3ff;
+            --ink:#0f2544;
+            --muted:#5e7798;
+            --card:#ffffffd9;
+            --line:#bdd6f7;
+            --accent:#1f72ff;
+            --accent2:#00b8b8;
+            --danger:#b84b63;
+        }
+        *{box-sizing:border-box}
+        body{
+            margin:0; min-height:100vh; padding:24px;
+            font-family:"Segoe UI",Tahoma,sans-serif; color:var(--ink);
+            background:
+                radial-gradient(circle at 8% 15%, #77b4ff3d, #77b4ff00 35%),
+                radial-gradient(circle at 85% 85%, #37d6cb3d, #37d6cb00 30%),
+                linear-gradient(145deg,#edf5ff,#dfefff);
+            display:flex; align-items:center; justify-content:center;
+        }
+        .wrap{
+            width:min(980px,100%);
+            display:grid; grid-template-columns:1.15fr .85fr;
+            border:1px solid var(--line); border-radius:20px; overflow:hidden;
+            box-shadow:0 24px 55px #1e4e8b1c;
+            backdrop-filter: blur(6px);
+        }
+        .left{
+            padding:34px;
+            background:linear-gradient(155deg,#f7fbff,#e7f2ff);
+            border-right:1px solid var(--line);
+        }
+        .brand{display:flex;align-items:center;gap:10px;margin-bottom:20px}
+        .brand img{width:42px;height:42px;object-fit:contain}
+        .brand strong{font-size:1.05rem}
+        .tag{font-size:.78rem;padding:6px 10px;border-radius:999px;border:1px solid #b9d5ff;background:#f1f7ff;display:inline-block}
+        h1{margin:14px 0 8px;font-size:2rem;line-height:1.1}
+        p{margin:0;color:var(--muted);line-height:1.6}
+        .grid{margin-top:18px;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+        .tile{
+            border:1px solid #cde0fa;border-radius:12px;padding:12px;background:#fbfdff;
+            font-size:.9rem;color:#24476f
+        }
+        .right{
+            padding:34px 28px;background:var(--card);
+        }
+        .ui-links{
+            display:flex; gap:8px; justify-content:flex-end; margin-bottom:14px;
+            font-size:.8rem;
+        }
+        .ui-links a{
+            text-decoration:none; color:#325b8e; border:1px solid #bdd6f7; border-radius:999px; padding:4px 10px; background:#f6faff;
+        }
+        h2{margin:0;font-size:1.55rem}
+        .sub{margin:8px 0 18px;color:var(--muted);font-size:.92rem}
+        label{display:block;font-size:.86rem;color:#35557d;font-weight:600;margin-bottom:6px}
+        .f{margin-bottom:12px}
+        input{
+            width:100%;padding:12px 12px;border-radius:10px;border:1px solid #bcd5f4;background:#fff;color:#173355;
+            outline:none;transition:.2s
+        }
+        input:focus{border-color:#5f9cf0;box-shadow:0 0 0 3px #62a7ff26}
+        button{
+            width:100%;border:0;border-radius:10px;padding:12px;font-size:1rem;font-weight:700;color:#fff;cursor:pointer;
+            background:linear-gradient(135deg,var(--accent),#2a88ff 52%,var(--accent2));
+            box-shadow:0 10px 24px #1f72ff33;
+        }
+        .err{margin-top:12px;padding:10px 12px;border-radius:10px;border:1px solid #efb7c2;background:#fff4f6;color:var(--danger);font-size:.9rem}
+        .tiny{margin-top:12px;color:#6783a6;font-size:.84rem}
+        @media(max-width:900px){
+            .wrap{grid-template-columns:1fr}
+            .left{border-right:0;border-bottom:1px solid var(--line)}
+        }
+    </style>
+</head>
+<body>
+<main class="wrap">
+    <section class="left">
+        <div class="brand">
+            <img src="{% static 'logo.png' %}" alt="Logo">
+            <strong>L.J. Institute of Engineering &amp; Technology</strong>
+        </div>
+        <span class="tag">Mentor Productivity Workspace</span>
+        <h1>Focus on Students. <br>Leave Tracking to System.</h1>
+        <p>Centralized mentor-coordinator flow for calls, results, and documentation with lower manual errors.</p>
+        <div class="grid">
+            <div class="tile">Attendance follow-up in structured weekly flow</div>
+            <div class="tile">Result-risk identification with call-ready data</div>
+            <div class="tile">Direct call history with remarks capture</div>
+            <div class="tile">SIF-oriented documentation in fewer steps</div>
+        </div>
+    </section>
+    <section class="right">
+        <div class="ui-links">
+            <a href="/?ui=1">UI 1</a>
+            <a href="/?ui=2">UI 2</a>
+            <a href="/?ui=3">UI 3</a>
+        </div>
+        <h2>Portal Login</h2>
+        <div class="sub">Use your role credentials to continue.</div>
+        <form method="post">
+            {% csrf_token %}
+            <div class="f">
+                <label for="id_username">Username</label>
+                <input id="id_username" type="text" name="username" autocomplete="username" required>
+            </div>
+            <div class="f">
+                <label for="id_password">Password</label>
+                <input id="id_password" type="password" name="password" autocomplete="current-password" required>
+            </div>
+            <button type="submit">Sign In</button>
+        </form>
+        {% if error %}<div class="err">{{ error }}</div>{% endif %}
+        <div class="tiny">Access types: SuperAdmin, Coordinator, Mentor</div>
+    </section>
+</main>
+</body>
+</html>

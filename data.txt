@@ -1,0 +1,13 @@
+supabase: 
+Database Direct connection string
+postgresql://postgres:31777%40Hardik@db.lsszkrzxwsalsqmcjsuo.supabase.co:5432/postgres
+
+publik key: sb_publishable_8LVK-gy37d65V7INoVOliw_iY6AK87g
+
+project url : https://lsszkrzxwsalsqmcjsuo.supabase.co
+
+transaction pooler : postgresql://postgres.lsszkrzxwsalsqmcjsuo:31777%40Hardik@aws-1-ap-northeast-1.pooler.supabase.com:6543/postgres
+
+
+upstash Redis URL: redis://default:Ad5TAAIncDJhOTBkZjkyNzRjNTM0YmZlYjgxZjkyOTdiZDQ5NzNmZXAyNTY5MTU@touching-bluebird-56915.upstash.io:6379
+

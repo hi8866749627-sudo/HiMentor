@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h4>Result Call WhatsApp Report</h4>
+
+<form method="get" class="d-flex flex-wrap gap-2 align-items-end mb-3">
+    <div>
+        <label>Select Test-Subject Upload</label>
+        <select name="upload" class="form-control" required>
+            <option value="">Select Upload</option>
+            {% for u in uploads %}
+                <option value="{{u.id}}" {% if selected_upload and u.id == selected_upload.id %}selected{% endif %}>
+                    {{u.test_name}} - {{u.subject.name}} ({{u.uploaded_at}})
+                </option>
+            {% endfor %}
+        </select>
+    </div>
+    <button class="btn btn-lj">Generate</button>
+</form>
+
+{% if report %}
+<hr>
+<label>Copy Message:</label>
+<textarea class="form-control" rows="12" id="reportText">{{ report }}</textarea>
+<button class="btn btn-success mt-2" onclick="copyText()">Copy</button>
+{% else %}
+<div class="alert alert-info">Select upload to generate report.</div>
+{% endif %}
+
+<script>
+function copyText(){
+    let t=document.getElementById("reportText");
+    t.select();
+    document.execCommand("copy");
+    alert("Copied for WhatsApp");
+}
+</script>
+
+{% endblock %}

@@ -1,0 +1,126 @@
+EASYMENTOR - CALL LOGICS (SINGLE REFERENCE)
+
+1) LESS ATTENDANCE CALL LOGIC
+
+Core rule:
+- Student is in less-attendance category if:
+  - Weekly attendance < 80
+  OR
+  - Overall attendance < 80
+
+Upload/creation flow:
+- Coordinator uploads attendance (weekly + overall as per flow).
+- System marks call-required students using the selected rule.
+- Call records are created mentor-wise for required students.
+
+Mentor call execution:
+- Mentor gets attendance calls in Attendance Calls page.
+- Status flow:
+  - Pending (blue)
+  - Not Received (yellow)
+  - Received (green)
+- Call data captured:
+  - talked_with
+  - duration
+  - parent_reason / remarks
+  - message_sent (if not received)
+
+Direct-call integration to attendance:
+- In Direct Calls popup, if category = Less Attendance:
+  - Inputs: Week Number, Day Number
+  - Parents Remark prefill: Sick
+  - Faculty Remark prefill: Absent on WK-{week} DAY-{day}
+- This also writes into Attendance CallRecord for that student+week.
+- In SIF PDF attendance section:
+  - it appears as attendance call row
+  - % Attend column shows "-" when attendance sheet value is unavailable.
+
+Reporting/PDF:
+- Attendance reports remain mentor-wise and coordinator-wise.
+- Print SIF includes attendance call rows from CallRecord.
+
+
+2) POOR RESULT CALL LOGIC
+
+Exam structure:
+- T1: out of 25
+- T2: out of 25
+- T3: out of 25
+- T4 (SEE): out of 50 (and T4/2 considered where applicable)
+- REMEDIAL: out of 100
+
+Fail rules used for result call generation:
+- T1:
+  - current < 9
+- T2:
+  - current (T2) < 9 AND cumulative (T1+T2) < 18
+- T3:
+  - current (T3) < 9 AND cumulative (T1+T2+T3) < 27
+- T4:
+  - current (T4 out of 50) < 18 AND cumulative total < 35
+- REMEDIAL:
+  - current < 35 (out of 100)
+
+Upload flow:
+- Coordinator uploads results by Test + Subject.
+- Supported modes:
+  - Subject-only sheet
+  - Compiled sheet
+- Re-upload for same Test+Subject replaces prior upload data and regenerates calls.
+- Bulk mode (ALL EXAMS + ALL subjects) replaces old result uploads.
+
+Matching key:
+- Enrollment Number only.
+
+Mentor mapping behavior:
+- Full mentor name and short mentor name are resolved to same mentor identity.
+
+View Result behavior:
+- Matrix by test/subject, with uploaded status.
+- Filter options include:
+  - current threshold filter
+  - cumulative threshold filter
+  - either/or filter
+- Mentor chips filter rows by mentor.
+- Historical changed marks (T1/T2/T3 in later uploads) are highlighted (purple).
+
+Result call execution:
+- Mentor handles result-only calls in Result Calls page.
+- Separate from attendance calls.
+- Status flow:
+  - Pending (blue)
+  - Not Received
+  - Received
+- Message-sent tracking supported for not-received flow.
+
+Direct-call integration to poor result:
+- In Direct Calls popup, if category = Poor Result:
+  - Inputs:
+    - Name of Exam
+    - Subject Name
+    - Marks Obtained
+    - Out of Marks (25/50/100 etc.)
+  - Parents Remark prefill: Student will Study more
+- These entries are included in SIF Poor Result section.
+
+SIF Poor Result print fields:
+- Sr No
+- Sem
+- Date
+- Time & Duration
+- Discussed With
+- Name of Exam
+- Subject (Obtained/Total)
+- Parents Remark
+- Faculty sign column (blank/sign area)
+
+
+3) SEPARATION OF CALL TYPES
+
+- Attendance calls: CallRecord
+- Result calls: ResultCallRecord
+- Direct calls: OtherCallRecord (category-based: less_attendance / poor_result / other)
+
+All records are module-scoped:
+- Academic Session + Semester + variant module selection applies.
+- Data remains isolated per selected module.

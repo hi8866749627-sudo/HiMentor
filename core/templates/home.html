@@ -1,0 +1,347 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+    .sa-tile {
+        border-radius: 12px;
+        color: #fff;
+        cursor: pointer;
+        transition: transform .15s ease, box-shadow .15s ease;
+    }
+
+    .sa-tile:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 18px rgba(15, 23, 42, .22);
+    }
+
+    .sa-blue {
+        background: linear-gradient(135deg, #1d4ed8, #1e40af);
+    }
+
+    .sa-teal {
+        background: linear-gradient(135deg, #0f766e, #0f766e);
+    }
+
+    .sa-violet {
+        background: linear-gradient(135deg, #7c3aed, #5b21b6);
+    }
+
+    .sa-orange {
+        background: linear-gradient(135deg, #ea580c, #c2410c);
+    }
+
+    .sa-section {
+        display: none;
+    }
+
+.sa-section.active {
+    display: block;
+}
+.sa-title{
+    font-weight: 600;
+    letter-spacing: .01em;
+}
+.sa-num{
+    font-weight: 700;
+}
+body.dark-mode .sa-blue .sa-title{ color:#93c5fd; }
+body.dark-mode .sa-blue .sa-num{ color:#dbeafe; }
+body.dark-mode .sa-teal .sa-title{ color:#99f6e4; }
+body.dark-mode .sa-teal .sa-num{ color:#ccfbf1; }
+body.dark-mode .sa-violet .sa-title{ color:#c4b5fd; }
+body.dark-mode .sa-violet .sa-num{ color:#e9d5ff; }
+body.dark-mode .sa-orange .sa-title{ color:#fdba74; }
+body.dark-mode .sa-orange .sa-num{ color:#ffedd5; }
+</style>
+
+<h3>SuperAdmin Home</h3>
+
+<div class="row g-3 mb-3">
+    <div class="col-md-3">
+        <div class="card p-3 sa-tile sa-blue" onclick="showSection('coordinators')">
+            <div class="small sa-title">Coordinator List</div>
+            <h4 class="mb-0 sa-num">{{ stats.total_coordinators }}</h4>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card p-3 sa-tile sa-teal" onclick="window.location.href='/modules/'">
+            <div class="small sa-title">Module List</div>
+            <h4 class="mb-0 sa-num">{{ stats.total_modules }}</h4>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card p-3 sa-tile sa-violet" onclick="showSection('mentors')">
+            <div class="small sa-title">Mentor List</div>
+            <h4 class="mb-0 sa-num">{{ stats.total_mentors }}</h4>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card p-3 sa-tile sa-orange" onclick="showSection('students')">
+            <div class="small sa-title">Student Report</div>
+            <h4 class="mb-0 sa-num">{{ stats.total_students }}</h4>
+        </div>
+    </div>
+</div>
+
+<div id="sec-coordinators" class="sa-section active">
+    <div class="card p-3 mb-3">
+        <h5>Create Coordinator</h5>
+        <form method="post" class="row g-2">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create">
+            <div class="col-md-3"><input name="coordinator_name" class="form-control" placeholder="Name of coordinator"
+                    required></div>
+            <div class="col-md-2"><input name="username" class="form-control" placeholder="Username" required></div>
+            <div class="col-md-2"><input name="password" class="form-control" placeholder="Password" required></div>
+            <div class="col-md-3">
+                <details>
+                    <summary class="btn btn-sm btn-outline-secondary">Select Modules</summary>
+                    <select name="module_ids" class="form-select form-select-sm mt-2" multiple required
+                        style="max-height:140px;">
+                        {% for m in modules %}
+                        <option value="{{ m.id }}">{{ m.name }}</option>
+                        {% endfor %}
+                    </select>
+                </details>
+            </div>
+            <div class="col-md-2"><button class="btn btn-primary w-100">Create</button></div>
+        </form>
+    </div>
+
+    <div class="card p-3 mb-3">
+        <h5>Update SuperAdmin Password</h5>
+        <form method="post" class="row g-2">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="change_super_password">
+            <div class="col-md-4"><input type="password" name="current_password" class="form-control"
+                    placeholder="Current password" required></div>
+            <div class="col-md-4"><input type="password" name="new_password" class="form-control"
+                    placeholder="New password (min 8)" required></div>
+            <div class="col-md-2"><button class="btn btn-warning w-100">Update Password</button></div>
+        </form>
+    </div>
+
+    <div class="card p-3 mb-3">
+        <h5>Coordinator Details</h5>
+        {% if coordinator_rows %}
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm align-middle">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Coordinator</th>
+                        <th>Status</th>
+                        <th style="width: 240px;">Assigned Modules</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in coordinator_rows %}
+                    <tr>
+                        <td>
+                            <span id="name-text-{{ row.user.id }}">{{ row.user.first_name|default:"-" }}</span>
+                            <input id="name-input-{{ row.user.id }}" class="form-control form-control-sm d-none"
+                                value="{{ row.user.first_name }}" form="coord-form-{{ row.user.id }}"
+                                name="coordinator_name">
+                        </td>
+                        <td>
+                            <span id="user-text-{{ row.user.id }}">{{ row.user.username }}</span>
+                            <input id="user-input-{{ row.user.id }}" class="form-control form-control-sm d-none"
+                                value="{{ row.user.username }}" form="coord-form-{{ row.user.id }}" name="username">
+                        </td>
+                        <td>
+                            <span id="status-text-{{ row.user.id }}">{% if row.user.is_active %}Active{% else %}Inactive{% endif %}</span>
+                            <select id="status-input-{{ row.user.id }}" class="form-select form-select-sm d-none"
+                                form="coord-form-{{ row.user.id }}" name="is_active" style="max-width:120px;">
+                                <option value="1" {% if row.user.is_active %}selected{% endif %}>Active</option>
+                                <option value="0" {% if not row.user.is_active %}selected{% endif %}>Inactive</option>
+                            </select>
+                        </td>
+                        <td style="max-width: 220px;">
+                            <div id="modules-text-{{ row.user.id }}">
+                                {% for m in row.modules %}
+                                <span class="badge bg-secondary">{{ m.name }}</span>
+                                {% empty %}
+                                <span class="text-muted">No modules</span>
+                                {% endfor %}
+                            </div>
+                            <details id="modules-input-{{ row.user.id }}" class="d-none">
+                                <summary class="btn btn-sm btn-outline-secondary">Select Modules</summary>
+                                <select name="module_ids" class="form-select form-select-sm mt-2" multiple
+                                    style="min-width:280px; max-height:140px;" form="coord-form-{{ row.user.id }}">
+                                    {% for m in modules %}
+                                    <option value="{{ m.id }}" {% if m in row.modules %}selected{% endif %}>{{ m.name }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </details>
+                        </td>
+                        <td>
+                            <form id="coord-form-{{ row.user.id }}" method="post"
+                                class="d-flex gap-2 align-items-center flex-wrap">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="update">
+                                <input type="hidden" name="coordinator_id" value="{{ row.user.id }}">
+                                <input id="pwd-{{ row.user.id }}" type="password" name="new_password" class="form-control form-control-sm" style="max-width:180px;"
+                                    placeholder="New password (optional)">
+                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                    onclick="toggleCoordinatorPassword('{{ row.user.id }}', this)">View</button>
+                                <button type="button" id="edit-btn-{{ row.user.id }}" class="btn btn-sm btn-info"
+                                    onclick="enableCoordinatorInlineEdit('{{ row.user.id }}')">Edit</button>
+                                <button id="save-btn-{{ row.user.id }}"
+                                    class="btn btn-sm btn-warning d-none">Save</button>
+                                <button type="button" class="btn btn-sm btn-danger"
+                                    onclick="deleteCoordinator('{{ row.user.id }}','{{ row.user.username }}')">Delete</button>
+                            </form>
+                            <form id="delete-form-{{ row.user.id }}" method="post" class="d-none">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="coordinator_id" value="{{ row.user.id }}">
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="alert alert-info mb-0">No coordinators found.</div>
+        {% endif %}
+    </div>
+</div>
+
+<div id="sec-modules" class="sa-section">
+    <div class="card p-3 mb-3">
+        <h5>Module List with Student/Mentor Count</h5>
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>Module</th>
+                        <th>Coordinators</th>
+                        <th>Mentors</th>
+                        <th>Students</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in module_summary %}
+                    <tr>
+                        <td>{{ r.module.name }}</td>
+                        <td>{{ r.coordinators }}</td>
+                        <td>{{ r.mentors }}</td>
+                        <td>{{ r.students }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div id="sec-mentors" class="sa-section">
+    <div class="card p-3 mb-3">
+        <h5>Mentor List</h5>
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>Mentor Code</th>
+                        <th>Full Name</th>
+                        <th>Students</th>
+                        <th>Modules</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in mentor_summary %}
+                    <tr>
+                        <td>{{ m.name }}</td>
+                        <td>{{ m.full_name|default:"-" }}</td>
+                        <td>{{ m.total_students }}</td>
+                        <td>{{ m.total_modules }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div id="sec-students" class="sa-section">
+    <div class="card p-3 mb-3">
+        <h5>Student Report Table (Module Wise)</h5>
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>Module</th>
+                        <th>Students</th>
+                        <th>Mentors</th>
+                        <th>Attendance Rows</th>
+                        <th>Result Uploads</th>
+                        <th>Practical Uploads</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in student_report_rows %}
+                    <tr>
+                        <td>{{ r.module_name }}</td>
+                        <td>{{ r.students }}</td>
+                        <td>{{ r.mentors }}</td>
+                        <td>{{ r.attendance_rows }}</td>
+                        <td>{{ r.result_uploads }}</td>
+                        <td>{{ r.practical_uploads }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    function showSection(key) {
+        ["coordinators", "modules", "mentors", "students"].forEach(function (k) {
+            const el = document.getElementById("sec-" + k);
+            if (!el) return;
+            el.classList.toggle("active", k === key);
+        });
+    }
+
+    function enableCoordinatorInlineEdit(id) {
+        const hide = function (el) { if (el) { el.classList.add("d-none"); } };
+        const show = function (el) { if (el) { el.classList.remove("d-none"); } };
+
+        hide(document.getElementById("name-text-" + id));
+        hide(document.getElementById("user-text-" + id));
+        hide(document.getElementById("status-text-" + id));
+        hide(document.getElementById("modules-text-" + id));
+
+        show(document.getElementById("name-input-" + id));
+        show(document.getElementById("user-input-" + id));
+        show(document.getElementById("status-input-" + id));
+        show(document.getElementById("modules-input-" + id));
+        hide(document.getElementById("edit-btn-" + id));
+        show(document.getElementById("save-btn-" + id));
+    }
+
+    function deleteCoordinator(id, username) {
+        if (confirm("Delete coordinator " + username + "? Click OK to Delete or Cancel to keep.")) {
+            const form = document.getElementById("delete-form-" + id);
+            if (form) { form.submit(); }
+        }
+    }
+
+    function toggleCoordinatorPassword(id, btn){
+        const input = document.getElementById("pwd-" + id);
+        if(!input){ return; }
+        if(input.type === "password"){
+            input.type = "text";
+            btn.innerText = "Hide";
+        }else{
+            input.type = "password";
+            btn.innerText = "View";
+        }
+    }
+</script>
+
+{% endblock %}

@@ -1,0 +1,287 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EasyMentor Login</title>
+    <title>EasyMentor</title>
+    <link rel="icon" type="image/png" href="{% static 'logo.png' %}">
+    <link rel="shortcut icon" type="image/x-icon" href="{% static 'lj.ico' %}">
+    <style>
+        :root{
+            --bg-1:#03152d;
+            --bg-2:#0a2f56;
+            --panel:#0a1f3fcc;
+            --panel-border:#2a5d97;
+            --text:#eaf3ff;
+            --muted:#a9c0dd;
+            --accent:#2a8cff;
+            --accent-2:#13c2c2;
+            --danger:#ff5c74;
+            --input:#0a1a35;
+            --input-border:#345c8e;
+            --focus:#62b0ff;
+        }
+
+        *{ box-sizing:border-box; }
+
+        body{
+            margin:0;
+            min-height:100vh;
+            color:var(--text);
+            font-family:"Segoe UI",Tahoma,sans-serif;
+            background:
+                radial-gradient(circle at 15% 18%, #1f63b933 0, #1f63b900 38%),
+                radial-gradient(circle at 85% 78%, #00b5d633 0, #00b5d600 34%),
+                linear-gradient(140deg, var(--bg-1), var(--bg-2));
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            padding:24px;
+        }
+
+        .shell{
+            width:min(1020px, 100%);
+            display:grid;
+            grid-template-columns: 1.05fr 0.95fr;
+            border:1px solid #2e5487;
+            border-radius:18px;
+            overflow:hidden;
+            background:#071a35aa;
+            backdrop-filter:blur(8px);
+            box-shadow:0 22px 60px rgba(0, 0, 0, 0.45);
+        }
+
+        .hero{
+            padding:42px 38px;
+            background:
+                linear-gradient(170deg, #0c2f5fcc 0%, #0a1e3dcc 100%),
+                repeating-linear-gradient(90deg, #ffffff05 0, #ffffff05 1px, transparent 1px, transparent 16px);
+            border-right:1px solid #355e93;
+        }
+
+        .brand{
+            display:flex;
+            align-items:center;
+            gap:12px;
+            margin-bottom:24px;
+        }
+
+        .brand img{
+            width:44px;
+            height:44px;
+            object-fit:contain;
+            filter:drop-shadow(0 2px 8px rgba(0,0,0,.35));
+        }
+
+        .brand h1{
+            margin:0;
+            font-size:1.05rem;
+            font-weight:700;
+            letter-spacing:.2px;
+        }
+
+        .hero h2{
+            margin:0 0 8px 0;
+            font-size:2.05rem;
+            line-height:1.15;
+        }
+
+        .hero .highlight{
+            color:#66d8ff;
+        }
+
+        .hero p{
+            margin:0 0 24px 0;
+            color:var(--muted);
+            max-width:42ch;
+            line-height:1.55;
+        }
+
+        .points{
+            display:grid;
+            gap:12px;
+        }
+
+        .point{
+            display:flex;
+            gap:10px;
+            align-items:flex-start;
+            color:#d4e6ff;
+            font-size:.95rem;
+        }
+
+        .dot{
+            margin-top:6px;
+            width:8px;
+            height:8px;
+            border-radius:50%;
+            background:linear-gradient(145deg, var(--accent), var(--accent-2));
+            box-shadow:0 0 10px #39a2ff99;
+            flex:0 0 auto;
+        }
+
+        .panel{
+            padding:38px 32px;
+            background:var(--panel);
+        }
+
+        .role-strip{
+            display:flex;
+            gap:8px;
+            margin-bottom:18px;
+            flex-wrap:wrap;
+        }
+
+        .role-pill{
+            border:1px solid #3a6597;
+            color:#c4dcfb;
+            background:#0f294f;
+            border-radius:999px;
+            padding:6px 12px;
+            font-size:.8rem;
+            letter-spacing:.2px;
+        }
+
+        .panel h3{
+            margin:0;
+            font-size:1.6rem;
+        }
+
+        .panel .sub{
+            margin:8px 0 20px 0;
+            color:var(--muted);
+            font-size:.94rem;
+        }
+
+        .field{
+            margin-bottom:14px;
+        }
+
+        label{
+            display:block;
+            margin-bottom:6px;
+            font-size:.88rem;
+            color:#cfe2fb;
+            font-weight:600;
+        }
+
+        input{
+            width:100%;
+            border:1px solid var(--input-border);
+            border-radius:10px;
+            padding:12px 13px;
+            background:var(--input);
+            color:#f3f8ff;
+            font-size:.96rem;
+            outline:none;
+            transition:border-color .2s, box-shadow .2s;
+        }
+
+        input:focus{
+            border-color:var(--focus);
+            box-shadow:0 0 0 3px #3e87d933;
+        }
+
+        .submit{
+            margin-top:6px;
+            width:100%;
+            border:0;
+            border-radius:10px;
+            padding:12px 14px;
+            font-size:1rem;
+            font-weight:700;
+            color:white;
+            cursor:pointer;
+            background:linear-gradient(135deg, #1f7aff, #18a9ff);
+            box-shadow:0 8px 24px #0078ff55;
+        }
+
+        .submit:hover{
+            filter:brightness(1.05);
+        }
+
+        .alert{
+            margin-top:14px;
+            border:1px solid #ff8fa2;
+            color:#ffdbe2;
+            background:#632436;
+            border-radius:10px;
+            padding:10px 12px;
+            font-size:.9rem;
+        }
+
+        .foot{
+            margin-top:16px;
+            color:#90afcf;
+            font-size:.84rem;
+            line-height:1.45;
+        }
+
+        @media (max-width:920px){
+            .shell{
+                grid-template-columns:1fr;
+            }
+            .hero{
+                border-right:0;
+                border-bottom:1px solid #355e93;
+                padding:26px 24px;
+            }
+            .hero h2{ font-size:1.6rem; }
+            .panel{ padding:26px 24px; }
+        }
+    </style>
+</head>
+<body>
+    <main class="shell">
+        <section class="hero">
+            <div class="brand">
+                <img src="{% static 'logo.png' %}" alt="LJ Logo">
+                <h1>L.J. Institute of Engineering &amp; Technology</h1>
+            </div>
+            <h2>Mentor Operations, <span class="highlight">Reimagined</span></h2>
+            <p>
+                One workspace to reduce manual sheets, simplify calls, and keep follow-up documentation accurate for mentors and coordinators.
+            </p>
+            <div class="points">
+                <div class="point"><span class="dot"></span><span>Faster follow-up tracking for attendance, results, and direct calls</span></div>
+                <div class="point"><span class="dot"></span><span>Lower data-entry error with structured academic workflows</span></div>
+                <div class="point"><span class="dot"></span><span>More mentor time for student guidance and academic support</span></div>
+                <div class="point"><span class="dot"></span><span>Print-ready SIF support from live call records</span></div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <div class="role-strip">
+                <span class="role-pill">Coordinator Access</span>
+                <span class="role-pill">Mentor Access</span>
+                <span class="role-pill">SuperAdmin Access</span>
+            </div>
+            <h3>Secure Login</h3>
+            <p class="sub">Enter your credentials to continue to EasyMentor portal.</p>
+
+            <form method="post">
+                {% csrf_token %}
+                <div class="field">
+                    <label for="id_username">Username</label>
+                    <input id="id_username" type="text" name="username" required autocomplete="username">
+                </div>
+                <div class="field">
+                    <label for="id_password">Password</label>
+                    <input id="id_password" type="password" name="password" required autocomplete="current-password">
+                </div>
+                <button class="submit" type="submit">Login to Portal</button>
+            </form>
+
+            {% if error %}
+                <div class="alert">{{ error }}</div>
+            {% endif %}
+
+            <div class="foot">
+                Assistance: contact your coordinator or system admin for account issues.
+            </div>
+        </section>
+    </main>
+</body>
+</html>

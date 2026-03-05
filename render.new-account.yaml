@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: easymentor-web-new
+    runtime: python
+    plan: free
+    buildCommand: |
+      pip install -r requirements.txt
+      pip install uvicorn
+      python manage.py collectstatic --noinput
+      python manage.py migrate --noinput
+      if [ -n "$FIXTURE_PATH" ] && [ -f "$FIXTURE_PATH" ]; then python manage.py loaddata "$FIXTURE_PATH"; fi
+    startCommand: uvicorn mentor_followup.asgi:application --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz/
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: DEBUG
+        value: "False"
+      - key: ALLOWED_HOSTS
+        value: ".onrender.com"
+      - key: CSRF_TRUSTED_ORIGINS
+        value: "https://*.onrender.com"
+      - key: SECURE_SSL_REDIRECT
+        value: "True"
+      - key: DB_SSL_REQUIRE
+        value: "True"
+      - key: USE_CACHE_SESSIONS
+        value: "False"
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: FIXTURE_PATH
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true

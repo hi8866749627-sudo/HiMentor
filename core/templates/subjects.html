@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h3>Manage Subjects</h3>
+
+{% if messages %}
+    {% for message in messages %}
+        {% if "coordinator created:" not in message|lower %}
+        <div class="alert alert-info">{{ message }}</div>
+        {% endif %}
+    {% endfor %}
+{% endif %}
+
+<style>
+.subject-table th,
+.subject-table td{
+    padding: 0.4rem 0.5rem;
+    font-size: 0.92rem;
+}
+.subject-table .compact-box{
+    padding: 0.3rem 0.45rem;
+}
+</style>
+
+{% if available_templates and not is_superadmin %}
+<div class="card p-3 mb-3">
+    <h5>Available Subjects (From SuperAdmin)</h5>
+    <p class="text-muted mb-2">Tick subjects to add in this module. Untick to remove from this module only.</p>
+    <form method="post" action="/subjects/apply-templates/">
+        {% csrf_token %}
+        <div class="row g-2 mb-2">
+            {% for t in available_templates %}
+            <div class="col-md-4">
+                <label class="d-flex align-items-center border rounded p-2">
+                    <input type="checkbox" class="form-check-input me-2" name="template_ids" value="{{ t.id }}"
+                        {% if t.id in selected_template_ids %}checked{% endif %}>
+                    <span>
+                        <strong>{{ t.name }}</strong>
+                        <small class="text-muted d-block">{{ t.short_name|default:"-" }} | {% if t.has_theory %}TH{% else %}-{% endif %}/{% if t.has_practical %}PR{% else %}-{% endif %}</small>
+                    </span>
+                </label>
+            </div>
+            {% endfor %}
+        </div>
+        <button class="btn btn-primary btn-sm">Apply Selected Subjects</button>
+    </form>
+</div>
+{% endif %}
+
+<div class="card p-3 mb-3">
+    <h5>{% if is_superadmin %}Add Subject (Also updates available subject library){% else %}Add Subject{% endif %}</h5>
+    <form method="post" action="/subjects/add/" class="d-flex gap-2 flex-wrap align-items-end">
+        {% csrf_token %}
+        <div>
+            <input name="name" class="form-control" placeholder="Subject name" required>
+        </div>
+        <div>
+            <input name="short_name" class="form-control" placeholder="Short name (e.g. SE, ES, IOT)" required>
+        </div>
+        <div class="border rounded p-2">
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="has_theory" id="has_theory_add" checked>
+                <label class="form-check-label" for="has_theory_add">TH</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="has_practical" id="has_practical_add" checked>
+                <label class="form-check-label" for="has_practical_add">PR</label>
+            </div>
+        </div>
+        <div id="add-format-wrap">
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="result_format" id="fmt_full_add" value="{{format_full}}" checked>
+                <label class="form-check-label" for="fmt_full_add">T1/T2/T3/T4</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="result_format" id="fmt_t4_add" value="{{format_t4_only}}">
+                <label class="form-check-label" for="fmt_t4_add">Only T4</label>
+            </div>
+        </div>
+        <button class="btn btn-lj">Add</button>
+    </form>
+</div>
+
+<div class="card p-3">
+    <h5>Subject List</h5>
+    <div class="table-responsive">
+        <table class="table table-bordered table-sm align-middle subject-table">
+            <thead class="table-dark">
+                <tr>
+                    <th style="width:170px;">Name</th>
+                    <th style="width:90px;">Short</th>
+                    <th>Status</th>
+                    <th>TH/PR</th>
+                    <th>Format</th>
+                    <th style="width:560px;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in subjects %}
+                <tr>
+                    <td>{{s.name}}</td>
+                    <td>{{s.short_name|default:"-"}}</td>
+                    <td>{% if s.is_active %}Active{% else %}Archived{% endif %}</td>
+                    <td>
+                        {% if s.has_theory %}TH{% else %}-{% endif %} /
+                        {% if s.has_practical %}PR{% else %}-{% endif %}
+                    </td>
+                    <td>{% if s.result_format == format_t4_only %}Only T4{% else %}T1/T2/T3/T4{% endif %}</td>
+                    <td>
+                        <form method="post" action="/subjects/{{s.id}}/edit/" class="d-flex gap-2 flex-wrap align-items-end">
+                            {% csrf_token %}
+                            <input name="name" class="form-control form-control-sm" value="{{s.name}}" required style="max-width:170px;">
+                            <input name="short_name" class="form-control form-control-sm" value="{{s.short_name}}" required style="max-width:110px;">
+                            <div class="border rounded compact-box d-flex gap-2 align-items-center">
+                                <div class="form-check mb-0">
+                                    <input class="form-check-input" type="checkbox" name="has_theory" id="has_theory_{{s.id}}" {% if s.has_theory %}checked{% endif %}>
+                                    <label class="form-check-label" for="has_theory_{{s.id}}">TH</label>
+                                </div>
+                                <div class="form-check mb-0">
+                                    <input class="form-check-input" type="checkbox" name="has_practical" id="has_practical_{{s.id}}" {% if s.has_practical %}checked{% endif %}>
+                                    <label class="form-check-label" for="has_practical_{{s.id}}">PR</label>
+                                </div>
+                            </div>
+                            <div id="edit-format-wrap-{{s.id}}" class="d-flex gap-2 align-items-center compact-box border rounded">
+                                <div class="form-check mb-0">
+                                    <input class="form-check-input" type="radio" name="result_format" id="fmt_full_{{s.id}}" value="{{format_full}}" {% if s.result_format != format_t4_only %}checked{% endif %}>
+                                    <label class="form-check-label" for="fmt_full_{{s.id}}">T1/T2/T3/T4</label>
+                                </div>
+                                <div class="form-check mb-0">
+                                    <input class="form-check-input" type="radio" name="result_format" id="fmt_t4_{{s.id}}" value="{{format_t4_only}}" {% if s.result_format == format_t4_only %}checked{% endif %}>
+                                    <label class="form-check-label" for="fmt_t4_{{s.id}}">Only T4</label>
+                                </div>
+                            </div>
+                            <button class="btn btn-sm btn-primary">Update</button>
+                            {% if s.is_active %}
+                            <a href="#" class="btn btn-sm btn-outline-danger"
+                               onclick="event.preventDefault(); document.getElementById('archive-form-{{s.id}}').submit();">
+                                Archive
+                            </a>
+                            {% endif %}
+                        </form>
+                        {% if s.is_active %}
+                        <form method="post" action="/subjects/{{s.id}}/delete/" id="archive-form-{{s.id}}" class="d-none">
+                            {% csrf_token %}
+                            <button type="submit"></button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6">No subjects added yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+function toggleFormatForForm(thCheckbox, wrapEl){
+    if(!thCheckbox || !wrapEl){ return; }
+    const radios = wrapEl.querySelectorAll('input[type="radio"][name="result_format"]');
+    const enabled = thCheckbox.checked;
+    wrapEl.style.opacity = enabled ? "1" : "0.45";
+    wrapEl.style.filter = enabled ? "none" : "blur(0.2px)";
+    radios.forEach(r => {
+        r.disabled = !enabled;
+        if(!enabled){
+            if(r.value === "{{format_full}}"){ r.checked = true; }
+        }
+    });
+}
+
+document.addEventListener("DOMContentLoaded", function(){
+    const addTh = document.getElementById("has_theory_add");
+    const addWrap = document.getElementById("add-format-wrap");
+    if(addTh && addWrap){
+        const syncAdd = () => toggleFormatForForm(addTh, addWrap);
+        addTh.addEventListener("change", syncAdd);
+        syncAdd();
+    }
+
+    document.querySelectorAll('input[id^="has_theory_"]').forEach(function(th){
+        const id = th.id.replace("has_theory_", "");
+        const wrap = document.getElementById("edit-format-wrap-" + id);
+        if(!wrap){ return; }
+        const sync = () => toggleFormatForForm(th, wrap);
+        th.addEventListener("change", sync);
+        sync();
+    });
+});
+</script>
+
+{% endblock %}

@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% load phone_filters %}
+{% block content %}
+
+<h3>Student Master</h3>
+
+<div class="card p-3 mb-4">
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+        <form method="post" enctype="multipart/form-data" class="mb-0">
+            {% csrf_token %}
+            <input type="file" name="file" required class="form-control form-control-sm" style="max-width: 360px;">
+            <button class="btn btn-success mt-2">Upload Excel</button>
+        </form>
+        <form method="post" class="ms-md-auto"
+            onsubmit="return confirm('Are you sure? This will delete Student Master data for {{ module.name }} only.');">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="clear_module_students">
+            <button type="submit" class="btn btn-danger btn-sm mt-2 mt-md-0">Delete Master Data: {{ module.name }}
+            </button>
+        </form>
+    </div>
+
+    {% if message %}
+    <div class="alert alert-info mt-2">{{message}}</div>
+    {% endif %}
+
+</div>
+
+{% if skipped_rows %}
+<div class="card p-3 mb-4">
+    <h5 class="mb-2">Skipped Rows (first {{ skipped_rows|length }})</h5>
+    <div class="table-responsive">
+        <table class="table table-bordered table-sm">
+            <thead>
+                <tr>
+                    <th>Row</th>
+                    <th>Roll</th>
+                    <th>Name</th>
+                    <th>Enrollment</th>
+                    <th>Reason</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in skipped_rows %}
+                <tr>
+                    <td>{{ r.row }}</td>
+                    <td>{{ r.roll }}</td>
+                    <td>{{ r.name }}</td>
+                    <td>{{ r.enrollment }}</td>
+                    <td>{{ r.reason }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<h4 class="mb-2">Student Data (Module-wise)</h4>
+<div class="table-responsive">
+    <table class="table table-bordered table-sm table-hover align-middle">
+        <thead class="table-dark text-center">
+            <tr>
+                <th>Roll ↑↓</th>
+                <th>Branch ↑↓</th>
+                <th>Division ↑↓</th>
+                <th>Enrollment ↑↓</th>
+                <th>Name ↑↓</th>
+                <th>Mentor ↑↓</th>
+                <th>Student Mobile ↑↓</th>
+                <th>Father Mobile ↑↓</th>
+            </tr>
+            <tr>
+                <th><input id="f_roll" class="form-control form-control-sm" placeholder="Filter"></th>
+                <th><input id="f_batch" class="form-control form-control-sm" placeholder="Filter"></th>
+                <th><input id="f_division" class="form-control form-control-sm" placeholder="Filter"></th>
+                <th><input id="f_enrollment" class="form-control form-control-sm" placeholder="Filter"></th>
+                <th><input id="f_name" class="form-control form-control-sm" placeholder="Filter"></th>
+                <th><input id="f_mentor" class="form-control form-control-sm" placeholder="Filter"></th>
+                <th><input id="f_student_mobile" class="form-control form-control-sm" placeholder="Filter"></th>
+                <th>
+                    <div class="d-flex gap-1">
+                        <input id="f_father_mobile" class="form-control form-control-sm" placeholder="Filter">
+                        <button id="clearFiltersBtn" type="button" class="btn btn-sm btn-secondary">Clear</button>
+                    </div>
+                </th>
+            </tr>
+        </thead>
+
+        <tbody id="studentMasterBody">
+            {% for s in students %}
+            <tr>
+                <td>{{s.roll_no}}</td>
+                <td>{{s.batch|default:"-"}}</td>
+                <td>{{s.division|default:"-"}}</td>
+                <td>{{s.enrollment}}</td>
+                <td>{{s.name}}</td>
+                <td>{{s.mentor.name}}</td>
+                <td>{{s.student_mobile|e164_in|default:"-"}}</td>
+                <td>{{s.father_mobile|e164_in|default:"-"}}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<script>
+    (function () {
+        const body = document.getElementById("studentMasterBody");
+        if (!body) { return; }
+
+        const rows = Array.from(body.querySelectorAll("tr"));
+        const inputs = {
+            roll: document.getElementById("f_roll"),
+            batch: document.getElementById("f_batch"),
+            division: document.getElementById("f_division"),
+            enrollment: document.getElementById("f_enrollment"),
+            name: document.getElementById("f_name"),
+            mentor: document.getElementById("f_mentor"),
+            student_mobile: document.getElementById("f_student_mobile"),
+            father_mobile: document.getElementById("f_father_mobile")
+        };
+
+        const norm = (v) => (v || "").toString().toLowerCase().trim();
+
+        function filterRows() {
+            const q = {
+                roll: norm(inputs.roll.value),
+                batch: norm(inputs.batch.value),
+                division: norm(inputs.division.value),
+                enrollment: norm(inputs.enrollment.value),
+                name: norm(inputs.name.value),
+                mentor: norm(inputs.mentor.value),
+                student_mobile: norm(inputs.student_mobile.value),
+                father_mobile: norm(inputs.father_mobile.value)
+            };
+
+            rows.forEach(function (row) {
+                const cols = row.querySelectorAll("td");
+                if (cols.length < 8) { return; }
+                const data = {
+                    roll: norm(cols[0].innerText),
+                    batch: norm(cols[1].innerText),
+                    division: norm(cols[2].innerText),
+                    enrollment: norm(cols[3].innerText),
+                    name: norm(cols[4].innerText),
+                    mentor: norm(cols[5].innerText),
+                    student_mobile: norm(cols[6].innerText),
+                    father_mobile: norm(cols[7].innerText)
+                };
+                const ok =
+                    (!q.roll || data.roll.includes(q.roll)) &&
+                    (!q.batch || data.batch.includes(q.batch)) &&
+                    (!q.division || data.division.includes(q.division)) &&
+                    (!q.enrollment || data.enrollment.includes(q.enrollment)) &&
+                    (!q.name || data.name.includes(q.name)) &&
+                    (!q.mentor || data.mentor.includes(q.mentor)) &&
+                    (!q.student_mobile || data.student_mobile.includes(q.student_mobile)) &&
+                    (!q.father_mobile || data.father_mobile.includes(q.father_mobile));
+                row.style.display = ok ? "" : "none";
+            });
+        }
+
+        const clearBtn = document.getElementById("clearFiltersBtn");
+
+        Object.values(inputs).forEach(function (el) {
+            if (!el) { return; }
+            el.addEventListener("input", filterRows);
+        });
+
+        if (clearBtn) {
+            clearBtn.addEventListener("click", function () {
+                Object.values(inputs).forEach(function (el) {
+                    if (el) { el.value = ""; }
+                });
+                filterRows();
+            });
+        }
+
+        filterRows();
+    })();
+</script>
+
+{% endblock %}

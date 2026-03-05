@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="container-fluid">
+    <div class="card p-3 mb-3">
+        <h3 class="mb-0">Result Calls Dashboard</h3>
+        <small class="text-muted">Coordinator Result Follow-up Summary</small>
+    </div>
+
+    <div class="card p-3 mb-3">
+        <form method="get" class="d-flex align-items-end gap-2 flex-wrap">
+            <div>
+                <label>Select Upload</label>
+                <select name="upload" class="form-control" required>
+                    <option value="">Select</option>
+                    {% for u in uploads %}
+                    <option value="{{u.id}}" {% if selected_upload and u.id == selected_upload.id %}selected{% endif %}>
+                        {{u.test_name}} - {{u.subject.name}} ({{u.uploaded_at}})
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button class="btn btn-primary">View Result Report</button>
+        </form>
+    </div>
+
+    {% if selected_upload %}
+    <div class="card p-3 mb-3">
+        <h4 class="mb-0">{{selected_upload.test_name}} - {{selected_upload.subject.name}}</h4>
+    </div>
+
+    <div class="card p-3">
+        <div class="table-responsive">
+            <table class="table table-bordered table-hover align-middle">
+                <thead class="table-dark text-center">
+                    <tr>
+                        <th>Mentor</th>
+                        <th>Need Call</th>
+                        <th>Call Done</th>
+                        <th>Call Received</th>
+                        <th>Call Not Received</th>
+                        <th>Call Not Done</th>
+                        <th>Message Sent</th>
+                        <th>Completion %</th>
+                    </tr>
+                </thead>
+                <tbody class="text-center">
+                    {% for r in data %}
+                    <tr>
+                        <td><b>{{r.mentor}}</b></td>
+                        <td class="text-danger fw-bold">{{r.need_call}}</td>
+                        <td class="text-success fw-bold">{{r.done}}</td>
+                        <td class="text-success fw-bold">{{r.received}}</td>
+                        <td class="text-warning fw-bold">{{r.not_received}}</td>
+                        <td class="text-primary fw-bold">{{r.not_done}}</td>
+                        <td class="text-dark fw-bold">{{r.msg_sent}}</td>
+                        <td>
+                            {% if r.percent < 50 %}
+                                <span class="badge bg-danger">{{r.percent}}%</span>
+                            {% elif r.percent < 80 %}
+                                <span class="badge bg-warning text-dark">{{r.percent}}%</span>
+                            {% else %}
+                                <span class="badge bg-success">{{r.percent}}%</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+{% endblock %}

@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: easymentor-web
+    runtime: python
+    plan: free
+    buildCommand: |
+      pip install -r requirements.txt
+      python manage.py collectstatic --noinput
+      python manage.py migrate --noinput
+    startCommand: gunicorn mentor_followup.wsgi:application --log-file -
+    healthCheckPath: /healthz/
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: DEBUG
+        value: "False"
+      - key: ALLOWED_HOSTS
+        value: ".onrender.com"
+      - key: CSRF_TRUSTED_ORIGINS
+        value: "https://*.onrender.com"
+      - key: SECURE_SSL_REDIRECT
+        value: "True"
+      - key: DB_SSL_REQUIRE
+        value: "True"
+      - key: REDIS_URL
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true

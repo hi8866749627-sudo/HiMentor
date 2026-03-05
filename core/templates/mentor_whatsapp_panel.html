@@ -1,0 +1,245 @@
+﻿{% extends "base.html" %}
+{% block content %}
+
+<h3>Whatsapp Message to Mentees</h3>
+
+<div class="card p-3 mb-3">
+    <div class="row g-3 align-items-start">
+        <div class="col-lg-8">
+            <form method="post" style="max-width: 680px;">
+                {% csrf_token %}
+                <label for="message" class="form-label">Message</label>
+                <textarea id="message" name="message" class="form-control" rows="5" required>{{ message_text }}</textarea>
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="wrapSelection('*')"><b>B</b></button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="wrapSelection('_')"><i>I</i></button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="wrapSelection('~')"><s>S</s></button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="wrapSelection('```')">Mono</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="insertText('\\n• ')">• Bullet</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="insertText('\\n')">New Line</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="insertText('??')">??</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="insertText('??')">??</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="insertText('??')">??</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="insertText('?')">?</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="insertText('??')">??</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="insertText('??')">??</button>
+                </div>
+                <div class="d-flex flex-wrap gap-2 mt-3">
+                    <button type="submit" name="target" value="student" class="btn btn-success">Send to Student</button>
+                    <button type="submit" name="target" value="father" class="btn btn-primary">Send to Parent (Father)</button>
+                </div>
+            </form>
+        </div>
+        <div class="col-lg-4">
+            <div class="alert alert-info py-2 mb-0">
+                <a href="/mentor-whatsapp/extension-download/" class="btn btn-sm btn-outline-primary mb-2">Download Chrome Extension (ZIP)</a>
+                <div class="small">
+                    <strong>How to use:</strong><br>
+                    1. Download and Unzip in Downloads folder.<br>
+                    2. Go to <a href="chrome://extensions">chrome://extensions</a><br>
+                    3. Enable Developer mode (Right side upper corner)<br>
+                    4. Click Load unpacked -&gt; select folder <code>whatsapp_automation_extension</code> you unzipped.<br>
+                    5. Open WhatsApp Web and Login once to WhatsApp Web<br>
+                    6. In Mentor portal mentor page, enter message and click Start Auto (Extension)
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if recipients %}
+<div class="card p-3">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="mb-0">Recipients ({{ recipient_count }})</h5>
+        <small class="text-muted">Single-window sequential sender</small>
+    </div>
+    <div class="d-flex flex-wrap gap-2 mb-3">
+        <button type="button" class="btn btn-dark btn-sm" onclick="startSequence()">Start Sequence</button>
+        <button type="button" class="btn btn-success btn-sm" onclick="sentAndNext()">Sent + Next</button>
+        <button type="button" class="btn btn-outline-dark btn-sm" onclick="openCurrent()">Open Current</button>
+        <button type="button" class="btn btn-warning btn-sm" onclick="startAutoWithExtension()">Start Auto (Extension)</button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="copyMessage()">Copy Message</button>
+        <span class="text-muted align-self-center" id="seqStatus"></span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-bordered table-sm">
+            <thead>
+                <tr>
+                    <th>Action</th>
+                    <th>Name</th>
+                    <th>Enrollment</th>
+                    <th>Phone</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in recipients %}
+                <tr>
+                    <td>
+                        <button type="button" class="btn btn-outline-success btn-sm" onclick="openByIndex({{ forloop.counter0 }})">
+                            Open
+                        </button>
+                    </td>
+                    <td>{{ r.name }}</td>
+                    <td>{{ r.enrollment }}</td>
+                    <td>{{ r.phone }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    (function () {
+        const isMobile = /Android|iPhone|iPad|iPod|Windows Phone/i.test(navigator.userAgent || "");
+        const base = isMobile ? "whatsapp://send" : "https://web.whatsapp.com/send";
+        const text = "{{ message_encoded|escapejs }}";
+        const recipients = window.__waRecipients = [
+            {% for r in recipients %}
+            { phone: "{{ r.phone }}" }{% if not forloop.last %},{% endif %}
+            {% endfor %}
+        ];
+        let idx = window.__waIndex = 0;
+        let started = false;
+        let waWin = null;
+
+        const statusEl = document.getElementById("seqStatus");
+        function updateStatus() {
+            if (!recipients.length) {
+                statusEl.textContent = "No recipients";
+                return;
+            }
+            if (!started) {
+                statusEl.textContent = "Ready: 1 / " + recipients.length;
+                return;
+            }
+            statusEl.textContent = "Current: " + (idx + 1) + " / " + recipients.length;
+        }
+
+        function linkFor(recipientPhone) {
+            return base + "?phone=" + encodeURIComponent(recipientPhone) + "&text=" + text;
+        }
+
+        function openInSameWindow(url) {
+            if (waWin && !waWin.closed) {
+                try {
+                    waWin.location.href = url;
+                    waWin.focus();
+                    return;
+                } catch (e) {
+                    // Fallback for browser restrictions
+                }
+            }
+            waWin = window.open(url, "wa_sender");
+        }
+
+        window.openByIndex = function (index) {
+            if (index < 0 || index >= recipients.length) return;
+            idx = index;
+            const url = linkFor(recipients[idx].phone);
+            openInSameWindow(url);
+            updateStatus();
+        };
+
+        window.startSequence = function () {
+            if (!recipients.length) return;
+            started = true;
+            idx = 0;
+            openInSameWindow(linkFor(recipients[idx].phone));
+            updateStatus();
+        };
+
+        window.openCurrent = function () {
+            if (!recipients.length) return;
+            openInSameWindow(linkFor(recipients[idx].phone));
+            updateStatus();
+        };
+
+        window.sentAndNext = function () {
+            if (!recipients.length) return;
+            if (!started) {
+                startSequence();
+                return;
+            }
+            if (idx >= recipients.length - 1) {
+                statusEl.textContent = "Completed: " + recipients.length + " / " + recipients.length;
+                alert("Message sent");
+                return;
+            }
+            idx += 1;
+            const url = linkFor(recipients[idx].phone);
+            openInSameWindow(url);
+            updateStatus();
+        };
+
+        window.copyMessage = function () {
+            const plainText = decodeURIComponent(text);
+            navigator.clipboard.writeText(plainText).then(function () {
+                statusEl.textContent = "Message copied";
+            });
+        };
+
+        window.startAutoWithExtension = function () {
+            if (!recipients.length) {
+                alert("No recipients.");
+                return;
+            }
+            const payload = {
+                createdAt: Date.now(),
+                text: decodeURIComponent(text),
+                recipients: recipients.map(function (r) { return { phone: r.phone }; })
+            };
+            const wa = window.open("https://web.whatsapp.com/", "wa_sender_auto");
+            if (!wa) {
+                alert("Popup blocked. Please allow popups for this portal.");
+                return;
+            }
+            try {
+                const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+                wa.location.href = "https://web.whatsapp.com/#easymentor=" + encodeURIComponent(encoded);
+                statusEl.textContent = "Auto queue pushed to WhatsApp tab";
+                alert("Queue sent. In WhatsApp tab, keep the extension enabled and logged in.");
+            } catch (e) {
+                alert("Failed to prepare auto queue.");
+            }
+        };
+
+        updateStatus();
+    })();
+</script>
+{% endif %}
+
+<script>
+    function wrapSelection(token) {
+        const el = document.getElementById("message");
+        const start = el.selectionStart || 0;
+        const end = el.selectionEnd || 0;
+        const val = el.value || "";
+        const selected = val.substring(start, end);
+        let wrapped = "";
+        if (token === "```") {
+            wrapped = "```" + selected + "```";
+        } else {
+            wrapped = token + selected + token;
+        }
+        el.value = val.substring(0, start) + wrapped + val.substring(end);
+        el.focus();
+        el.selectionStart = start + token.length;
+        el.selectionEnd = start + token.length + selected.length;
+    }
+
+    function insertText(txt) {
+        const el = document.getElementById("message");
+        const start = el.selectionStart || 0;
+        const end = el.selectionEnd || 0;
+        const val = el.value || "";
+        el.value = val.substring(0, start) + txt + val.substring(end);
+        el.focus();
+        const pos = start + txt.length;
+        el.selectionStart = pos;
+        el.selectionEnd = pos;
+    }
+</script>
+
+{% endblock %}
+
