@@ -153,7 +153,7 @@ def _latest_attendance_calls_map(module, week_no, mentor=None):
     qs = CallRecord.objects.filter(student__module=module, week_no=week_no).select_related("student", "student__mentor")
     if mentor:
         qs = qs.filter(student__mentor=mentor)
-    qs = qs.order_by("student_id", "-attempt1_time", "-attempt2_time", "-created_at", "-id")
+    qs = qs.order_by("student_id", "-created_at", "-id")
     latest = {}
     for rec in qs:
         if rec.student_id not in latest:
@@ -167,7 +167,7 @@ def _latest_result_calls_map(upload, module, mentor=None, student_ids=None):
         qs = qs.filter(student__mentor=mentor)
     if student_ids is not None:
         qs = qs.filter(student_id__in=list(student_ids))
-    qs = qs.order_by("student_id", "-attempt1_time", "-attempt2_time", "-created_at", "-id")
+    qs = qs.order_by("student_id", "-created_at", "-id")
     latest = {}
     for rec in qs:
         if rec.student_id not in latest:
@@ -1584,7 +1584,7 @@ def api_mobile_save_result_call(request):
     if not source_call:
         source_call = (
             ResultCallRecord.objects.filter(upload=upload, student=student)
-            .order_by("-attempt1_time", "-attempt2_time", "-created_at", "-id")
+            .order_by("-created_at", "-id")
             .first()
         )
     if not source_call:
@@ -1643,7 +1643,7 @@ def api_mobile_mark_result_message(request):
         if student and upload:
             source_call = (
                 ResultCallRecord.objects.filter(upload=upload, student=student)
-                .order_by("-attempt1_time", "-attempt2_time", "-created_at", "-id")
+                .order_by("-created_at", "-id")
                 .first()
             )
     if not source_call:
@@ -1778,7 +1778,7 @@ def api_mobile_other_calls(request):
     rows = (
         OtherCallRecord.objects.filter(mentor=mentor, student__module=module, student__in=students)
         .select_related("student")
-        .order_by("student_id", "-attempt1_time", "-created_at", "-id")
+        .order_by("student_id", "-created_at", "-id")
     )
     latest_by_student = {}
     for row in rows:

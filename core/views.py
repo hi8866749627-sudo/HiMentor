@@ -85,7 +85,7 @@ def _latest_attendance_calls_map(module, week_no, mentor=None):
     qs = CallRecord.objects.filter(student__module=module, week_no=week_no).select_related("student", "student__mentor")
     if mentor:
         qs = qs.filter(student__mentor=mentor)
-    qs = qs.order_by("student_id", "-attempt1_time", "-attempt2_time", "-created_at", "-id")
+    qs = qs.order_by("student_id", "-created_at", "-id")
     latest = {}
     for rec in qs:
         if rec.student_id not in latest:
@@ -103,7 +103,7 @@ def _latest_result_calls_map(upload, mentor=None, student=None, module=None, stu
         qs = qs.filter(student=student)
     if student_ids is not None:
         qs = qs.filter(student_id__in=list(student_ids))
-    qs = qs.order_by("student_id", "-attempt1_time", "-attempt2_time", "-created_at", "-id")
+    qs = qs.order_by("student_id", "-created_at", "-id")
     latest = {}
     for rec in qs:
         if rec.student_id not in latest:
@@ -1798,7 +1798,7 @@ def mentor_other_calls(request):
     qs = (
         OtherCallRecord.objects.filter(mentor=mentor, student__module=module, student__in=students)
         .select_related("student")
-        .order_by("student_id", "-attempt1_time", "-created_at", "-id")
+        .order_by("student_id", "-created_at", "-id")
     )
     latest_by_student = {}
     for rec in qs:
@@ -2010,7 +2010,7 @@ def mark_message(request):
         if not source_call:
             source_call = (
                 CallRecord.objects.filter(student=student, week_no=week_no)
-                .order_by("-attempt1_time", "-attempt2_time", "-created_at", "-id")
+                .order_by("-created_at", "-id")
                 .first()
             )
         call = CallRecord(
@@ -2157,7 +2157,7 @@ def save_result_call(request):
     if not source_call:
         source_call = (
             ResultCallRecord.objects.filter(upload=upload, student=student)
-            .order_by("-attempt1_time", "-attempt2_time", "-created_at", "-id")
+            .order_by("-created_at", "-id")
             .first()
         )
     if not source_call:
@@ -2224,7 +2224,7 @@ def mark_result_message(request):
     if not source_call:
         source_call = (
             ResultCallRecord.objects.filter(upload=upload, student=student)
-            .order_by("-attempt1_time", "-attempt2_time", "-created_at", "-id")
+            .order_by("-created_at", "-id")
             .first()
         )
     if not source_call:
@@ -2467,7 +2467,7 @@ def _build_live_followup_rows(module, selected_mentor="", selected_type="all", s
     )
     if selected_week:
         attendance_calls = attendance_calls.filter(week_no=selected_week)
-    attendance_calls = attendance_calls.order_by("student_id", "week_no", "-attempt1_time", "-attempt2_time", "-created_at", "-id")
+    attendance_calls = attendance_calls.order_by("student_id", "week_no", "-created_at", "-id")
     latest_attendance_calls = {}
     for c in attendance_calls:
         key = (c.student_id, c.week_no)
@@ -2520,7 +2520,7 @@ def _build_live_followup_rows(module, selected_mentor="", selected_type="all", s
     active_fail_pairs = set(
         StudentResult.objects.filter(upload__module=module, fail_flag=True).values_list("upload_id", "student_id")
     )
-    result_calls = result_calls.order_by("upload_id", "student_id", "-attempt1_time", "-attempt2_time", "-created_at", "-id")
+    result_calls = result_calls.order_by("upload_id", "student_id", "-created_at", "-id")
     latest_result_calls = {}
     for c in result_calls:
         key = (c.upload_id, c.student_id)
@@ -3073,7 +3073,7 @@ def mentor_view_sif(request):
 
     if selected_student:
         calls_by_week = {}
-        for c in CallRecord.objects.filter(student=selected_student).order_by("week_no", "-attempt1_time", "-attempt2_time", "-created_at", "-id"):
+        for c in CallRecord.objects.filter(student=selected_student).order_by("week_no", "-created_at", "-id"):
             if c.week_no not in calls_by_week:
                 calls_by_week[c.week_no] = c
         attendance_qs = Attendance.objects.filter(student=selected_student).order_by("week_no")
@@ -3129,7 +3129,7 @@ def mentor_view_sif(request):
             ),
         )
         result_call_map = {}
-        for c in ResultCallRecord.objects.filter(student=selected_student).select_related("upload").order_by("upload_id", "-attempt1_time", "-attempt2_time", "-created_at", "-id"):
+        for c in ResultCallRecord.objects.filter(student=selected_student).select_related("upload").order_by("upload_id", "-created_at", "-id"):
             if c.upload_id not in result_call_map:
                 result_call_map[c.upload_id] = c
         sr = 1
@@ -3172,7 +3172,7 @@ def mentor_view_sif(request):
 
         direct_call = (
             OtherCallRecord.objects.filter(student=selected_student)
-            .order_by("-attempt1_time", "-created_at", "-id")
+            .order_by("-created_at", "-id")
             .first()
         )
         if direct_call and direct_call.call_category != "poor_result":
