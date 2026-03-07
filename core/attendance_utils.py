@@ -156,7 +156,9 @@ def import_attendance(weekly_file, overall_file, week_no, module, rule="both"):
 
         # create call record
         if call_required:
-            CallRecord.objects.get_or_create(student=student, week_no=week_no)
-            created_calls += 1
+            # Seed only once per student/week; later follow-ups append via save endpoints.
+            if not CallRecord.objects.filter(student=student, week_no=week_no).exists():
+                CallRecord.objects.create(student=student, week_no=week_no)
+                created_calls += 1
 
     return created_calls

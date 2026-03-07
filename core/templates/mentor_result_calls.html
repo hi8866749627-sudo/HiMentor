@@ -73,7 +73,7 @@ body.dark-mode .modal-content{
 <td>{{c.fail_reason}}</td>
 <td class="text-center">
     <button class="btn btn-success call-btn"
-        data-id="{{c.id}}"
+        data-id="{{c.student.id}}"
         data-phone="{{c.student.father_mobile|default:c.student.mother_mobile|e164_in}}">
         CALL
     </button>
@@ -94,7 +94,7 @@ body.dark-mode .modal-content{
         <div class="small mb-2">Marks: {{c.marks_current}} | Total: {{c.marks_total|default:"-"}}</div>
         <div class="small text-danger mb-2">{{c.fail_reason}}</div>
         <button class="btn btn-success w-100 call-btn"
-                data-id="{{c.id}}"
+                data-id="{{c.student.id}}"
                 data-phone="{{c.student.father_mobile|default:c.student.mother_mobile|e164_in}}">
             Call Parent
         </button>
@@ -195,7 +195,7 @@ function markReceived(){
             "Content-Type":"application/x-www-form-urlencoded",
             "X-CSRFToken":"{{csrf_token}}"
         },
-        body:`id=${id}&status=received&talked=${talked}&duration=${duration}&reason=${reason}`
+        body:`id=${id}&upload_id={{selected_upload.id|default:''}}&status=received&talked=${talked}&duration=${duration}&reason=${reason}`
     }).then(()=>{ clearPendingCall(); location.reload(); });
 }
 
@@ -207,7 +207,7 @@ function markNotReceived(){
             "Content-Type":"application/x-www-form-urlencoded",
             "X-CSRFToken":"{{csrf_token}}"
         },
-        body:`id=${id}&status=not_received`
+        body:`id=${id}&upload_id={{selected_upload.id|default:''}}&status=not_received`
     }).then(()=>{ clearPendingCall(); location.reload(); });
 }
 
@@ -218,7 +218,7 @@ function markSent(id){
             "Content-Type":"application/x-www-form-urlencoded",
             "X-CSRFToken":"{{csrf_token}}"
         },
-        body:`id=${id}`
+        body:`id=${id}&upload_id={{selected_upload.id|default:''}}`
     }).then(()=>location.reload());
 }
 </script>

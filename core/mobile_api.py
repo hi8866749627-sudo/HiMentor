@@ -149,6 +149,38 @@ def _module_id_from_request(request):
     return hv.strip() or None
 
 
+def _latest_attendance_calls_map(module, week_no, mentor=None):
+    qs = CallRecord.objects.filter(student__module=module, week_no=week_no).select_related("student", "student__mentor")
+    if mentor:
+        qs = qs.filter(student__mentor=mentor)
+    qs = qs.order_by("student_id", "-attempt1_time", "-attempt2_time", "-created_at", "-id")
+    latest = {}
+    for rec in qs:
+        if rec.student_id not in latest:
+            latest[rec.student_id] = rec
+    return latest
+
+
+def _latest_result_calls_map(upload, module, mentor=None, student_ids=None):
+    qs = ResultCallRecord.objects.filter(upload=upload, student__module=module).select_related("student", "student__mentor")
+    if mentor:
+        qs = qs.filter(student__mentor=mentor)
+    if student_ids is not None:
+        qs = qs.filter(student_id__in=list(student_ids))
+    qs = qs.order_by("student_id", "-attempt1_time", "-attempt2_time", "-created_at", "-id")
+    latest = {}
+    for rec in qs:
+        if rec.student_id not in latest:
+            latest[rec.student_id] = rec
+    return latest
+
+
+def _upload_fail_student_ids(upload):
+    return set(
+        StudentResult.objects.filter(upload=upload, fail_flag=True).values_list("student_id", flat=True)
+    )
+
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def api_mobile_staff_login(request):
@@ -306,10 +338,7 @@ def api_mobile_staff_attendance(request):
         a.student_id: a
         for a in Attendance.objects.filter(student__module=module, week_no=week_no).select_related("student")
     }
-    call_map = {
-        c.student_id: c
-        for c in CallRecord.objects.filter(student__module=module, week_no=week_no).select_related("student")
-    }
+    call_map = _latest_attendance_calls_map(module, week_no)
 
     rows = []
     students = Student.objects.select_related("mentor").filter(module=module).order_by("roll_no", "name")
@@ -393,7 +422,7 @@ def _staff_process_result_upload(module, username, test_name, subject_id, upload
     mentor_stats = list(
         ResultCallRecord.objects.filter(upload=upload)
         .values("student__mentor__name")
-        .annotate(total=Count("id"))
+        .annotate(total=Count("student", distinct=True))
         .order_by("student__mentor__name")
     )
     total_calls = sum(m["total"] for m in mentor_stats)
@@ -579,26 +608,13 @@ def api_mobile_staff_control_summary(request):
             if week_no
             else 0
         )
-        received = (
-            CallRecord.objects.filter(
-                week_no=week_no,
-                student__module=module,
-                student__mentor=m,
-                final_status="received",
-            ).count()
-            if week_no
-            else 0
-        )
-        not_received = (
-            CallRecord.objects.filter(
-                week_no=week_no,
-                student__module=module,
-                student__mentor=m,
-                final_status="not_received",
-            ).count()
-            if week_no
-            else 0
-        )
+        if week_no:
+            latest_calls = _latest_attendance_calls_map(module, week_no, mentor=m)
+            received = len([c for c in latest_calls.values() if c.final_status == "received"])
+            not_received = len([c for c in latest_calls.values() if c.final_status == "not_received"])
+        else:
+            received = 0
+            not_received = 0
         done = received + not_received
         not_done = max(need_call - done, 0)
         percent = round((done / need_call) * 100, 1) if need_call else 0
@@ -625,6 +641,7 @@ def api_mobile_staff_control_summary(request):
     result_rows = []
     upload_meta = None
     if upload:
+        fail_student_ids = _upload_fail_student_ids(upload)
         upload_meta = {
             "upload_id": upload.id,
             "test_name": upload.test_name,
@@ -632,10 +649,10 @@ def api_mobile_staff_control_summary(request):
             "uploaded_at": upload.uploaded_at.isoformat(),
         }
         for m in mentors:
-            qs = ResultCallRecord.objects.filter(upload=upload, student__module=module, student__mentor=m)
-            need_call = qs.count()
-            received = qs.filter(final_status="received").count()
-            not_received = qs.filter(final_status="not_received").count()
+            latest_calls = _latest_result_calls_map(upload, module, mentor=m, student_ids=fail_student_ids)
+            need_call = len(latest_calls)
+            received = len([c for c in latest_calls.values() if c.final_status == "received"])
+            not_received = len([c for c in latest_calls.values() if c.final_status == "not_received"])
             done = received + not_received
             not_done = max(need_call - done, 0)
             percent = round((done / need_call) * 100, 1) if need_call else 0
@@ -748,7 +765,7 @@ def api_mobile_staff_upload_attendance(request):
         mentor_stats = list(
             CallRecord.objects.filter(week_no=week_no, student__module=module)
             .values("student__mentor__name")
-            .annotate(total=Count("id"))
+            .annotate(total=Count("student", distinct=True))
             .order_by("student__mentor__name")
         )
         total_calls = sum(m["total"] for m in mentor_stats)
@@ -802,26 +819,12 @@ def api_mobile_staff_attendance_report(request):
             student__mentor=m,
             call_required=True,
         ).count()
-        received = CallRecord.objects.filter(
-            week_no=week_no,
-            student__module=module,
-            student__mentor=m,
-            final_status="received",
-        ).count()
-        not_received = CallRecord.objects.filter(
-            week_no=week_no,
-            student__module=module,
-            student__mentor=m,
-            final_status="not_received",
-        ).count()
+        latest_calls = _latest_attendance_calls_map(module, week_no, mentor=m)
+        received = len([c for c in latest_calls.values() if c.final_status == "received"])
+        not_received = len([c for c in latest_calls.values() if c.final_status == "not_received"])
         done = received + not_received
         not_done = max(need_call - done, 0)
-        msg_sent = CallRecord.objects.filter(
-            week_no=week_no,
-            student__module=module,
-            student__mentor=m,
-            message_sent=True,
-        ).count()
+        msg_sent = len([c for c in latest_calls.values() if c.message_sent])
         percent = round((done / need_call) * 100, 1) if need_call else 0
         rows.append(
             {
@@ -859,14 +862,15 @@ def api_mobile_staff_result_report(request):
 
     mentors = Mentor.objects.filter(student__module=module).distinct().order_by("name")
     rows = []
+    fail_student_ids = _upload_fail_student_ids(upload)
     for m in mentors:
-        qs = ResultCallRecord.objects.filter(upload=upload, student__module=module, student__mentor=m)
-        need_call = qs.count()
-        received = qs.filter(final_status="received").count()
-        not_received = qs.filter(final_status="not_received").count()
+        latest_calls = _latest_result_calls_map(upload, module, mentor=m, student_ids=fail_student_ids)
+        need_call = len(latest_calls)
+        received = len([c for c in latest_calls.values() if c.final_status == "received"])
+        not_received = len([c for c in latest_calls.values() if c.final_status == "not_received"])
         done = received + not_received
         not_done = max(need_call - done, 0)
-        msg_sent = qs.filter(message_sent=True).count()
+        msg_sent = len([c for c in latest_calls.values() if c.message_sent])
         percent = round((done / need_call) * 100, 1) if need_call else 0
         rows.append(
             {
@@ -1251,10 +1255,9 @@ def api_mobile_calls(request):
     week_no = int(week)
     attendance_map = _attendance_map(mentor, week_no, module)
 
-    calls = (
-        CallRecord.objects.filter(student__mentor=mentor, student__module=module, week_no=week_no)
-        .select_related("student")
-        .order_by("student__roll_no", "student__name")
+    calls = sorted(
+        _latest_attendance_calls_map(module, week_no, mentor=mentor).values(),
+        key=lambda c: (c.student.roll_no or 999999, c.student.name or ""),
     )
 
     data = []
@@ -1311,23 +1314,36 @@ def api_mobile_save_call(request):
 
     body = _json_body(request)
     call_id = body.get("id")
+    week_no = body.get("week")
     status = body.get("status")
     talked = body.get("talked")
     duration = (body.get("duration") or "").strip()
     reason = (body.get("reason") or "").strip()
 
-    call = (
+    source_call = (
         CallRecord.objects.select_related("student", "student__mentor")
         .filter(id=call_id, student__mentor=mentor, student__module=module)
         .first()
     )
-    if not call:
+    student = source_call.student if source_call else None
+    if not student:
+        student = Student.objects.select_related("mentor").filter(id=call_id, mentor=mentor, module=module).first()
+    if not student:
         return JsonResponse({"ok": False, "msg": "Call not found"}, status=404)
+    if source_call:
+        resolved_week_no = source_call.week_no
+    else:
+        try:
+            resolved_week_no = int(week_no)
+        except Exception:
+            return JsonResponse({"ok": False, "msg": "week is required"}, status=400)
 
-    if not call.attempt1_time:
-        call.attempt1_time = timezone.now()
-    elif not call.attempt2_time:
-        call.attempt2_time = timezone.now()
+    call = CallRecord(
+        student=student,
+        week_no=resolved_week_no,
+        attempt1_time=timezone.now(),
+        message_sent=(source_call.message_sent if source_call else False),
+    )
 
     if status == "received":
         if not reason:
@@ -1360,15 +1376,24 @@ def api_mobile_mark_message(request):
 
     body = _json_body(request)
     call_id = body.get("id")
-    call = (
+    source_call = (
         CallRecord.objects.select_related("student", "student__mentor")
         .filter(id=call_id, student__mentor=mentor, student__module=module)
         .first()
     )
-    if not call:
+    if not source_call:
         return JsonResponse({"ok": False, "msg": "Call not found"}, status=404)
-    call.message_sent = True
-    call.save(update_fields=["message_sent"])
+    call = CallRecord(
+        student=source_call.student,
+        week_no=source_call.week_no,
+        attempt1_time=timezone.now(),
+        final_status=source_call.final_status,
+        talked_with=source_call.talked_with,
+        duration=source_call.duration,
+        parent_reason=source_call.parent_reason,
+        message_sent=True,
+    )
+    call.save()
     return JsonResponse({"ok": True})
 
 
@@ -1389,16 +1414,14 @@ def api_mobile_retry_list(request):
     week_no = int(week)
     attendance_map = _attendance_map(mentor, week_no, module)
 
-    calls = (
-        CallRecord.objects.filter(
-            student__mentor=mentor,
-            student__module=module,
-            week_no=week_no,
-            final_status="not_received",
+    calls = [
+        c
+        for c in sorted(
+            _latest_attendance_calls_map(module, week_no, mentor=mentor).values(),
+            key=lambda x: (x.student.roll_no or 999999, x.student.name or ""),
         )
-        .select_related("student")
-        .order_by("student__roll_no", "student__name")
-    )
+        if c.final_status == "not_received"
+    ]
 
     data = []
     for c in calls:
@@ -1476,10 +1499,10 @@ def api_mobile_result_calls(request):
     if not upload:
         return JsonResponse({"ok": True, "records": [], "all_done": False, "upload": None})
 
-    calls = (
-        ResultCallRecord.objects.filter(upload=upload, student__mentor=mentor, student__module=module)
-        .select_related("student", "upload", "upload__subject")
-        .order_by("student__roll_no", "student__name")
+    fail_student_ids = _upload_fail_student_ids(upload)
+    calls = sorted(
+        _latest_result_calls_map(upload, module, mentor=mentor, student_ids=fail_student_ids).values(),
+        key=lambda c: (c.student.roll_no or 999999, c.student.name or ""),
     )
     data = []
     for c in calls:
@@ -1539,23 +1562,43 @@ def api_mobile_save_result_call(request):
 
     body = _json_body(request)
     call_id = body.get("id")
+    upload_id = body.get("upload_id")
     status = body.get("status")
     talked = body.get("talked")
     duration = (body.get("duration") or "").strip()
     reason = (body.get("reason") or "").strip()
 
-    call = (
-        ResultCallRecord.objects.select_related("student", "student__mentor")
+    source_call = (
+        ResultCallRecord.objects.select_related("student", "student__mentor", "upload")
         .filter(id=call_id, student__mentor=mentor, student__module=module)
         .first()
     )
-    if not call:
+    student = source_call.student if source_call else None
+    upload = source_call.upload if source_call else None
+    if not student:
+        student = Student.objects.select_related("mentor").filter(id=call_id, mentor=mentor, module=module).first()
+    if not upload and upload_id:
+        upload = ResultUpload.objects.filter(id=upload_id, module=module).first()
+    if not student or not upload:
         return JsonResponse({"ok": False, "msg": "Call not found"}, status=404)
+    if not source_call:
+        source_call = (
+            ResultCallRecord.objects.filter(upload=upload, student=student)
+            .order_by("-attempt1_time", "-attempt2_time", "-created_at", "-id")
+            .first()
+        )
+    if not source_call:
+        return JsonResponse({"ok": False, "msg": "No result call context found"}, status=404)
 
-    if not call.attempt1_time:
-        call.attempt1_time = timezone.now()
-    elif not call.attempt2_time:
-        call.attempt2_time = timezone.now()
+    call = ResultCallRecord(
+        upload=upload,
+        student=student,
+        attempt1_time=timezone.now(),
+        fail_reason=(source_call.fail_reason if source_call else ""),
+        marks_current=(source_call.marks_current if source_call else 0),
+        marks_total=(source_call.marks_total if source_call else None),
+        message_sent=(source_call.message_sent if source_call else False),
+    )
 
     if status == "received":
         if not reason:
@@ -1588,15 +1631,37 @@ def api_mobile_mark_result_message(request):
 
     body = _json_body(request)
     call_id = body.get("id")
-    call = (
+    source_call = (
         ResultCallRecord.objects.select_related("student", "student__mentor")
         .filter(id=call_id, student__mentor=mentor, student__module=module)
         .first()
     )
-    if not call:
-        return JsonResponse({"ok": False, "msg": "Call not found"}, status=404)
-    call.message_sent = True
-    call.save(update_fields=["message_sent"])
+    if not source_call:
+        upload_id = body.get("upload_id")
+        student = Student.objects.select_related("mentor").filter(id=call_id, mentor=mentor, module=module).first()
+        upload = ResultUpload.objects.filter(id=upload_id, module=module).first() if upload_id else None
+        if student and upload:
+            source_call = (
+                ResultCallRecord.objects.filter(upload=upload, student=student)
+                .order_by("-attempt1_time", "-attempt2_time", "-created_at", "-id")
+                .first()
+            )
+    if not source_call:
+        return JsonResponse({"ok": False, "msg": "No result call context found"}, status=404)
+    call = ResultCallRecord(
+        upload=source_call.upload,
+        student=source_call.student,
+        attempt1_time=timezone.now(),
+        final_status=source_call.final_status,
+        talked_with=source_call.talked_with,
+        duration=source_call.duration,
+        parent_reason=source_call.parent_reason,
+        message_sent=True,
+        fail_reason=source_call.fail_reason,
+        marks_current=source_call.marks_current,
+        marks_total=source_call.marks_total,
+    )
+    call.save()
     return JsonResponse({"ok": True})
 
 
@@ -1618,16 +1683,15 @@ def api_mobile_result_retry_list(request):
     if not upload:
         return JsonResponse({"ok": True, "records": [], "module_id": module.id})
 
-    calls = (
-        ResultCallRecord.objects.filter(
-            student__mentor=mentor,
-            student__module=module,
-            upload=upload,
-            final_status="not_received",
+    fail_student_ids = _upload_fail_student_ids(upload)
+    calls = [
+        c
+        for c in sorted(
+            _latest_result_calls_map(upload, module, mentor=mentor, student_ids=fail_student_ids).values(),
+            key=lambda x: (x.student.roll_no or 999999, x.student.name or ""),
         )
-        .select_related("student")
-        .order_by("student__roll_no", "student__name")
-    )
+        if c.final_status == "not_received"
+    ]
     data = []
     for c in calls:
         data.append(
@@ -1671,11 +1735,12 @@ def api_mobile_result_report(request):
     if not upload:
         return JsonResponse({"ok": True, "report": "", "stats": {}})
 
-    calls = ResultCallRecord.objects.filter(upload=upload, student__mentor=mentor, student__module=module)
-    total = calls.count()
-    received = calls.filter(final_status="received").count()
-    not_received = calls.filter(final_status="not_received").count()
-    message_done = calls.filter(message_sent=True).count()
+    fail_student_ids = _upload_fail_student_ids(upload)
+    latest_calls = _latest_result_calls_map(upload, module, mentor=mentor, student_ids=fail_student_ids)
+    total = len(latest_calls)
+    received = len([c for c in latest_calls.values() if c.final_status == "received"])
+    not_received = len([c for c in latest_calls.values() if c.final_status == "not_received"])
+    message_done = len([c for c in latest_calls.values() if c.message_sent])
     report = _result_report_text(upload, mentor.name, total, received, not_received, message_done)
     return JsonResponse(
         {
@@ -1710,41 +1775,36 @@ def api_mobile_other_calls(request):
         return JsonResponse({"ok": True, "records": [], "module_id": None})
 
     students = Student.objects.filter(module=module, mentor=mentor).order_by("roll_no", "name")
-    existing = {
-        c.student_id: c
-        for c in OtherCallRecord.objects.filter(mentor=mentor, student__module=module, student__in=students).select_related("student")
-    }
-    to_create = []
-    for s in students:
-        if s.id not in existing:
-            to_create.append(OtherCallRecord(student=s, mentor=mentor))
-    if to_create:
-        OtherCallRecord.objects.bulk_create(to_create)
-
     rows = (
-        OtherCallRecord.objects.filter(mentor=mentor, student__module=module)
+        OtherCallRecord.objects.filter(mentor=mentor, student__module=module, student__in=students)
         .select_related("student")
-        .order_by("student__roll_no", "student__name")
+        .order_by("student_id", "-attempt1_time", "-created_at", "-id")
     )
+    latest_by_student = {}
+    for row in rows:
+        if row.student_id not in latest_by_student:
+            latest_by_student[row.student_id] = row
+
     data = []
-    for c in rows:
+    for s in students:
+        c = latest_by_student.get(s.id)
         data.append(
             {
-                "call_id": c.id,
+                "call_id": s.id,  # mobile save endpoint treats this as student id
                 "student": {
-                    "roll_no": c.student.roll_no,
-                    "enrollment": c.student.enrollment,
-                    "name": c.student.name,
-                    "student_mobile": c.student.student_mobile,
-                    "father_mobile": c.student.father_mobile,
-                    "mother_mobile": c.student.mother_mobile,
+                    "roll_no": s.roll_no,
+                    "enrollment": s.enrollment,
+                    "name": s.name,
+                    "student_mobile": s.student_mobile,
+                    "father_mobile": s.father_mobile,
+                    "mother_mobile": s.mother_mobile,
                 },
-                "final_status": c.final_status,
-                "talked_with": c.talked_with,
-                "duration": c.duration,
-                "parent_remark": c.parent_remark,
-                "call_done_reason": c.call_done_reason,
-                "last_called_target": c.last_called_target,
+                "final_status": c.final_status if c else None,
+                "talked_with": c.talked_with if c else None,
+                "duration": c.duration if c else "",
+                "parent_remark": c.parent_remark if c else "",
+                "call_done_reason": c.call_done_reason if c else "",
+                "last_called_target": c.last_called_target if c else "",
             }
         )
 
@@ -1770,18 +1830,21 @@ def api_mobile_save_other_call(request):
     call_reason = (body.get("call_reason") or "").strip()
     target = (body.get("target") or "").strip()
 
-    call = (
-        OtherCallRecord.objects.select_related("student", "mentor")
-        .filter(id=call_id, mentor=mentor, student__module=module)
-        .first()
-    )
-    if not call:
-        return JsonResponse({"ok": False, "msg": "Call not found"}, status=404)
+    student = Student.objects.select_related("mentor").filter(
+        id=call_id, module=module, mentor=mentor
+    ).first()
+    if not student:
+        # Backward compatibility: old mobile clients may send old call record id.
+        previous = (
+            OtherCallRecord.objects.select_related("student", "mentor")
+            .filter(id=call_id, mentor=mentor, student__module=module)
+            .first()
+        )
+        student = previous.student if previous else None
+    if not student:
+        return JsonResponse({"ok": False, "msg": "Student not found"}, status=404)
 
-    if not call.attempt1_time:
-        call.attempt1_time = timezone.now()
-    elif not call.attempt2_time:
-        call.attempt2_time = timezone.now()
+    call = OtherCallRecord(student=student, mentor=mentor, attempt1_time=timezone.now())
 
     if target in {"student", "father"}:
         call.last_called_target = target

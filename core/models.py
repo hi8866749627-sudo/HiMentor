@@ -124,7 +124,10 @@ class CallRecord(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = ('student', 'week_no')
+        indexes = [
+            models.Index(fields=["student", "week_no"], name="core_call_s_week_idx"),
+            models.Index(fields=["week_no", "student"], name="core_call_w_student_idx"),
+        ]
 
     def __str__(self):
         return f"{self.student.name} - Week {self.week_no}"
@@ -362,8 +365,11 @@ class ResultCallRecord(models.Model):
     marks_total = models.FloatField(null=True, blank=True)
 
     class Meta:
-        unique_together = ("upload", "student")
         ordering = ["student__roll_no", "student__name"]
+        indexes = [
+            models.Index(fields=["upload", "student"], name="core_rcall_u_student_idx"),
+            models.Index(fields=["student", "upload"], name="core_rcall_s_upload_idx"),
+        ]
 
     def __str__(self):
         return f"{self.upload} - {self.student.enrollment}"
@@ -393,7 +399,7 @@ class OtherCallRecord(models.Model):
         ("other", "Other"),
     ]
 
-    student = models.OneToOneField(Student, on_delete=models.CASCADE, related_name="other_call")
+    student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name="other_calls")
     mentor = models.ForeignKey(Mentor, on_delete=models.CASCADE, related_name="other_calls")
 
     last_called_target = models.CharField(max_length=20, choices=TARGET_CHOICES, blank=True)

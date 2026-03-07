@@ -183,7 +183,7 @@ def _fail_rule(test_name, marks_current, marks_total):
 
 def _save_import_rows(upload, rows, progress_cb=None, cancel_cb=None):
     StudentResult.objects.filter(upload=upload).delete()
-    ResultCallRecord.objects.filter(upload=upload).delete()
+    # Keep historical call records immutable; do not delete prior call history.
 
     rows_total = 0
     rows_matched = 0
