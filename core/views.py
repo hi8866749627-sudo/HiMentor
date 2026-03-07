@@ -1766,7 +1766,11 @@ def mentor_dashboard(request):
 
     if selected_week:
         latest_by_student = _latest_attendance_calls_map(module, selected_week, mentor=mentor)
-        records = list(latest_by_student.values())
+        status_weight = {None: 0, "": 0, "not_received": 1, "received": 2}
+        records = sorted(
+            list(latest_by_student.values()),
+            key=lambda c: (status_weight.get(c.final_status, 0), c.student.roll_no or 999999),
+        )
         total = len(records)
         finished = len([c for c in records if c.final_status in {"received", "not_received"}])
 

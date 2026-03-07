@@ -74,10 +74,10 @@
 {% endwith %}
 
 <td class="text-center">
-    <button class="btn btn-success call-btn"
+    <button class="btn {% if c.final_status == 'received' %}btn-success{% elif c.final_status == 'not_received' %}btn-warning{% else %}btn-primary{% endif %} call-btn"
         data-id="{{c.student.id}}"
         data-phone="{{c.student.father_mobile|default:c.student.mother_mobile|e164_in}}">
-		📞 CALL
+		{% if c.final_status == 'received' %}✅ Received{% elif c.final_status == 'not_received' %}⚠ Not Received{% else %}📞 Pending{% endif %}
 	</button>
 
 </td>
@@ -107,7 +107,7 @@
         </div>
 
         <div class="text-muted small mb-2">
-            {{c.student.enrollment}}
+            {{c.student.batch|default:"-"}} - {{c.student.enrollment}}
         </div>
 
         <div class="d-flex justify-content-between mb-2">
@@ -128,10 +128,10 @@
 
         </div>
 
-        <button class="btn btn-success w-100 call-btn"
+        <button class="btn {% if c.final_status == 'received' %}btn-success{% elif c.final_status == 'not_received' %}btn-warning{% else %}btn-primary{% endif %} w-100 call-btn"
 				data-id="{{c.student.id}}"
 				data-phone="{{c.student.father_mobile|default:c.student.mother_mobile|e164_in}}">
-			📞 Call Parent
+			{% if c.final_status == 'received' %}✅ Received{% elif c.final_status == 'not_received' %}⚠ Not Received{% else %}📞 Pending{% endif %}
 		</button>
 
 
@@ -239,10 +239,15 @@ function markReceived(){
             "X-CSRFToken":"{{csrf_token}}"
         },
         body:`id=${id}&week={{selected_week|default:''}}&status=received&talked=${talked}&duration=${duration}&reason=${reason}`
-    }).then(()=>{
+    }).then(r => r.json())
+      .then(data => {
+        if(!data.ok){
+            alert(data.msg || "Unable to save call");
+            return;
+        }
         clearPendingCall();
         location.reload();
-    });
+      });
 }
 
 function markNotReceived(){
@@ -256,10 +261,15 @@ function markNotReceived(){
             "X-CSRFToken":"{{csrf_token}}"
         },
         body:`id=${id}&week={{selected_week|default:''}}&status=not_received`
-    }).then(()=>{
+    }).then(r => r.json())
+      .then(data => {
+        if(!data.ok){
+            alert(data.msg || "Unable to save call");
+            return;
+        }
         clearPendingCall();
         location.reload();
-    });
+      });
 }
 
 </script>
