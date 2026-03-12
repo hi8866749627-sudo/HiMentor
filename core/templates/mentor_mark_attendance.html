@@ -51,14 +51,13 @@
 
                 <div class="row g-2">
                     {% for s in batch.students %}
-                    <div class="col-6 col-md-2">
-                        <label class="d-flex align-items-center gap-2">
-                            <input type="checkbox"
-                                   name="absent_roll_numbers"
-                                   value="{{ s.roll_no }}"
-                                   {% if s.roll_no in slot.absent_rolls %}checked{% endif %}>
-                            <span class="small">{{ s.roll_no }}</span>
-                        </label>
+                    <div class="col-4 col-md-2">
+                        <button type="button"
+                                class="btn btn-sm roll-btn {% if s.roll_no in slot.absent_rolls %}btn-danger{% else %}btn-outline-success{% endif %}"
+                                data-roll="{{ s.roll_no }}"
+                                data-absent="{% if s.roll_no in slot.absent_rolls %}1{% else %}0{% endif %}">
+                            {{ s.roll_no }}
+                        </button>
                     </div>
                     {% endfor %}
                 </div>
@@ -87,17 +86,40 @@ document.querySelectorAll('.attendance-form').forEach(form => {
     const saveBtn = form.querySelector('.save-btn');
     const allPresentBtn = form.querySelector('.all-present-btn');
     const status = form.querySelector('.save-status');
+    const rollButtons = form.querySelectorAll('.roll-btn');
 
     if (allPresentBtn) {
         allPresentBtn.addEventListener('click', () => {
-            form.querySelectorAll('input[name="absent_roll_numbers"]').forEach(cb => cb.checked = false);
+            rollButtons.forEach(btn => {
+                btn.dataset.absent = "0";
+                btn.classList.remove('btn-danger');
+                btn.classList.add('btn-outline-success');
+            });
             saveBtn.click();
         });
     }
 
+    rollButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const isAbsent = btn.dataset.absent === "1";
+            if (isAbsent) {
+                btn.dataset.absent = "0";
+                btn.classList.remove('btn-danger');
+                btn.classList.add('btn-outline-success');
+            } else {
+                btn.dataset.absent = "1";
+                btn.classList.remove('btn-outline-success');
+                btn.classList.add('btn-danger');
+            }
+        });
+    });
+
     if (saveBtn) {
         saveBtn.addEventListener('click', () => {
             const data = new FormData(form);
+            form.querySelectorAll('.roll-btn[data-absent="1"]').forEach(btn => {
+                data.append('absent_roll_numbers', btn.getAttribute('data-roll'));
+            });
             fetch('/mentor-mark-attendance/save/', {
                 method: 'POST',
                 headers: { 'X-CSRFToken': getCsrfToken(form) },
