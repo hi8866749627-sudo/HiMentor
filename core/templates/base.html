@@ -497,6 +497,9 @@
             <form method="post" action="/switch-module/" class="d-flex align-items-center gap-2 mb-0 module-form">
                 {% csrf_token %}
                 <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                {% if request.session.mentor %}
+                <span class="text-white fw-semibold me-1">Hi {{ request.session.mentor }}</span>
+                {% endif %}
                 <select name="module_id" class="form-select form-select-sm module-select"
                     onchange="this.form.submit()">
                     {% for m in module_list %}
