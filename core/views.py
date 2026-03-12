@@ -4134,7 +4134,9 @@ def mentor_mark_attendance(request):
     batch_rows = []
     for batch, batch_entries in batch_map.items():
         students = list(
-            Student.objects.filter(module=module, batch=batch).order_by("roll_no", "name")
+            Student.objects.filter(module=module)
+            .filter(Q(batch__iexact=batch) | Q(division__iexact=batch))
+            .order_by("roll_no", "name")
         )
         slots = []
         for entry in batch_entries:
