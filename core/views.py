@@ -4384,7 +4384,7 @@ def mentor_load_adjustment(request):
             batch_faculty_subjects.setdefault(be.faculty, set()).add(be.subject)
         batch_faculties = []
         conflict_map = {}
-        conflict_faculties = set(
+        conflict_entries = list(
             TimetableEntry.objects.filter(
                 module=module,
                 day_of_week=day_of_week,
@@ -4392,8 +4392,9 @@ def mentor_load_adjustment(request):
             )
             .exclude(batch=entry.batch)
             .exclude(faculty="")
-            .values_list("faculty", flat=True)
         )
+        conflict_faculties = set(e.faculty for e in conflict_entries if e.faculty)
+        conflict_rooms = {e.faculty: e.room for e in conflict_entries if e.faculty and e.room}
         for fac, subjects in batch_faculty_subjects.items():
             if fac.lower() == mentor.name.lower():
                 continue
@@ -4416,9 +4417,14 @@ def mentor_load_adjustment(request):
                 module=module, date=selected_date, lecture_no=entry.lecture_no, status=LectureAdjustment.STATUS_ACTIVE
             ).exclude(room="").values_list("room", flat=True)
         )
-        available_rooms = sorted(r for r in rooms_base if r and r not in used_rooms)
-        if entry.room and entry.room not in available_rooms:
-            available_rooms.insert(0, entry.room)
+        available_rooms = [{"name": r, "is_conflict": False} for r in sorted(r for r in rooms_base if r and r not in used_rooms)]
+        if entry.room and all(r["name"] != entry.room for r in available_rooms):
+            available_rooms.insert(0, {"name": entry.room, "is_conflict": False})
+        for fac, room in conflict_rooms.items():
+            if not room:
+                continue
+            if all(r["name"] != room for r in available_rooms):
+                available_rooms.insert(0, {"name": room, "is_conflict": True})
         rows.append(
             {
                 "entry": entry,
@@ -4426,6 +4432,7 @@ def mentor_load_adjustment(request):
                 "faculties": batch_faculties,
                 "available_rooms": available_rooms,
                 "slot_started": slot_started,
+                "conflict_rooms": conflict_rooms,
             }
         )
 

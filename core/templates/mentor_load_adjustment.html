@@ -63,7 +63,9 @@
                     <select name="room_select" class="form-select">
                         <option value="">Select</option>
                         {% for r in row.available_rooms %}
-                            <option value="{{ r }}">{{ r }}</option>
+                            <option value="{{ r.name }}" {% if r.is_conflict %}class="text-danger"{% endif %}>
+                                {{ r.name }}{% if r.is_conflict %} (Busy Faculty Room){% endif %}
+                            </option>
                         {% endfor %}
                     </select>
                 </div>
