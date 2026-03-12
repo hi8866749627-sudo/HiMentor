@@ -65,6 +65,20 @@ def normalize_time_slot(value):
     return raw.replace(" ", "")
 
 
+def slot_start_time(value):
+    raw = _clean_text(value)
+    if not raw:
+        return None
+    parts = re.split(r"\s*(?:to|-)\s*", raw, flags=re.IGNORECASE)
+    if not parts:
+        return None
+    start = _parse_time_piece(parts[0])
+    if not start:
+        return None
+    hour, minute = start.split(":")
+    return int(hour), int(minute)
+
+
 def _find_header_row(raw_df):
     for i in range(len(raw_df)):
         row = " ".join(_clean_text(x).lower() for x in raw_df.iloc[i].values)
@@ -192,4 +206,3 @@ def end_date_for_week(calendar, phase, week_no):
     if week_no is None:
         return end
     return start + timedelta(days=(week_no * 7) - 1)
-

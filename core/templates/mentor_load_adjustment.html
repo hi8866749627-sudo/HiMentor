@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h4 class="mb-3">Load Adjustment</h4>
+
+<form method="get" class="row g-2 align-items-end mb-3">
+    <div class="col-md-3">
+        <label class="form-label">Date</label>
+        <input type="date" name="date" class="form-control" value="{{ selected_date|date:'Y-m-d' }}">
+    </div>
+    <div class="col-md-2">
+        <button class="btn btn-primary" type="submit">Show</button>
+    </div>
+</form>
+
+{% for row in rows %}
+<div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Lec {{ row.entry.lecture_no }} · {{ row.entry.time_slot }} · {{ row.entry.batch }} · {{ row.entry.subject }}</span>
+        {% if row.adjustment %}
+            <span class="badge bg-warning text-dark">Proxy</span>
+        {% endif %}
+    </div>
+    <div class="card-body">
+        <div class="mb-2 text-muted small">Room: {{ row.entry.room }}</div>
+
+        {% if row.adjustment %}
+            <div class="alert alert-info">
+                Proxy assigned to <strong>{{ row.adjustment.proxy_faculty.name }}</strong> in room <strong>{{ row.adjustment.room }}</strong>.
+            </div>
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="cancel">
+                <input type="hidden" name="adjustment_id" value="{{ row.adjustment.id }}">
+                <button class="btn btn-outline-danger" type="submit" {% if row.slot_started %}disabled{% endif %}>
+                    Cancel Proxy
+                </button>
+                {% if row.slot_started %}
+                    <span class="text-muted small ms-2">Lecture already started.</span>
+                {% endif %}
+            </form>
+        {% else %}
+            <form method="post" class="row g-2 align-items-end">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="create">
+                <input type="hidden" name="entry_id" value="{{ row.entry.id }}">
+                <div class="col-md-3">
+                    <label class="form-label">Proxy Faculty</label>
+                    <select name="proxy_faculty" class="form-select">
+                        <option value="">Select</option>
+                        {% for f in row.faculties %}
+                            <option value="{{ f }}">{{ f }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Available Room</label>
+                    <select name="room_select" class="form-select">
+                        <option value="">Select</option>
+                        {% for r in row.available_rooms %}
+                            <option value="{{ r }}">{{ r }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Custom Room</label>
+                    <input type="text" name="room_custom" class="form-control" placeholder="Optional">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Remarks</label>
+                    <input type="text" name="remarks" class="form-control" placeholder="Optional">
+                </div>
+                <div class="col-md-1">
+                    <button class="btn btn-primary" type="submit" {% if row.slot_started %}disabled{% endif %}>Save</button>
+                </div>
+                {% if row.slot_started %}
+                    <div class="col-12 text-muted small">Lecture already started. Adjustment not allowed.</div>
+                {% endif %}
+            </form>
+        {% endif %}
+    </div>
+</div>
+{% empty %}
+<div class="alert alert-info">No lectures found for this date.</div>
+{% endfor %}
+
+{% endblock %}

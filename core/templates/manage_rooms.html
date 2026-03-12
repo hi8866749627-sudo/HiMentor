@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h4 class="mb-3">Available Classrooms</h4>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <form method="post" class="row g-2 align-items-end">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="add">
+            <div class="col-md-4">
+                <label class="form-label">Room Name</label>
+                <input type="text" name="name" class="form-control" placeholder="e.g. 517-A">
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-primary" type="submit">Add</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Room</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for r in rooms %}
+                    <tr>
+                        <td>
+                            <form method="post" class="d-flex gap-2 align-items-center">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="update">
+                                <input type="hidden" name="room_id" value="{{ r.id }}">
+                                <input type="text" name="name" class="form-control form-control-sm" value="{{ r.name }}">
+                                <select name="is_active" class="form-select form-select-sm" style="max-width:120px;">
+                                    <option value="1" {% if r.is_active %}selected{% endif %}>Active</option>
+                                    <option value="0" {% if not r.is_active %}selected{% endif %}>Inactive</option>
+                                </select>
+                                <button class="btn btn-sm btn-outline-primary" type="submit">Update</button>
+                            </form>
+                        </td>
+                        <td>
+                            {% if r.is_active %}
+                                <span class="badge bg-success">Active</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Inactive</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <form method="post" class="d-inline">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="room_id" value="{{ r.id }}">
+                                <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="3" class="text-center text-muted">No rooms added.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

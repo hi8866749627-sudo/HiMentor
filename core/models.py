@@ -229,6 +229,52 @@ class LectureAbsence(models.Model):
         return f"{self.session} - {self.student.roll_no}"
 
 
+class Room(models.Model):
+    module = models.ForeignKey(AcademicModule, on_delete=models.CASCADE, related_name="rooms")
+    name = models.CharField(max_length=50)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("module", "name")
+        ordering = ["name"]
+
+    def __str__(self):
+        return f"{self.module.name} - {self.name}"
+
+
+class LectureAdjustment(models.Model):
+    STATUS_ACTIVE = "active"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_CHOICES = [
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_CANCELLED, "Cancelled"),
+    ]
+
+    module = models.ForeignKey(AcademicModule, on_delete=models.CASCADE, related_name="lecture_adjustments")
+    timetable_entry = models.ForeignKey(TimetableEntry, on_delete=models.SET_NULL, null=True, blank=True)
+    date = models.DateField()
+    batch = models.CharField(max_length=30)
+    lecture_no = models.IntegerField()
+    time_slot = models.CharField(max_length=60, blank=True)
+    subject = models.CharField(max_length=120, blank=True)
+    original_faculty = models.CharField(max_length=50, blank=True)
+    proxy_faculty = models.ForeignKey(Mentor, on_delete=models.SET_NULL, null=True, blank=True, related_name="proxy_adjustments")
+    room = models.CharField(max_length=50, blank=True)
+    remarks = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
+    created_by = models.ForeignKey(Mentor, on_delete=models.SET_NULL, null=True, blank=True, related_name="created_adjustments")
+    created_at = models.DateTimeField(auto_now_add=True)
+    cancelled_by = models.CharField(max_length=120, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-date", "lecture_no", "batch"]
+
+    def __str__(self):
+        return f"{self.batch} Lec {self.lecture_no} {self.date:%Y-%m-%d}"
+
+
 
 # ------------------ CALL RECORD ------------------
 class CallRecord(models.Model):

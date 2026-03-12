@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h4 class="mb-3">Load Adjustments (Week View)</h4>
+
+<form method="get" class="row g-2 align-items-end mb-3">
+    <div class="col-md-3">
+        <label class="form-label">Week Start</label>
+        <input type="date" name="start_date" class="form-control" value="{{ week_start|date:'Y-m-d' }}">
+    </div>
+    <div class="col-md-2">
+        <button class="btn btn-primary" type="submit">Show</button>
+    </div>
+    <div class="col-md-6 text-muted small">
+        Showing {{ week_start|date:"d M Y" }} to {{ week_end|date:"d M Y" }}
+    </div>
+</form>
+
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Lecture</th>
+                        <th>Batch</th>
+                        <th>Subject</th>
+                        <th>Original</th>
+                        <th>Proxy</th>
+                        <th>Room</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for a in adjustments %}
+                    <tr>
+                        <td>{{ a.date|date:"d M Y" }}</td>
+                        <td>{{ a.lecture_no }}</td>
+                        <td>{{ a.batch }}</td>
+                        <td>{{ a.subject }}</td>
+                        <td>{{ a.original_faculty }}</td>
+                        <td>{{ a.proxy_faculty.name if a.proxy_faculty }}</td>
+                        <td>{{ a.room }}</td>
+                        <td>
+                            {% if a.status == "active" %}
+                                <span class="badge bg-success">Active</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Cancelled</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if a.status == "active" %}
+                            <form method="post" class="d-inline">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="cancel">
+                                <input type="hidden" name="adjustment_id" value="{{ a.id }}">
+                                <button class="btn btn-sm btn-outline-danger" type="submit">Cancel</button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="9" class="text-center text-muted">No adjustments found.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

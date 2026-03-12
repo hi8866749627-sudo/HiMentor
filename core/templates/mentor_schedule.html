@@ -37,7 +37,14 @@
                         <td>{{ e.lecture_no }}</td>
                         <td>{{ e.time_slot }}</td>
                         <td>{{ e.batch }}</td>
-                        <td>{{ e.subject }}</td>
+                        <td>
+                            {{ e.subject }}
+                            {% if e.status == "proxy" %}
+                                <span class="badge bg-warning text-dark ms-1">Proxy</span>
+                            {% elif e.has_proxy %}
+                                <span class="badge bg-info text-dark ms-1">Proxy Assigned</span>
+                            {% endif %}
+                        </td>
                         <td>{{ e.room }}</td>
                     </tr>
                 {% empty %}

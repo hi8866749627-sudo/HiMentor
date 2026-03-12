@@ -6,7 +6,7 @@ import tempfile
 import threading
 import uuid
 import zipfile
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, time
 from zoneinfo import ZoneInfo
 from django.core.management import call_command
 
@@ -62,6 +62,8 @@ from .models import (
     TimetableUpload,
     LectureSession,
     LectureAbsence,
+    Room,
+    LectureAdjustment,
     WeekLock,
 )
 
@@ -74,6 +76,7 @@ from .lecture_utils import (
     phase_for_date,
     week_for_date,
     end_date_for_week,
+    slot_start_time,
 )
 from .result_utils import import_compiled_bulk_all, import_compiled_result_sheet, import_result_sheet
 from .practical_utils import import_practical_marks, ordered_subjects
@@ -3798,6 +3801,17 @@ def _parse_date_param(raw, fallback=None):
         return fallback
 
 
+def _slot_has_started(slot_date, slot_time):
+    start = slot_start_time(slot_time)
+    if not start:
+        return False
+    if slot_date < timezone.localdate():
+        return True
+    if slot_date > timezone.localdate():
+        return False
+    return timezone.localtime().time() >= time(start[0], start[1])
+
+
 def _normalize_week_no(phase, week_no):
     phase = (phase or "").upper()
     if week_no is None:
@@ -4094,10 +4108,47 @@ def mentor_schedule(request):
     selected_date = _parse_date_param(request.GET.get("date"), timezone.localdate())
     day_of_week = selected_date.weekday()
 
-    entries = (
-        TimetableEntry.objects.filter(module=module, day_of_week=day_of_week, faculty__iexact=mentor.name)
-        .order_by("lecture_no", "time_slot", "batch")
+    adjustments = list(
+        LectureAdjustment.objects.filter(module=module, date=selected_date, status=LectureAdjustment.STATUS_ACTIVE)
+        .select_related("proxy_faculty")
     )
+    adj_map = {(a.batch, a.lecture_no): a for a in adjustments}
+
+    entries = []
+    original_entries = TimetableEntry.objects.filter(
+        module=module, day_of_week=day_of_week, faculty__iexact=mentor.name
+    )
+    for entry in original_entries:
+        adj = adj_map.get((entry.batch, entry.lecture_no))
+        entries.append(
+            {
+                "lecture_no": entry.lecture_no,
+                "time_slot": entry.time_slot,
+                "batch": entry.batch,
+                "subject": entry.subject,
+                "room": entry.room,
+                "status": "original",
+                "proxy_faculty": adj.proxy_faculty.name if adj and adj.proxy_faculty else "",
+                "has_proxy": bool(adj),
+            }
+        )
+
+    for adj in adjustments:
+        if adj.proxy_faculty and adj.proxy_faculty.name.lower() == mentor.name.lower():
+            entries.append(
+                {
+                    "lecture_no": adj.lecture_no,
+                    "time_slot": adj.time_slot,
+                    "batch": adj.batch,
+                    "subject": adj.subject,
+                    "room": adj.room,
+                    "status": "proxy",
+                    "proxy_for": adj.original_faculty,
+                    "has_proxy": True,
+                }
+            )
+
+    entries.sort(key=lambda x: (x["lecture_no"], x["time_slot"], x["batch"]))
     calendar = _calendar_for_module(module)
     return render(
         request,
@@ -4127,9 +4178,31 @@ def mentor_mark_attendance(request):
         TimetableEntry.objects.filter(module=module, day_of_week=day_of_week, faculty__iexact=mentor.name)
         .order_by("batch", "lecture_no")
     )
+    adjustments = list(
+        LectureAdjustment.objects.filter(module=module, date=selected_date, status=LectureAdjustment.STATUS_ACTIVE)
+        .select_related("proxy_faculty")
+    )
+    adj_by_key = {(a.batch, a.lecture_no): a for a in adjustments}
+
     batch_map = {}
     for entry in entries:
-        batch_map.setdefault(entry.batch, []).append(entry)
+        batch_map.setdefault(entry.batch, []).append(
+            {"entry": entry, "adjustment": adj_by_key.get((entry.batch, entry.lecture_no))}
+        )
+
+    for adj in adjustments:
+        if adj.proxy_faculty and adj.proxy_faculty.name.lower() == mentor.name.lower():
+            proxy_entry = TimetableEntry(
+                module=module,
+                day_of_week=day_of_week,
+                lecture_no=adj.lecture_no,
+                time_slot=adj.time_slot,
+                batch=adj.batch,
+                subject=adj.subject,
+                faculty=mentor.name,
+                room=adj.room,
+            )
+            batch_map.setdefault(adj.batch, []).append({"entry": proxy_entry, "adjustment": adj})
 
     def _norm_batch(value):
         return "".join(ch for ch in str(value or "").upper() if ch.isalnum())
@@ -4147,7 +4220,9 @@ def mentor_mark_attendance(request):
     for batch, batch_entries in batch_map.items():
         students = students_by_batch.get(_norm_batch(batch), [])
         slots = []
-        for entry in batch_entries:
+        for item in batch_entries:
+            entry = item["entry"]
+            adj = item.get("adjustment")
             session = LectureSession.objects.filter(
                 module=module, date=selected_date, lecture_no=entry.lecture_no, batch=batch
             ).first()
@@ -4161,6 +4236,7 @@ def mentor_mark_attendance(request):
                     "session": session,
                     "absent_rolls": absent_rolls,
                     "form_id": f"form-{batch}-{entry.lecture_no}",
+                    "adjustment": adj,
                 }
             )
         batch_rows.append(
@@ -4180,6 +4256,219 @@ def mentor_mark_attendance(request):
             "selected_date": selected_date,
             "calendar": calendar,
             "is_holiday": is_holiday,
+        },
+    )
+
+
+def mentor_load_adjustment(request):
+    mentor = _session_mentor_obj(request)
+    if not mentor:
+        return redirect("/")
+
+    module = _active_module(request)
+    selected_date = _parse_date_param(request.GET.get("date"), timezone.localdate())
+    day_of_week = selected_date.weekday()
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip()
+        if action == "create":
+            entry_id = request.POST.get("entry_id")
+            proxy_name = (request.POST.get("proxy_faculty") or "").strip()
+            room_select = (request.POST.get("room_select") or "").strip()
+            room_custom = (request.POST.get("room_custom") or "").strip()
+            remarks = (request.POST.get("remarks") or "").strip()
+            entry = TimetableEntry.objects.filter(id=entry_id, module=module).first()
+            if not entry:
+                messages.error(request, "Lecture not found.")
+                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+
+            if _slot_has_started(selected_date, entry.time_slot):
+                messages.error(request, "Lecture already started. Adjustment not allowed.")
+                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+
+            proxy = Mentor.objects.filter(name__iexact=proxy_name).first()
+            if not proxy:
+                messages.error(request, "Select a valid proxy faculty.")
+                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+
+            room = room_custom or room_select or entry.room
+            LectureAdjustment.objects.update_or_create(
+                module=module,
+                date=selected_date,
+                batch=entry.batch,
+                lecture_no=entry.lecture_no,
+                defaults={
+                    "timetable_entry": entry,
+                    "time_slot": entry.time_slot,
+                    "subject": entry.subject,
+                    "original_faculty": entry.faculty,
+                    "proxy_faculty": proxy,
+                    "room": room,
+                    "remarks": remarks,
+                    "status": LectureAdjustment.STATUS_ACTIVE,
+                    "created_by": mentor,
+                    "cancelled_by": "",
+                    "cancelled_at": None,
+                },
+            )
+            messages.success(request, "Adjustment saved.")
+            return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+
+        if action == "cancel":
+            adj_id = request.POST.get("adjustment_id")
+            adj = LectureAdjustment.objects.filter(id=adj_id, created_by=mentor, status=LectureAdjustment.STATUS_ACTIVE).first()
+            if not adj:
+                messages.error(request, "Adjustment not found or not allowed.")
+                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+            if _slot_has_started(adj.date, adj.time_slot):
+                messages.error(request, "Lecture already started. Cancellation not allowed.")
+                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+            adj.status = LectureAdjustment.STATUS_CANCELLED
+            adj.cancelled_by = mentor.name
+            adj.cancelled_at = timezone.now()
+            adj.save(update_fields=["status", "cancelled_by", "cancelled_at"])
+            messages.success(request, "Adjustment cancelled.")
+            return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+
+    entries = TimetableEntry.objects.filter(
+        module=module, day_of_week=day_of_week, faculty__iexact=mentor.name
+    ).order_by("lecture_no", "batch")
+
+    adjustments = {
+        (a.batch, a.lecture_no): a
+        for a in LectureAdjustment.objects.filter(
+            module=module, date=selected_date, status=LectureAdjustment.STATUS_ACTIVE
+        ).select_related("proxy_faculty")
+    }
+
+    rooms_base = set(
+        list(Room.objects.filter(module=module, is_active=True).values_list("name", flat=True))
+        + list(TimetableEntry.objects.filter(module=module).exclude(room="").values_list("room", flat=True))
+    )
+
+    rows = []
+    for entry in entries:
+        slot_started = _slot_has_started(selected_date, entry.time_slot)
+        batch_faculties = sorted(
+            set(
+                TimetableEntry.objects.filter(module=module, batch=entry.batch)
+                .exclude(faculty="")
+                .values_list("faculty", flat=True)
+            )
+        )
+        used_rooms = set(
+            TimetableEntry.objects.filter(
+                module=module, day_of_week=day_of_week, lecture_no=entry.lecture_no
+            ).exclude(room="").values_list("room", flat=True)
+        )
+        used_rooms |= set(
+            LectureAdjustment.objects.filter(
+                module=module, date=selected_date, lecture_no=entry.lecture_no, status=LectureAdjustment.STATUS_ACTIVE
+            ).exclude(room="").values_list("room", flat=True)
+        )
+        available_rooms = sorted(r for r in rooms_base if r and r not in used_rooms)
+        rows.append(
+            {
+                "entry": entry,
+                "adjustment": adjustments.get((entry.batch, entry.lecture_no)),
+                "faculties": batch_faculties,
+                "available_rooms": available_rooms,
+                "slot_started": slot_started,
+            }
+        )
+
+    return render(
+        request,
+        "mentor_load_adjustment.html",
+        {
+            "mentor": mentor,
+            "rows": rows,
+            "selected_date": selected_date,
+        },
+    )
+
+
+@login_required
+def coordinator_adjustments(request):
+    if request.session.get("mentor"):
+        return redirect("/mentor-dashboard/")
+
+    module = _active_module(request)
+    start_date = _parse_date_param(request.GET.get("start_date"), timezone.localdate())
+    week_start = start_date - timedelta(days=start_date.weekday())
+    week_end = week_start + timedelta(days=6)
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip()
+        if action == "cancel":
+            adj_id = request.POST.get("adjustment_id")
+            adj = LectureAdjustment.objects.filter(id=adj_id, status=LectureAdjustment.STATUS_ACTIVE).first()
+            if not adj:
+                messages.error(request, "Adjustment not found.")
+            elif _slot_has_started(adj.date, adj.time_slot):
+                messages.error(request, "Lecture already started. Cancellation not allowed.")
+            else:
+                adj.status = LectureAdjustment.STATUS_CANCELLED
+                adj.cancelled_by = request.user.username
+                adj.cancelled_at = timezone.now()
+                adj.save(update_fields=["status", "cancelled_by", "cancelled_at"])
+                messages.success(request, "Adjustment cancelled.")
+            return redirect(f"/coordinator-adjustments/?start_date={week_start:%Y-%m-%d}")
+
+    adjustments = LectureAdjustment.objects.filter(
+        module=module,
+        date__gte=week_start,
+        date__lte=week_end,
+    ).select_related("proxy_faculty", "created_by")
+
+    return render(
+        request,
+        "coordinator_adjustments.html",
+        {
+            "module": module,
+            "adjustments": adjustments,
+            "week_start": week_start,
+            "week_end": week_end,
+        },
+    )
+
+
+@login_required
+def manage_rooms(request):
+    if request.session.get("mentor"):
+        return redirect("/mentor-dashboard/")
+
+    module = _active_module(request)
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip()
+        if action == "add":
+            name = (request.POST.get("name") or "").strip()
+            if name:
+                Room.objects.update_or_create(module=module, name=name, defaults={"is_active": True})
+                messages.success(request, "Room added.")
+        elif action == "update":
+            room_id = request.POST.get("room_id")
+            name = (request.POST.get("name") or "").strip()
+            is_active = request.POST.get("is_active") == "1"
+            room = Room.objects.filter(id=room_id, module=module).first()
+            if room and name:
+                room.name = name
+                room.is_active = is_active
+                room.save(update_fields=["name", "is_active"])
+                messages.success(request, "Room updated.")
+        elif action == "delete":
+            room_id = request.POST.get("room_id")
+            Room.objects.filter(id=room_id, module=module).delete()
+            messages.success(request, "Room deleted.")
+        return redirect("/manage-rooms/")
+
+    rooms = Room.objects.filter(module=module).order_by("name")
+    return render(
+        request,
+        "manage_rooms.html",
+        {
+            "module": module,
+            "rooms": rooms,
         },
     )
 
@@ -4328,15 +4617,40 @@ def save_lecture_attendance(request):
     except Exception:
         return JsonResponse({"ok": False, "msg": "Invalid lecture number"}, status=400)
 
-    entry = TimetableEntry.objects.filter(
-        module=module,
-        day_of_week=date_val.weekday(),
-        lecture_no=lecture_no,
-        batch=batch,
-        faculty__iexact=mentor.name,
-    ).first()
-    if not entry:
-        return JsonResponse({"ok": False, "msg": "Timetable entry not found"}, status=404)
+    adjustment_id = request.POST.get("adjustment_id")
+    adjustment = None
+    entry = None
+    if adjustment_id:
+        adjustment = LectureAdjustment.objects.filter(
+            id=adjustment_id,
+            module=module,
+            date=date_val,
+            batch=batch,
+            lecture_no=lecture_no,
+            status=LectureAdjustment.STATUS_ACTIVE,
+            proxy_faculty__name__iexact=mentor.name,
+        ).first()
+        if not adjustment:
+            return JsonResponse({"ok": False, "msg": "Proxy adjustment not found"}, status=404)
+    else:
+        entry = TimetableEntry.objects.filter(
+            module=module,
+            day_of_week=date_val.weekday(),
+            lecture_no=lecture_no,
+            batch=batch,
+            faculty__iexact=mentor.name,
+        ).first()
+        if not entry:
+            return JsonResponse({"ok": False, "msg": "Timetable entry not found"}, status=404)
+        active_adj = LectureAdjustment.objects.filter(
+            module=module,
+            date=date_val,
+            batch=batch,
+            lecture_no=lecture_no,
+            status=LectureAdjustment.STATUS_ACTIVE,
+        ).first()
+        if active_adj and (not active_adj.proxy_faculty or active_adj.proxy_faculty.name.lower() != mentor.name.lower()):
+            return JsonResponse({"ok": False, "msg": "Proxy assigned. Original faculty cannot mark attendance."}, status=403)
 
     session, _ = LectureSession.objects.update_or_create(
         module=module,
@@ -4344,12 +4658,12 @@ def save_lecture_attendance(request):
         lecture_no=lecture_no,
         batch=batch,
         defaults={
-            "timetable_entry": entry,
+            "timetable_entry": entry or adjustment.timetable_entry if adjustment else entry,
             "day_of_week": date_val.weekday(),
-            "time_slot": entry.time_slot,
-            "subject": entry.subject,
-            "faculty": entry.faculty,
-            "room": entry.room,
+            "time_slot": (adjustment.time_slot if adjustment else entry.time_slot),
+            "subject": (adjustment.subject if adjustment else entry.subject),
+            "faculty": mentor.name if adjustment else entry.faculty,
+            "room": (adjustment.room if adjustment else entry.room),
             "marked_by": mentor,
         },
     )
