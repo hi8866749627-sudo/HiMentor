@@ -493,7 +493,7 @@
         </a>
 
         <div class="ms-auto d-flex gap-2 align-items-center top-actions">
-            {% if current_module and module_list %}
+            {% if module_list %}
             <form method="post" action="/switch-module/" class="d-flex align-items-center gap-2 mb-0 module-form">
                 {% csrf_token %}
                 <input type="hidden" name="next" value="{{ request.get_full_path }}">
