@@ -4131,13 +4131,21 @@ def mentor_mark_attendance(request):
     for entry in entries:
         batch_map.setdefault(entry.batch, []).append(entry)
 
+    def _norm_batch(value):
+        return "".join(ch for ch in str(value or "").upper() if ch.isalnum())
+
+    students_all = list(
+        Student.objects.filter(module=module).order_by("roll_no", "name")
+    )
+    students_by_batch = {}
+    for s in students_all:
+        for key in {_norm_batch(s.batch), _norm_batch(s.division)}:
+            if key:
+                students_by_batch.setdefault(key, []).append(s)
+
     batch_rows = []
     for batch, batch_entries in batch_map.items():
-        students = list(
-            Student.objects.filter(module=module)
-            .filter(Q(batch__iexact=batch) | Q(division__iexact=batch))
-            .order_by("roll_no", "name")
-        )
+        students = students_by_batch.get(_norm_batch(batch), [])
         slots = []
         for entry in batch_entries:
             session = LectureSession.objects.filter(
