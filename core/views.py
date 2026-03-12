@@ -4148,6 +4148,7 @@ def mentor_schedule(request):
                 }
             )
 
+    has_proxy_alert = any(e.get("status") == "proxy" for e in entries)
     entries.sort(key=lambda x: (x["lecture_no"], x["time_slot"], x["batch"]))
     calendar = _calendar_for_module(module)
     return render(
@@ -4158,6 +4159,7 @@ def mentor_schedule(request):
             "entries": entries,
             "selected_date": selected_date,
             "calendar": calendar,
+            "has_proxy_alert": has_proxy_alert,
         },
     )
 
@@ -4274,6 +4276,7 @@ def mentor_load_adjustment(request):
         if action == "create":
             entry_id = request.POST.get("entry_id")
             proxy_name = (request.POST.get("proxy_faculty") or "").strip()
+            proxy_subject = (request.POST.get("proxy_subject") or "").strip()
             room_select = (request.POST.get("room_select") or "").strip()
             room_custom = (request.POST.get("room_custom") or "").strip()
             remarks = (request.POST.get("remarks") or "").strip()
@@ -4300,7 +4303,7 @@ def mentor_load_adjustment(request):
                 defaults={
                     "timetable_entry": entry,
                     "time_slot": entry.time_slot,
-                    "subject": entry.subject,
+                    "subject": proxy_subject or entry.subject,
                     "original_faculty": entry.faculty,
                     "proxy_faculty": proxy,
                     "room": room,
@@ -4349,13 +4352,17 @@ def mentor_load_adjustment(request):
     rows = []
     for entry in entries:
         slot_started = _slot_has_started(selected_date, entry.time_slot)
-        batch_faculties = sorted(
-            set(
-                TimetableEntry.objects.filter(module=module, batch=entry.batch)
-                .exclude(faculty="")
-                .values_list("faculty", flat=True)
-            )
-        )
+        batch_faculty_subjects = {}
+        batch_entries = TimetableEntry.objects.filter(module=module, batch=entry.batch).exclude(faculty="")
+        for be in batch_entries:
+            batch_faculty_subjects.setdefault(be.faculty, set()).add(be.subject)
+        batch_faculties = []
+        for fac, subjects in batch_faculty_subjects.items():
+            if fac.lower() == mentor.name.lower():
+                continue
+            subject_label = sorted(s for s in subjects if s)[0] if subjects else ""
+            batch_faculties.append({"name": fac, "subject": subject_label})
+        batch_faculties.sort(key=lambda x: x["name"])
         used_rooms = set(
             TimetableEntry.objects.filter(
                 module=module, day_of_week=day_of_week, lecture_no=entry.lecture_no
@@ -4367,6 +4374,8 @@ def mentor_load_adjustment(request):
             ).exclude(room="").values_list("room", flat=True)
         )
         available_rooms = sorted(r for r in rooms_base if r and r not in used_rooms)
+        if entry.room and entry.room not in available_rooms:
+            available_rooms.insert(0, entry.room)
         rows.append(
             {
                 "entry": entry,

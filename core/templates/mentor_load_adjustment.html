@@ -49,9 +49,10 @@
                     <select name="proxy_faculty" class="form-select">
                         <option value="">Select</option>
                         {% for f in row.faculties %}
-                            <option value="{{ f }}">{{ f }}</option>
+                            <option value="{{ f.name }}" data-subject="{{ f.subject }}">{{ f.name }}{% if f.subject %} - {{ f.subject }}{% endif %}</option>
                         {% endfor %}
                     </select>
+                    <input type="hidden" name="proxy_subject" value="">
                 </div>
                 <div class="col-md-3">
                     <label class="form-label">Available Room</label>
@@ -85,3 +86,15 @@
 {% endfor %}
 
 {% endblock %}
+
+<script>
+document.querySelectorAll('form').forEach(form => {
+    const facultySelect = form.querySelector('select[name="proxy_faculty"]');
+    const subjectInput = form.querySelector('input[name="proxy_subject"]');
+    if (!facultySelect || !subjectInput) return;
+    facultySelect.addEventListener('change', () => {
+        const opt = facultySelect.selectedOptions[0];
+        subjectInput.value = opt ? (opt.getAttribute('data-subject') || '') : '';
+    });
+});
+</script>
