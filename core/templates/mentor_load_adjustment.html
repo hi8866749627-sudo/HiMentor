@@ -104,7 +104,7 @@ document.querySelectorAll('form').forEach(form => {
         if (!roomSelect) return;
         const baseRooms = JSON.parse(roomSelect.getAttribute('data-base-rooms') || '[]');
         const conflictRooms = JSON.parse(roomSelect.getAttribute('data-conflict-rooms') || '{}');
-        const busyRoom = conflictRooms[facultyName] || '';
+        const busyRoom = conflictRooms[(facultyName || '').toLowerCase()] || '';
         const options = [''].concat(baseRooms);
         if (busyRoom && options.indexOf(busyRoom) === -1) {
             options.unshift(busyRoom);

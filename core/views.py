@@ -4396,7 +4396,7 @@ def mentor_load_adjustment(request):
             .exclude(faculty="")
         )
         conflict_faculties = set(e.faculty for e in conflict_entries if e.faculty)
-        conflict_rooms = {e.faculty: e.room for e in conflict_entries if e.faculty and e.room}
+        conflict_rooms = {str(e.faculty).strip().lower(): e.room for e in conflict_entries if e.faculty and e.room}
         for fac, subjects in batch_faculty_subjects.items():
             if fac.lower() == mentor.name.lower():
                 continue
