@@ -261,6 +261,7 @@ class LectureAdjustment(models.Model):
     original_faculty = models.CharField(max_length=50, blank=True)
     proxy_faculty = models.ForeignKey(Mentor, on_delete=models.SET_NULL, null=True, blank=True, related_name="proxy_adjustments")
     room = models.CharField(max_length=50, blank=True)
+    merge_room = models.CharField(max_length=50, blank=True)
     remarks = models.TextField(blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
     created_by = models.ForeignKey(Mentor, on_delete=models.SET_NULL, null=True, blank=True, related_name="created_adjustments")

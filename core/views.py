@@ -4115,10 +4115,17 @@ def mentor_schedule(request):
     adj_map = {(a.batch, a.lecture_no): a for a in adjustments}
 
     entries = []
+    merge_room_map = {
+        (a.date, a.lecture_no): a.merge_room
+        for a in adjustments
+        if a.proxy_faculty and a.proxy_faculty.name.lower() == mentor.name.lower() and a.merge_room
+    }
     original_entries = TimetableEntry.objects.filter(
         module=module, day_of_week=day_of_week, faculty__iexact=mentor.name
     )
     for entry in original_entries:
+        merge_room = merge_room_map.get((selected_date, entry.lecture_no), "")
+        room_val = merge_room or entry.room
         adj = adj_map.get((entry.batch, entry.lecture_no))
         entries.append(
             {
@@ -4126,7 +4133,7 @@ def mentor_schedule(request):
                 "time_slot": entry.time_slot,
                 "batch": entry.batch,
                 "subject": entry.subject,
-                "room": entry.room,
+                "room": room_val,
                 "status": "original",
                 "proxy_faculty": adj.proxy_faculty.name if adj and adj.proxy_faculty else "",
                 "has_proxy": bool(adj),
@@ -4185,6 +4192,11 @@ def mentor_mark_attendance(request):
         .select_related("proxy_faculty")
     )
     adj_by_key = {(a.batch, a.lecture_no): a for a in adjustments}
+    merge_room_by_proxy = {
+        (a.date, a.lecture_no, a.proxy_faculty.name.lower() if a.proxy_faculty else ""): a.merge_room
+        for a in adjustments
+        if a.merge_room and a.proxy_faculty
+    }
 
     batch_map = {}
     for entry in entries:
@@ -4225,6 +4237,9 @@ def mentor_mark_attendance(request):
         for item in batch_entries:
             entry = item["entry"]
             adj = item.get("adjustment")
+            merge_room = merge_room_by_proxy.get((selected_date, entry.lecture_no, mentor.name.lower()), "")
+            if merge_room and entry.faculty.lower() == mentor.name.lower():
+                entry.room = merge_room
             session = LectureSession.objects.filter(
                 module=module, date=selected_date, lecture_no=entry.lecture_no, batch=batch
             ).first()
@@ -4279,6 +4294,7 @@ def mentor_load_adjustment(request):
             proxy_subject = (request.POST.get("proxy_subject") or "").strip()
             room_select = (request.POST.get("room_select") or "").strip()
             room_custom = (request.POST.get("room_custom") or "").strip()
+            merge_room = (request.POST.get("merge_room") or "").strip()
             remarks = (request.POST.get("remarks") or "").strip()
             entry = TimetableEntry.objects.filter(id=entry_id, module=module).first()
             if not entry:
@@ -4294,7 +4310,16 @@ def mentor_load_adjustment(request):
                 messages.error(request, "Select a valid proxy faculty.")
                 return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
 
-            room = room_custom or room_select or entry.room
+            room = merge_room or room_custom or room_select or entry.room
+            conflict = TimetableEntry.objects.filter(
+                module=module,
+                day_of_week=day_of_week,
+                lecture_no=entry.lecture_no,
+                faculty__iexact=proxy.name,
+            ).exclude(batch=entry.batch).exists()
+            if conflict and not merge_room:
+                messages.error(request, "Proxy faculty already has a lecture. Merge room required.")
+                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
             LectureAdjustment.objects.update_or_create(
                 module=module,
                 date=selected_date,
@@ -4307,6 +4332,7 @@ def mentor_load_adjustment(request):
                     "original_faculty": entry.faculty,
                     "proxy_faculty": proxy,
                     "room": room,
+                    "merge_room": merge_room,
                     "remarks": remarks,
                     "status": LectureAdjustment.STATUS_ACTIVE,
                     "created_by": mentor,
@@ -4357,11 +4383,28 @@ def mentor_load_adjustment(request):
         for be in batch_entries:
             batch_faculty_subjects.setdefault(be.faculty, set()).add(be.subject)
         batch_faculties = []
+        conflict_map = {}
+        conflict_faculties = set(
+            TimetableEntry.objects.filter(
+                module=module,
+                day_of_week=day_of_week,
+                lecture_no=entry.lecture_no,
+            )
+            .exclude(batch=entry.batch)
+            .exclude(faculty="")
+            .values_list("faculty", flat=True)
+        )
         for fac, subjects in batch_faculty_subjects.items():
             if fac.lower() == mentor.name.lower():
                 continue
             subject_label = sorted(s for s in subjects if s)[0] if subjects else ""
-            batch_faculties.append({"name": fac, "subject": subject_label})
+            batch_faculties.append(
+                {
+                    "name": fac,
+                    "subject": subject_label,
+                    "has_conflict": fac in conflict_faculties,
+                }
+            )
         batch_faculties.sort(key=lambda x: x["name"])
         used_rooms = set(
             TimetableEntry.objects.filter(

@@ -49,10 +49,14 @@
                     <select name="proxy_faculty" class="form-select">
                         <option value="">Select</option>
                         {% for f in row.faculties %}
-                            <option value="{{ f.name }}" data-subject="{{ f.subject }}">{{ f.name }}{% if f.subject %} - {{ f.subject }}{% endif %}</option>
+                            <option value="{{ f.name }}" data-subject="{{ f.subject }}" data-conflict="{{ f.has_conflict|yesno:'1,0' }}"
+                                {% if f.has_conflict %}class="text-danger"{% endif %}>
+                                {{ f.name }}{% if f.subject %} - {{ f.subject }}{% endif %}{% if f.has_conflict %} (Busy){% endif %}
+                            </option>
                         {% endfor %}
                     </select>
                     <input type="hidden" name="proxy_subject" value="">
+                    <input type="hidden" name="merge_room" value="">
                 </div>
                 <div class="col-md-3">
                     <label class="form-label">Available Room</label>
@@ -91,10 +95,31 @@
 document.querySelectorAll('form').forEach(form => {
     const facultySelect = form.querySelector('select[name="proxy_faculty"]');
     const subjectInput = form.querySelector('input[name="proxy_subject"]');
-    if (!facultySelect || !subjectInput) return;
+    const mergeInput = form.querySelector('input[name="merge_room"]');
+    if (!facultySelect || !subjectInput || !mergeInput) return;
     facultySelect.addEventListener('change', () => {
         const opt = facultySelect.selectedOptions[0];
         subjectInput.value = opt ? (opt.getAttribute('data-subject') || '') : '';
+        const conflict = opt && opt.getAttribute('data-conflict') === '1';
+        if (conflict) {
+            const ok = window.confirm('Selected faculty already has a lecture in this slot. Merge?');
+            if (!ok) {
+                facultySelect.value = '';
+                subjectInput.value = '';
+                mergeInput.value = '';
+                return;
+            }
+            const room = window.prompt('Enter merge room number (both batches will use this room):', '');
+            if (!room) {
+                facultySelect.value = '';
+                subjectInput.value = '';
+                mergeInput.value = '';
+                return;
+            }
+            mergeInput.value = room;
+        } else {
+            mergeInput.value = '';
+        }
     });
 });
 </script>
