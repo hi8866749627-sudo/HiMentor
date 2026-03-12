@@ -4416,8 +4416,29 @@ def mentor_load_adjustment(request):
             .exclude(batch=entry.batch)
             .exclude(faculty="")
         )
+        conflict_adjustments = list(
+            LectureAdjustment.objects.filter(
+                module=module,
+                date=selected_date,
+                lecture_no=entry.lecture_no,
+                status=LectureAdjustment.STATUS_ACTIVE,
+            )
+            .exclude(batch=entry.batch)
+            .select_related("proxy_faculty")
+        )
         conflict_faculties = set(e.faculty for e in conflict_entries if e.faculty)
-        conflict_rooms = {str(e.faculty).strip().lower(): e.room for e in conflict_entries if e.faculty and e.room}
+        conflict_rooms = {
+            str(e.faculty).strip().lower(): e.room
+            for e in conflict_entries
+            if e.faculty and e.room
+        }
+        for adj in conflict_adjustments:
+            faculty_name = (adj.proxy_faculty.name if adj.proxy_faculty else adj.original_faculty or "").strip()
+            if not faculty_name:
+                continue
+            conflict_faculties.add(faculty_name)
+            if adj.room:
+                conflict_rooms[faculty_name.lower()] = adj.room
         for fac, subjects in batch_faculty_subjects.items():
             if fac.lower() == mentor.name.lower():
                 continue
