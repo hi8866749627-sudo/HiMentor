@@ -82,9 +82,19 @@
                 <tbody>
                 {% for h in holidays %}
                     <tr>
-                        <td>{{ h.date|date:"d M Y" }}</td>
-                        <td>{{ h.label }}</td>
+                        <td>
+                            <form method="post" class="d-flex align-items-center gap-2 mb-0">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="holiday_update">
+                                <input type="hidden" name="holiday_id" value="{{ h.id }}">
+                                <input type="date" name="holiday_date" class="form-control form-control-sm" value="{{ h.date|date:'Y-m-d' }}">
+                        </td>
+                        <td>
+                                <input type="text" name="holiday_label" class="form-control form-control-sm" value="{{ h.label }}">
+                        </td>
                         <td class="text-end">
+                                <button class="btn btn-sm btn-outline-primary me-2" type="submit">Edit</button>
+                            </form>
                             <form method="post" class="d-inline">
                                 {% csrf_token %}
                                 <input type="hidden" name="action" value="holiday_delete">

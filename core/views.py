@@ -4088,6 +4088,27 @@ def academic_calendar(request):
                 messages.error(request, "Select a valid holiday date.")
             return redirect("/academic-calendar/")
 
+        if action == "holiday_update":
+            holiday_id = request.POST.get("holiday_id")
+            holiday_date = _parse_date_param(request.POST.get("holiday_date"))
+            label = (request.POST.get("holiday_label") or "").strip()
+            holiday = AcademicHoliday.objects.filter(id=holiday_id, module=module).first()
+            if not holiday:
+                messages.error(request, "Holiday not found.")
+            elif not holiday_date:
+                messages.error(request, "Select a valid holiday date.")
+            else:
+                conflict = AcademicHoliday.objects.filter(module=module, date=holiday_date).exclude(id=holiday.id).exists()
+                if conflict:
+                    messages.error(request, "Another holiday already exists on that date.")
+                else:
+                    holiday.date = holiday_date
+                    holiday.label = label
+                    holiday.is_active = True
+                    holiday.save(update_fields=["date", "label", "is_active"])
+                    messages.success(request, "Holiday updated.")
+            return redirect("/academic-calendar/")
+
         if action == "holiday_delete":
             holiday_id = request.POST.get("holiday_id")
             AcademicHoliday.objects.filter(id=holiday_id, module=module).delete()
