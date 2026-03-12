@@ -13,6 +13,17 @@
     padding: .55rem 0;
     border-bottom: 1px solid #eef1f4;
 }
+.slot-card {
+    padding: .55rem 0;
+    border-bottom: 1px solid #eef1f4;
+}
+.slot-card:last-child {
+    border-bottom: 0;
+}
+.slot-card .attendance-form {
+    display: block;
+    width: 100%;
+}
 .compact-slot-row:last-child {
     border-bottom: 0;
 }
@@ -31,6 +42,7 @@
     display: flex;
     flex-wrap: nowrap;
     gap: .2rem;
+    min-width: 0;
     overflow-x: auto;
     overflow-y: hidden;
     white-space: nowrap;
@@ -99,7 +111,7 @@
     </div>
     <div class="card-body py-2">
         {% for slot in batch.slots %}
-        <div class="slot-card compact-slot-row" data-batch="{{ batch.batch }}">
+        <div class="slot-card" data-batch="{{ batch.batch }}">
             <form class="attendance-form">
                 {% csrf_token %}
                 <input type="hidden" name="date" value="{{ selected_date|date:'Y-m-d' }}">
