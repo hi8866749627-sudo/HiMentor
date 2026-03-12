@@ -41,7 +41,7 @@
                         <td>{{ a.batch }}</td>
                         <td>{{ a.subject }}</td>
                         <td>{{ a.original_faculty }}</td>
-                        <td>{{ a.proxy_faculty.name if a.proxy_faculty }}</td>
+                        <td>{% if a.proxy_faculty %}{{ a.proxy_faculty.name }}{% endif %}</td>
                         <td>{{ a.room }}</td>
                         <td>
                             {% if a.status == "active" %}
