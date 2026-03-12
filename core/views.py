@@ -6,6 +6,7 @@ import tempfile
 import threading
 import uuid
 import zipfile
+from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 from django.core.management import call_command
 
@@ -39,6 +40,9 @@ from .forms import UploadFileForm
 from .models import (
     AcademicModule,
     Attendance,
+    AcademicCalendar,
+    AcademicHoliday,
+    AttendanceWeekMeta,
     CallRecord,
     CoordinatorModuleAccess,
     Mentor,
@@ -54,12 +58,23 @@ from .models import (
     StudentResult,
     Subject,
     SubjectTemplate,
+    TimetableEntry,
+    TimetableUpload,
+    LectureSession,
+    LectureAbsence,
     WeekLock,
 )
 
 # ---------- LOCAL UTILITIES ----------
 from .utils import import_students_from_excel, resolve_mentor_identity
 from .attendance_utils import import_attendance
+from .lecture_utils import (
+    parse_timetable_excel,
+    phase_range,
+    phase_for_date,
+    week_for_date,
+    end_date_for_week,
+)
 from .result_utils import import_compiled_bulk_all, import_compiled_result_sheet, import_result_sheet
 from .practical_utils import import_practical_marks, ordered_subjects
 from .pdf_report import generate_student_pdf, generate_student_prefilled_pdf
@@ -683,6 +698,11 @@ def upload_attendance(request):
 
         # import
         count = import_attendance(weekly_file, overall_file, week_no, module, rule)
+        AttendanceWeekMeta.objects.update_or_create(
+            module=module,
+            week_no=week_no,
+            defaults={"source": AttendanceWeekMeta.SOURCE_MANUAL},
+        )
 
         # mentor-wise counts
         mentor_stats = list(
@@ -3755,3 +3775,999 @@ def mentor_semester_register(request):
             "rows": table,
         },
     )
+
+
+# ---------------- DAILY ATTENDANCE (TIMETABLE) ----------------
+
+def _calendar_for_module(module):
+    return AcademicCalendar.objects.filter(module=module).first()
+
+
+def _holiday_set(module):
+    return set(
+        AcademicHoliday.objects.filter(module=module, is_active=True).values_list("date", flat=True)
+    )
+
+
+def _parse_date_param(raw, fallback=None):
+    if not raw:
+        return fallback
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d").date()
+    except Exception:
+        return fallback
+
+
+def _normalize_week_no(phase, week_no):
+    phase = (phase or "").upper()
+    if week_no is None:
+        return None
+    if phase == "T1":
+        return week_no
+    if phase == "T2":
+        return 100 + week_no
+    if phase == "T3":
+        return 200 + week_no
+    if phase == "T4":
+        return 300 + week_no
+    return week_no
+
+
+def _attendance_lock_for_module_week(module, week_no):
+    return WeekLock.objects.filter(module=module, week_no=week_no, locked=True).exists()
+
+
+def _has_manual_week(module, week_no):
+    return AttendanceWeekMeta.objects.filter(
+        module=module, week_no=week_no, source=AttendanceWeekMeta.SOURCE_MANUAL
+    ).exists()
+
+
+def _create_calls_for_week(module, week_no):
+    qs = Attendance.objects.filter(student__module=module, week_no=week_no, call_required=True)
+    created = 0
+    for att in qs.select_related("student"):
+        if not CallRecord.objects.filter(student=att.student, week_no=week_no).exists():
+            CallRecord.objects.create(student=att.student, week_no=week_no)
+            created += 1
+    return created
+
+
+def recompute_weekly_attendance_from_daily(module, phase, week_no):
+    calendar = _calendar_for_module(module)
+    start, end = phase_range(calendar, phase)
+    if not start or not end:
+        return 0, "Academic calendar not configured."
+
+    end_date = end_date_for_week(calendar, phase, week_no)
+    if end_date and end_date > end:
+        end_date = end
+    if not end_date:
+        return 0, "Week range invalid."
+
+    sessions = list(
+        LectureSession.objects.filter(
+            module=module,
+            date__gte=start,
+            date__lte=end_date,
+        )
+    )
+    if not sessions:
+        return 0, "No lecture sessions found for selected week."
+
+    session_ids = [s.id for s in sessions]
+    absences = LectureAbsence.objects.filter(session_id__in=session_ids).select_related("student", "session")
+
+    held_by_batch = {}
+    for s in sessions:
+        held_by_batch.setdefault(s.batch, 0)
+        held_by_batch[s.batch] += 1
+
+    absent_by_student = {}
+    for a in absences:
+        absent_by_student[a.student_id] = absent_by_student.get(a.student_id, 0) + 1
+
+    normalized_week = _normalize_week_no(phase, week_no)
+    updated = 0
+    for student in Student.objects.filter(module=module):
+        held = held_by_batch.get(student.batch or "", 0)
+        absent = absent_by_student.get(student.id, 0)
+        attended = max(held - absent, 0)
+        pct = round((attended / held) * 100, 2) if held else 0
+        Attendance.objects.update_or_create(
+            week_no=normalized_week,
+            student=student,
+            defaults={
+                "week_percentage": pct,
+                "overall_percentage": pct,
+                "call_required": pct < 80,
+            },
+        )
+        updated += 1
+
+    AttendanceWeekMeta.objects.update_or_create(
+        module=module,
+        week_no=normalized_week,
+        defaults={"source": AttendanceWeekMeta.SOURCE_AUTO},
+    )
+    _create_calls_for_week(module, normalized_week)
+    return updated, None
+
+
+@login_required
+def upload_timetable(request):
+    if request.session.get("mentor"):
+        return redirect("/mentor-dashboard/")
+
+    module = _active_module(request)
+    form = UploadFileForm(request.POST or None, request.FILES or None)
+    uploads = TimetableUpload.objects.filter(module=module).order_by("-uploaded_at")[:5]
+
+    if request.method == "POST" and request.POST.get("action") == "delete_all":
+        TimetableEntry.objects.filter(module=module).delete()
+        TimetableUpload.objects.filter(module=module).delete()
+        messages.success(request, "All timetable entries deleted.")
+        return redirect("/upload-timetable/")
+
+    if request.method == "POST" and form.is_valid():
+        file = form.cleaned_data["file"]
+        try:
+            entries, sheet_name = parse_timetable_excel(file)
+        except Exception as exc:
+            messages.error(request, f"Unable to parse timetable: {exc}")
+            return render(
+                request,
+                "upload_timetable.html",
+                {"form": form, "uploads": uploads, "module": module},
+            )
+
+        TimetableEntry.objects.filter(module=module).delete()
+        created = 0
+        skipped = 0
+        for entry in entries:
+            batch = (entry.get("batch") or "").strip()
+            subject = (entry.get("subject") or "").strip()
+            if not batch or not subject:
+                skipped += 1
+                continue
+            faculty = (entry.get("faculty") or "").strip().upper()
+            if faculty:
+                Mentor.objects.get_or_create(name=faculty)
+            TimetableEntry.objects.update_or_create(
+                module=module,
+                day_of_week=entry["day_of_week"],
+                lecture_no=entry["lecture_no"],
+                batch=batch,
+                defaults={
+                    "time_slot": entry.get("time_slot") or "",
+                    "subject": subject,
+                    "faculty": faculty,
+                    "room": (entry.get("room") or "").strip(),
+                    "is_active": True,
+                },
+            )
+            created += 1
+
+        TimetableUpload.objects.create(
+            module=module,
+            uploaded_by=request.user.username,
+            source_name=getattr(file, "name", "")[:255],
+            rows_total=len(entries),
+            rows_created=created,
+            rows_skipped=skipped,
+        )
+        messages.success(
+            request,
+            f"Timetable uploaded ({sheet_name}). Entries created: {created}, skipped: {skipped}.",
+        )
+        return redirect("/upload-timetable/")
+
+    return render(
+        request,
+        "upload_timetable.html",
+        {"form": form, "uploads": uploads, "module": module},
+    )
+
+
+@login_required
+def view_timetable(request):
+    module = _active_module(request)
+    day_filter = request.GET.get("day")
+    batch_filter = (request.GET.get("batch") or "").strip()
+    faculty_filter = (request.GET.get("faculty") or "").strip()
+
+    qs = TimetableEntry.objects.filter(module=module).order_by("day_of_week", "lecture_no", "batch")
+    if day_filter and str(day_filter).isdigit():
+        qs = qs.filter(day_of_week=int(day_filter))
+    if batch_filter:
+        qs = qs.filter(batch__iexact=batch_filter)
+    if faculty_filter:
+        qs = qs.filter(faculty__icontains=faculty_filter)
+
+    day_choices = TimetableEntry.DAY_CHOICES
+    batches_all = sorted(
+        set(
+            TimetableEntry.objects.filter(module=module).values_list("batch", flat=True)
+        )
+    )
+
+    grouped = {}
+    for entry in qs:
+        day_key = entry.day_of_week
+        grouped.setdefault(day_key, []).append(entry)
+
+    day_tables = []
+    for day_key, entries in grouped.items():
+        batch_set = sorted({e.batch for e in entries})
+        lectures = sorted({e.lecture_no for e in entries})
+        time_map = {}
+        cell_map = {}
+        for e in entries:
+            time_map[e.lecture_no] = e.time_slot
+            cell_map.setdefault(e.lecture_no, {})[e.batch] = e
+        day_tables.append(
+            {
+                "day": dict(day_choices).get(day_key, str(day_key)),
+                "day_key": day_key,
+                "batches": batch_set,
+                "lectures": lectures,
+                "time_map": time_map,
+                "cell_map": cell_map,
+            }
+        )
+
+    day_tables.sort(key=lambda d: d["day_key"])
+
+    return render(
+        request,
+        "view_timetable.html",
+        {
+            "day_filter": day_filter,
+            "batch_filter": batch_filter,
+            "faculty_filter": faculty_filter,
+            "day_choices": day_choices,
+            "batches": batches_all,
+            "day_tables": day_tables,
+            "module": module,
+        },
+    )
+
+
+@login_required
+def academic_calendar(request):
+    if request.session.get("mentor"):
+        return redirect("/mentor-dashboard/")
+
+    module = _active_module(request)
+    calendar, _ = AcademicCalendar.objects.get_or_create(module=module)
+    holidays = AcademicHoliday.objects.filter(module=module).order_by("-date")
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip()
+        if action == "calendar":
+            calendar.is_active = bool(request.POST.get("is_active"))
+            calendar.t1_start = _parse_date_param(request.POST.get("t1_start"))
+            calendar.t1_end = _parse_date_param(request.POST.get("t1_end"))
+            calendar.t2_start = _parse_date_param(request.POST.get("t2_start"))
+            calendar.t2_end = _parse_date_param(request.POST.get("t2_end"))
+            calendar.t3_start = _parse_date_param(request.POST.get("t3_start"))
+            calendar.t3_end = _parse_date_param(request.POST.get("t3_end"))
+            calendar.t4_start = _parse_date_param(request.POST.get("t4_start"))
+            calendar.t4_end = _parse_date_param(request.POST.get("t4_end"))
+            calendar.save()
+            messages.success(request, "Academic calendar updated.")
+            return redirect("/academic-calendar/")
+
+        if action == "holiday_add":
+            holiday_date = _parse_date_param(request.POST.get("holiday_date"))
+            label = (request.POST.get("holiday_label") or "").strip()
+            if holiday_date:
+                AcademicHoliday.objects.update_or_create(
+                    module=module,
+                    date=holiday_date,
+                    defaults={"label": label, "is_active": True},
+                )
+                messages.success(request, "Holiday added.")
+            else:
+                messages.error(request, "Select a valid holiday date.")
+            return redirect("/academic-calendar/")
+
+        if action == "holiday_delete":
+            holiday_id = request.POST.get("holiday_id")
+            AcademicHoliday.objects.filter(id=holiday_id, module=module).delete()
+            messages.info(request, "Holiday removed.")
+            return redirect("/academic-calendar/")
+
+    return render(
+        request,
+        "academic_calendar.html",
+        {"calendar": calendar, "holidays": holidays, "module": module},
+    )
+
+
+def mentor_schedule(request):
+    mentor = _session_mentor_obj(request)
+    if not mentor:
+        return redirect("/")
+
+    module = _active_module(request)
+    selected_date = _parse_date_param(request.GET.get("date"), timezone.localdate())
+    day_of_week = selected_date.weekday()
+
+    entries = (
+        TimetableEntry.objects.filter(module=module, day_of_week=day_of_week, faculty__iexact=mentor.name)
+        .order_by("lecture_no", "time_slot", "batch")
+    )
+    calendar = _calendar_for_module(module)
+    return render(
+        request,
+        "mentor_schedule.html",
+        {
+            "mentor": mentor,
+            "entries": entries,
+            "selected_date": selected_date,
+            "calendar": calendar,
+        },
+    )
+
+
+def mentor_mark_attendance(request):
+    mentor = _session_mentor_obj(request)
+    if not mentor:
+        return redirect("/")
+
+    module = _active_module(request)
+    selected_date = _parse_date_param(request.GET.get("date"), timezone.localdate())
+    day_of_week = selected_date.weekday()
+    calendar = _calendar_for_module(module)
+    holiday_dates = _holiday_set(module)
+    is_holiday = selected_date.weekday() == 6 or selected_date in holiday_dates
+
+    entries = (
+        TimetableEntry.objects.filter(module=module, day_of_week=day_of_week, faculty__iexact=mentor.name)
+        .order_by("batch", "lecture_no")
+    )
+    batch_map = {}
+    for entry in entries:
+        batch_map.setdefault(entry.batch, []).append(entry)
+
+    batch_rows = []
+    for batch, batch_entries in batch_map.items():
+        students = list(
+            Student.objects.filter(module=module, batch=batch).order_by("roll_no", "name")
+        )
+        slots = []
+        for entry in batch_entries:
+            session = LectureSession.objects.filter(
+                module=module, date=selected_date, lecture_no=entry.lecture_no, batch=batch
+            ).first()
+            absent_rolls = set()
+            if session:
+                absences = LectureAbsence.objects.filter(session=session).select_related("student")
+                absent_rolls = {a.student.roll_no for a in absences if a.student.roll_no is not None}
+            slots.append(
+                {
+                    "entry": entry,
+                    "session": session,
+                    "absent_rolls": absent_rolls,
+                    "form_id": f"form-{batch}-{entry.lecture_no}",
+                }
+            )
+        batch_rows.append(
+            {
+                "batch": batch,
+                "students": students,
+                "slots": slots,
+            }
+        )
+
+    return render(
+        request,
+        "mentor_mark_attendance.html",
+        {
+            "mentor": mentor,
+            "batch_rows": batch_rows,
+            "selected_date": selected_date,
+            "calendar": calendar,
+            "is_holiday": is_holiday,
+        },
+    )
+
+
+def mentor_daily_absentees(request):
+    mentor = _session_mentor_obj(request)
+    if not mentor:
+        return redirect("/")
+
+    module = _active_module(request)
+    date_val = _parse_date_param(request.GET.get("date"), timezone.localdate())
+    calendar = _calendar_for_module(module)
+    phase, week_no = week_for_date(calendar, date_val)
+    day_no = date_val.weekday() + 1
+
+    sessions = LectureSession.objects.filter(module=module, date=date_val)
+    absences = (
+        LectureAbsence.objects.filter(session__in=sessions, student__mentor=mentor)
+        .select_related("student", "session")
+        .order_by("student__roll_no", "session__lecture_no")
+    )
+
+    student_map = {}
+    for a in absences:
+        entry = student_map.setdefault(
+            a.student_id,
+            {
+                "student": a.student,
+                "count": 0,
+                "details": [],
+            },
+        )
+        entry["count"] += 1
+        entry["details"].append(
+            {
+                "lecture_no": a.session.lecture_no,
+                "subject": a.session.subject,
+                "batch": a.session.batch,
+            }
+        )
+
+    records = []
+    for item in student_map.values():
+        student = item["student"]
+        call = (
+            OtherCallRecord.objects.filter(
+                mentor=mentor,
+                student=student,
+                call_category="less_attendance",
+                created_at__date=date_val,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+        if not call:
+            call = OtherCallRecord.objects.create(
+                mentor=mentor,
+                student=student,
+                call_category="less_attendance",
+            )
+        records.append(
+            {
+                "call": call,
+                "absent_count": item["count"],
+                "details": item["details"],
+            }
+        )
+
+    return render(
+        request,
+        "mentor_daily_absentees.html",
+        {
+            "mentor": mentor,
+            "records": records,
+            "selected_date": date_val,
+            "week_no": week_no or 1,
+            "day_no": day_no,
+            "calendar": calendar,
+        },
+    )
+
+
+@login_required
+def attendance_fill_status(request):
+    if request.session.get("mentor"):
+        return redirect("/mentor-dashboard/")
+
+    module = _active_module(request)
+    date_val = _parse_date_param(request.GET.get("date"), timezone.localdate())
+    day_of_week = date_val.weekday()
+
+    expected_entries = TimetableEntry.objects.filter(module=module, day_of_week=day_of_week)
+    expected_map = {}
+    for entry in expected_entries:
+        faculty = (entry.faculty or "").strip().upper()
+        expected_map.setdefault(faculty, []).append(entry)
+
+    sessions = LectureSession.objects.filter(module=module, date=date_val)
+    session_map = {}
+    for sess in sessions:
+        faculty = (sess.faculty or "").strip().upper()
+        session_map.setdefault(faculty, []).append(sess)
+
+    rows = []
+    for faculty, entries in expected_map.items():
+        marked = session_map.get(faculty, [])
+        marked_keys = {(m.batch, m.lecture_no) for m in marked}
+        missing = [e for e in entries if (e.batch, e.lecture_no) not in marked_keys]
+        rows.append(
+            {
+                "faculty": faculty,
+                "expected": len(entries),
+                "marked": len(marked),
+                "pending": len(missing),
+                "missing": missing,
+            }
+        )
+
+    rows.sort(key=lambda r: (r["pending"], r["faculty"]))
+    return render(
+        request,
+        "attendance_fill_status.html",
+        {
+            "module": module,
+            "selected_date": date_val,
+            "rows": rows,
+        },
+    )
+
+
+@require_http_methods(["POST"])
+def save_lecture_attendance(request):
+    mentor = _session_mentor_obj(request)
+    if not mentor:
+        return JsonResponse({"ok": False, "msg": "Unauthorized"}, status=401)
+
+    module = _active_module(request)
+    date_val = _parse_date_param(request.POST.get("date"))
+    batch = (request.POST.get("batch") or "").strip()
+    lecture_no_raw = request.POST.get("lecture_no")
+    if not date_val or not batch or not lecture_no_raw:
+        return JsonResponse({"ok": False, "msg": "Missing required fields"}, status=400)
+
+    try:
+        lecture_no = int(lecture_no_raw)
+    except Exception:
+        return JsonResponse({"ok": False, "msg": "Invalid lecture number"}, status=400)
+
+    entry = TimetableEntry.objects.filter(
+        module=module,
+        day_of_week=date_val.weekday(),
+        lecture_no=lecture_no,
+        batch=batch,
+        faculty__iexact=mentor.name,
+    ).first()
+    if not entry:
+        return JsonResponse({"ok": False, "msg": "Timetable entry not found"}, status=404)
+
+    session, _ = LectureSession.objects.update_or_create(
+        module=module,
+        date=date_val,
+        lecture_no=lecture_no,
+        batch=batch,
+        defaults={
+            "timetable_entry": entry,
+            "day_of_week": date_val.weekday(),
+            "time_slot": entry.time_slot,
+            "subject": entry.subject,
+            "faculty": entry.faculty,
+            "room": entry.room,
+            "marked_by": mentor,
+        },
+    )
+
+    LectureAbsence.objects.filter(session=session).delete()
+    absent_rolls = request.POST.getlist("absent_roll_numbers")
+    for roll in absent_rolls:
+        try:
+            roll_no = int(str(roll).strip())
+        except Exception:
+            continue
+        student = Student.objects.filter(module=module, batch=batch, roll_no=roll_no).first()
+        if not student:
+            continue
+        LectureAbsence.objects.create(session=session, student=student, marked_by=mentor)
+
+    calendar = _calendar_for_module(module)
+    phase, week_no = week_for_date(calendar, date_val)
+    if phase and week_no:
+        normalized_week = _normalize_week_no(phase, week_no)
+        if not _attendance_lock_for_module_week(module, normalized_week) and not _has_manual_week(module, normalized_week):
+            recompute_weekly_attendance_from_daily(module, phase, week_no)
+
+    return JsonResponse({"ok": True})
+
+
+def attendance_analytics(request):
+    mentor = _session_mentor_obj(request)
+    if not mentor and not request.user.is_authenticated:
+        return redirect("/")
+
+    module = _active_module(request)
+    calendar = _calendar_for_module(module)
+    phase = (request.GET.get("phase") or "T1").upper()
+    week_param = (request.GET.get("week") or "all").strip().lower()
+    week_no = None if week_param in {"all", ""} else int(week_param) + 1
+    batch_filter = (request.GET.get("batch") or "").strip()
+    search = (request.GET.get("search") or "").strip()
+
+    start, end = phase_range(calendar, phase)
+    if not start or not end:
+        return render(
+            request,
+            "attendance_analytics.html",
+            {
+                "module": module,
+                "calendar": calendar,
+                "phase": phase,
+                "week_param": week_param,
+                "batch_filter": batch_filter,
+                "search": search,
+                "rows": [],
+                "week_list": [],
+                "subject_list": [],
+                "message": "Set the academic calendar first.",
+            },
+        )
+
+    end_date = end_date_for_week(calendar, phase, week_no)
+    if end_date and end_date > end:
+        end_date = end
+
+    sessions_qs = LectureSession.objects.filter(
+        module=module,
+        date__gte=start,
+        date__lte=end_date or end,
+    )
+    if batch_filter:
+        sessions_qs = sessions_qs.filter(batch=batch_filter)
+    sessions = list(sessions_qs)
+
+    session_ids = [s.id for s in sessions]
+    absences = LectureAbsence.objects.filter(session_id__in=session_ids).select_related("session", "student")
+
+    students_qs = Student.objects.filter(module=module)
+    if batch_filter:
+        students_qs = students_qs.filter(batch=batch_filter)
+    if search:
+        search_q = Q(name__icontains=search) | Q(enrollment__icontains=search)
+        if search.isdigit():
+            search_q |= Q(roll_no=int(search))
+        students_qs = students_qs.filter(search_q)
+    students = list(students_qs.order_by("roll_no", "name"))
+
+    held_by_batch = {}
+    held_by_batch_subject = {}
+    held_by_batch_week = {}
+    subject_set = set()
+    week_set = set()
+
+    for s in sessions:
+        held_by_batch.setdefault(s.batch, 0)
+        held_by_batch[s.batch] += 1
+        subj = (s.subject or "").strip()
+        subject_set.add(subj)
+        held_by_batch_subject.setdefault(s.batch, {}).setdefault(subj, 0)
+        held_by_batch_subject[s.batch][subj] += 1
+        _, week_idx = week_for_date(calendar, s.date)
+        if week_idx:
+            week_set.add(week_idx)
+            held_by_batch_week.setdefault(s.batch, {}).setdefault(week_idx, 0)
+            held_by_batch_week[s.batch][week_idx] += 1
+
+    absent_by_student = {}
+    absent_by_student_subject = {}
+    absent_by_student_week = {}
+    for a in absences:
+        sid = a.student_id
+        absent_by_student[sid] = absent_by_student.get(sid, 0) + 1
+        subj = (a.session.subject or "").strip()
+        absent_by_student_subject.setdefault(sid, {}).setdefault(subj, 0)
+        absent_by_student_subject[sid][subj] += 1
+        _, week_idx = week_for_date(calendar, a.session.date)
+        if week_idx:
+            absent_by_student_week.setdefault(sid, {}).setdefault(week_idx, 0)
+            absent_by_student_week[sid][week_idx] += 1
+
+    subject_list = [s for s in sorted(subject_set) if s]
+    week_list = sorted(week_set)
+
+    rows = []
+    for student in students:
+        batch = student.batch or ""
+        held_total = held_by_batch.get(batch, 0)
+        absent_total = absent_by_student.get(student.id, 0)
+        attended_total = max(held_total - absent_total, 0)
+        percent = round((attended_total / held_total) * 100, 1) if held_total else 0
+
+        week_rows = []
+        for wk in week_list:
+            held_w = held_by_batch_week.get(batch, {}).get(wk, 0)
+            absent_w = absent_by_student_week.get(student.id, {}).get(wk, 0)
+            attended_w = max(held_w - absent_w, 0)
+            pct_w = round((attended_w / held_w) * 100, 1) if held_w else 0
+            week_rows.append(
+                {
+                    "week": wk,
+                    "held": held_w,
+                    "attended": attended_w,
+                    "percent": pct_w,
+                }
+            )
+
+        subject_rows = []
+        for subj in subject_list:
+            held_s = held_by_batch_subject.get(batch, {}).get(subj, 0)
+            absent_s = absent_by_student_subject.get(student.id, {}).get(subj, 0)
+            attended_s = max(held_s - absent_s, 0)
+            pct_s = round((attended_s / held_s) * 100, 1) if held_s else 0
+            subject_rows.append(
+                {
+                    "subject": subj,
+                    "held": held_s,
+                    "attended": attended_s,
+                    "percent": pct_s,
+                }
+            )
+
+        rows.append(
+            {
+                "student": student,
+                "held": held_total,
+                "attended": attended_total,
+                "percent": percent,
+                "week_rows": week_rows,
+                "subject_rows": subject_rows,
+            }
+        )
+
+    return render(
+        request,
+        "attendance_analytics.html",
+        {
+            "module": module,
+            "calendar": calendar,
+            "phase": phase,
+            "week_param": week_param,
+            "batch_filter": batch_filter,
+            "search": search,
+            "rows": rows,
+            "week_list": week_list,
+            "subject_list": subject_list,
+        },
+    )
+
+
+def daily_absent_excel(request):
+    mentor = _session_mentor_obj(request)
+    if not mentor and not request.user.is_authenticated:
+        return redirect("/")
+
+    module = _active_module(request)
+    date_val = _parse_date_param(request.GET.get("date"), timezone.localdate())
+    batch_filter = (request.GET.get("batch") or "").strip()
+
+    sessions_qs = LectureSession.objects.filter(module=module, date=date_val)
+    if batch_filter:
+        sessions_qs = sessions_qs.filter(batch=batch_filter)
+    sessions = list(sessions_qs.order_by("batch", "lecture_no"))
+    if not sessions:
+        return HttpResponse("No attendance sessions found for selected date.", status=404)
+
+    absences = LectureAbsence.objects.filter(session__in=sessions).select_related("student", "session")
+    absences_by_session = {}
+    for a in absences:
+        absences_by_session.setdefault(a.session_id, []).append(a)
+
+    batches = sorted({s.batch for s in sessions})
+    sessions_by_batch = {}
+    for s in sessions:
+        sessions_by_batch.setdefault(s.batch, []).append(s)
+
+    wb = Workbook()
+    ws = wb.active
+    day_str = date_val.strftime("%d-%b-%Y")
+    ws.title = day_str[:31]
+    title = f"L J Institute of Engineering and Technology\n{module.name} Daily Absent No.\n{day_str} ({date_val.strftime('%A')})"
+    ws.cell(row=1, column=1, value=title)
+
+    row_cursor = 2
+    for i in range(0, len(batches), 2):
+        left = batches[i]
+        right = batches[i + 1] if i + 1 < len(batches) else None
+
+        def batch_label(code):
+            raw = code.strip()
+            if raw.upper().startswith("B-"):
+                num = raw.split("-", 1)[1]
+                return f"Batch-{num} ({raw})"
+            return f"Batch ({raw})"
+
+        ws.cell(row=row_cursor, column=1, value=batch_label(left))
+        if right:
+            ws.cell(row=row_cursor, column=7, value=batch_label(right))
+        row_cursor += 1
+
+        headers = ["Lec No.", "Total no of absent", "Subject", "Faculty", "Absent Nos."]
+        for idx, label in enumerate(headers):
+            ws.cell(row=row_cursor, column=1 + idx, value=label)
+            if right:
+                ws.cell(row=row_cursor, column=7 + idx, value=label)
+        row_cursor += 1
+
+        left_sessions = sessions_by_batch.get(left, [])
+        right_sessions = sessions_by_batch.get(right, []) if right else []
+        max_len = max(len(left_sessions), len(right_sessions))
+
+        for j in range(max_len):
+            if j < len(left_sessions):
+                s = left_sessions[j]
+                abs_list = absences_by_session.get(s.id, [])
+                rolls = sorted([a.student.roll_no for a in abs_list if a.student.roll_no is not None])
+                absent_str = ",".join(str(x) for x in rolls) if rolls else "NIL"
+                ws.cell(row=row_cursor, column=1, value=s.lecture_no)
+                ws.cell(row=row_cursor, column=2, value=len(rolls))
+                ws.cell(row=row_cursor, column=3, value=s.subject)
+                ws.cell(row=row_cursor, column=4, value=s.faculty)
+                ws.cell(row=row_cursor, column=5, value=absent_str)
+            if right and j < len(right_sessions):
+                s = right_sessions[j]
+                abs_list = absences_by_session.get(s.id, [])
+                rolls = sorted([a.student.roll_no for a in abs_list if a.student.roll_no is not None])
+                absent_str = ",".join(str(x) for x in rolls) if rolls else "NIL"
+                ws.cell(row=row_cursor, column=7, value=s.lecture_no)
+                ws.cell(row=row_cursor, column=8, value=len(rolls))
+                ws.cell(row=row_cursor, column=9, value=s.subject)
+                ws.cell(row=row_cursor, column=10, value=s.faculty)
+                ws.cell(row=row_cursor, column=11, value=absent_str)
+            row_cursor += 1
+
+        row_cursor += 1
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    filename = f"Daily_Absent_{date_val:%Y-%m-%d}.xlsx"
+    response = HttpResponse(
+        buffer.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+def weekly_attendance_excel(request):
+    if request.session.get("mentor"):
+        return HttpResponse("Forbidden", status=403)
+    if not request.user.is_authenticated:
+        return redirect("/")
+
+    module = _active_module(request)
+    calendar = _calendar_for_module(module)
+    phase = (request.GET.get("phase") or "T1").upper()
+    week_param = (request.GET.get("week") or "all").strip().lower()
+    week_no = None if week_param in {"all", ""} else int(week_param) + 1
+
+    start, end = phase_range(calendar, phase)
+    if not start or not end:
+        return HttpResponse("Academic calendar not configured.", status=400)
+
+    end_date = end_date_for_week(calendar, phase, week_no)
+    if end_date and end_date > end:
+        end_date = end
+
+    sessions = list(
+        LectureSession.objects.filter(module=module, date__gte=start, date__lte=end_date or end)
+    )
+    session_ids = [s.id for s in sessions]
+    absences = LectureAbsence.objects.filter(session_id__in=session_ids).select_related("session", "student")
+
+    subject_set = sorted({(s.subject or "").strip() for s in sessions if (s.subject or "").strip()})
+
+    held_by_batch_subject = {}
+    held_by_batch = {}
+    for s in sessions:
+        held_by_batch.setdefault(s.batch, 0)
+        held_by_batch[s.batch] += 1
+        subj = (s.subject or "").strip()
+        held_by_batch_subject.setdefault(s.batch, {}).setdefault(subj, 0)
+        held_by_batch_subject[s.batch][subj] += 1
+
+    absent_by_student_subject = {}
+    absent_by_student = {}
+    for a in absences:
+        sid = a.student_id
+        absent_by_student[sid] = absent_by_student.get(sid, 0) + 1
+        subj = (a.session.subject or "").strip()
+        absent_by_student_subject.setdefault(sid, {}).setdefault(subj, 0)
+        absent_by_student_subject[sid][subj] += 1
+
+    students = list(Student.objects.filter(module=module).order_by("roll_no", "name"))
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Compiled"
+    ws.cell(row=1, column=1, value="L.J.INSTITUTE OF ENGINEERING AND TECHNOLOGY")
+    ws.cell(row=2, column=1, value=f"{module.name}")
+    ws.cell(row=3, column=1, value=f"ATTENDANCE RECORD - {phase}")
+
+    base_cols = ["Roll No", "Branch", "Div", "Student Name", "Enrollment No", "Mentor Name"]
+    col = 1
+    header_row = 6
+    sub_header_row = 7
+    for label in base_cols:
+        ws.cell(row=header_row, column=col, value=label)
+        col += 1
+
+    for subj in subject_set:
+        ws.cell(row=header_row, column=col, value=subj)
+        ws.cell(row=sub_header_row, column=col, value="A")
+        ws.cell(row=sub_header_row, column=col + 1, value="B")
+        ws.cell(row=sub_header_row, column=col + 2, value="Overall %")
+        col += 3
+
+    ws.cell(row=header_row, column=col, value="Attendance")
+    ws.cell(row=sub_header_row, column=col, value="A")
+    ws.cell(row=sub_header_row, column=col + 1, value="B")
+    ws.cell(row=sub_header_row, column=col + 2, value="Overall %")
+
+    row_cursor = 9
+    for student in students:
+        batch = student.batch or ""
+        held_total = held_by_batch.get(batch, 0)
+        absent_total = absent_by_student.get(student.id, 0)
+        attended_total = max(held_total - absent_total, 0)
+        overall_pct = round(attended_total / held_total, 4) if held_total else 0
+
+        col_cursor = 1
+        ws.cell(row=row_cursor, column=col_cursor, value=student.roll_no)
+        col_cursor += 1
+        ws.cell(row=row_cursor, column=col_cursor, value=student.batch or "")
+        col_cursor += 1
+        ws.cell(row=row_cursor, column=col_cursor, value=student.division or student.batch or "")
+        col_cursor += 1
+        ws.cell(row=row_cursor, column=col_cursor, value=student.name)
+        col_cursor += 1
+        ws.cell(row=row_cursor, column=col_cursor, value=student.enrollment)
+        col_cursor += 1
+        ws.cell(row=row_cursor, column=col_cursor, value=student.mentor.name if student.mentor else "")
+        col_cursor += 1
+
+        for subj in subject_set:
+            held = held_by_batch_subject.get(batch, {}).get(subj, 0)
+            absent = absent_by_student_subject.get(student.id, {}).get(subj, 0)
+            attended = max(held - absent, 0)
+            pct = round(attended / held, 4) if held else 0
+            ws.cell(row=row_cursor, column=col_cursor, value=attended)
+            ws.cell(row=row_cursor, column=col_cursor + 1, value=held)
+            ws.cell(row=row_cursor, column=col_cursor + 2, value=pct)
+            col_cursor += 3
+
+        ws.cell(row=row_cursor, column=col_cursor, value=attended_total)
+        ws.cell(row=row_cursor, column=col_cursor + 1, value=held_total)
+        ws.cell(row=row_cursor, column=col_cursor + 2, value=overall_pct)
+        row_cursor += 1
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    filename = f"Weekly_Attendance_{phase}_{date.today():%Y-%m-%d}.xlsx"
+    response = HttpResponse(
+        buffer.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+@login_required
+@require_http_methods(["POST"])
+def recompute_week_from_daily(request):
+    if request.session.get("mentor"):
+        return JsonResponse({"ok": False, "msg": "Forbidden"}, status=403)
+    module = _active_module(request)
+    phase = (request.POST.get("phase") or "T1").upper()
+    week_raw = request.POST.get("week_no")
+    try:
+        week_no = int(week_raw)
+    except Exception:
+        return JsonResponse({"ok": False, "msg": "Invalid week number"}, status=400)
+
+    normalized_week = _normalize_week_no(phase, week_no)
+    if _attendance_lock_for_module_week(module, normalized_week):
+        return JsonResponse({"ok": False, "msg": "Week is locked."}, status=400)
+    if _has_manual_week(module, normalized_week):
+        return JsonResponse({"ok": False, "msg": "Manual upload exists for this week."}, status=400)
+
+    updated, err = recompute_weekly_attendance_from_daily(module, phase, week_no)
+    if err:
+        return JsonResponse({"ok": False, "msg": err}, status=400)
+    return JsonResponse({"ok": True, "updated": updated})

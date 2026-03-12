@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h4 class="mb-3">Student Analytics</h4>
+
+{% if message %}
+<div class="alert alert-warning">{{ message }}</div>
+{% endif %}
+
+<form method="get" class="row g-2 align-items-end mb-3">
+    <div class="col-md-2">
+        <label class="form-label">Phase</label>
+        <select name="phase" class="form-select">
+            <option value="T1" {% if phase == "T1" %}selected{% endif %}>T1</option>
+            <option value="T2" {% if phase == "T2" %}selected{% endif %}>T2</option>
+            <option value="T3" {% if phase == "T3" %}selected{% endif %}>T3</option>
+            <option value="T4" {% if phase == "T4" %}selected{% endif %}>T4</option>
+        </select>
+    </div>
+    <div class="col-md-2">
+        <label class="form-label">Week (up to)</label>
+        <select name="week" class="form-select">
+            <option value="all" {% if week_param == "all" %}selected{% endif %}>All</option>
+            {% for w in week_list %}
+            <option value="{{ w|add:'-1' }}" {% if week_param == w|add:'-1'|stringformat:'s' %}selected{% endif %}>Week {{ w }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">Batch</label>
+        <input type="text" name="batch" class="form-control" value="{{ batch_filter }}" placeholder="e.g. B-1">
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">Search (roll/name/enroll)</label>
+        <input type="text" name="search" class="form-control" value="{{ search }}">
+    </div>
+    <div class="col-md-2 d-flex gap-2">
+        <button class="btn btn-primary" type="submit">Show</button>
+        {% if not request.session.mentor %}
+        <a class="btn btn-outline-secondary" href="/attendance-analytics/weekly-excel/?phase={{ phase }}&week={{ week_param }}">Download</a>
+        {% endif %}
+    </div>
+</form>
+
+{% if not request.session.mentor %}
+<form method="post" action="/attendance-analytics/recompute-week/" class="row g-2 align-items-end mb-4">
+    {% csrf_token %}
+    <div class="col-md-2">
+        <label class="form-label">Phase</label>
+        <select name="phase" class="form-select">
+            <option value="T1" {% if phase == "T1" %}selected{% endif %}>T1</option>
+            <option value="T2" {% if phase == "T2" %}selected{% endif %}>T2</option>
+            <option value="T3" {% if phase == "T3" %}selected{% endif %}>T3</option>
+            <option value="T4" {% if phase == "T4" %}selected{% endif %}>T4</option>
+        </select>
+    </div>
+    <div class="col-md-2">
+        <label class="form-label">Week No</label>
+        <input type="number" name="week_no" class="form-control" min="1" value="1">
+    </div>
+    <div class="col-md-4 d-flex gap-2">
+        <button class="btn btn-outline-primary" type="submit">Recompute from Daily</button>
+        <small class="text-muted align-self-center">Skips if manual upload exists or week locked.</small>
+    </div>
+</form>
+{% endif %}
+
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>Roll</th>
+                        <th>Name</th>
+                        <th>Batch</th>
+                        <th class="text-end">Held</th>
+                        <th class="text-end">Attended</th>
+                        <th class="text-end">%</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for row in rows %}
+                    <tr>
+                        <td>
+                            <button class="btn btn-sm btn-outline-secondary toggle-btn" data-target="details-{{ forloop.counter }}">+</button>
+                        </td>
+                        <td>{{ row.student.roll_no }}</td>
+                        <td>{{ row.student.name }}</td>
+                        <td>{{ row.student.batch }}</td>
+                        <td class="text-end">{{ row.held }}</td>
+                        <td class="text-end">{{ row.attended }}</td>
+                        <td class="text-end">{{ row.percent }}%</td>
+                    </tr>
+                    <tr id="details-{{ forloop.counter }}" class="d-none">
+                        <td colspan="7">
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <strong>Week-wise</strong>
+                                    <table class="table table-sm mt-2">
+                                        <thead>
+                                            <tr><th>Week</th><th class="text-end">Held</th><th class="text-end">Attended</th><th class="text-end">%</th></tr>
+                                        </thead>
+                                        <tbody>
+                                        {% for w in row.week_rows %}
+                                            <tr>
+                                                <td>Week {{ w.week }}</td>
+                                                <td class="text-end">{{ w.held }}</td>
+                                                <td class="text-end">{{ w.attended }}</td>
+                                                <td class="text-end">{{ w.percent }}%</td>
+                                            </tr>
+                                        {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="col-md-6">
+                                    <strong>Subject-wise</strong>
+                                    <table class="table table-sm mt-2">
+                                        <thead>
+                                            <tr><th>Subject</th><th class="text-end">Held</th><th class="text-end">Attended</th><th class="text-end">%</th></tr>
+                                        </thead>
+                                        <tbody>
+                                        {% for s in row.subject_rows %}
+                                            <tr>
+                                                <td>{{ s.subject }}</td>
+                                                <td class="text-end">{{ s.held }}</td>
+                                                <td class="text-end">{{ s.attended }}</td>
+                                                <td class="text-end">{{ s.percent }}%</td>
+                                            </tr>
+                                        {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="7" class="text-center text-muted">No students found.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+document.querySelectorAll('.toggle-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-target');
+        const row = document.getElementById(id);
+        if (!row) return;
+        const isHidden = row.classList.contains('d-none');
+        row.classList.toggle('d-none');
+        btn.textContent = isHidden ? '-' : '+';
+    });
+});
+</script>
+
+{% endblock %}

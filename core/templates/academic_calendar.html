@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h4 class="mb-3">Academic Calendar</h4>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="calendar">
+            <div class="form-check form-switch mb-3">
+                <input class="form-check-input" type="checkbox" name="is_active" id="is_active" {% if calendar.is_active %}checked{% endif %}>
+                <label class="form-check-label" for="is_active">Attendance calendar active</label>
+            </div>
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label">T1 Start</label>
+                    <input type="date" name="t1_start" class="form-control" value="{{ calendar.t1_start|date:'Y-m-d' }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">T1 End</label>
+                    <input type="date" name="t1_end" class="form-control" value="{{ calendar.t1_end|date:'Y-m-d' }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">T2 Start</label>
+                    <input type="date" name="t2_start" class="form-control" value="{{ calendar.t2_start|date:'Y-m-d' }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">T2 End</label>
+                    <input type="date" name="t2_end" class="form-control" value="{{ calendar.t2_end|date:'Y-m-d' }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">T3 Start</label>
+                    <input type="date" name="t3_start" class="form-control" value="{{ calendar.t3_start|date:'Y-m-d' }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">T3 End</label>
+                    <input type="date" name="t3_end" class="form-control" value="{{ calendar.t3_end|date:'Y-m-d' }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">T4 Start</label>
+                    <input type="date" name="t4_start" class="form-control" value="{{ calendar.t4_start|date:'Y-m-d' }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">T4 End</label>
+                    <input type="date" name="t4_end" class="form-control" value="{{ calendar.t4_end|date:'Y-m-d' }}">
+                </div>
+            </div>
+            <button class="btn btn-primary mt-3" type="submit">Save Calendar</button>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">Holidays (besides Sundays)</div>
+    <div class="card-body">
+        <form method="post" class="row g-2 align-items-end mb-3">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="holiday_add">
+            <div class="col-md-3">
+                <label class="form-label">Holiday Date</label>
+                <input type="date" name="holiday_date" class="form-control">
+            </div>
+            <div class="col-md-5">
+                <label class="form-label">Label</label>
+                <input type="text" name="holiday_label" class="form-control" placeholder="e.g. Holi">
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-outline-primary" type="submit">Add</button>
+            </div>
+        </form>
+
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Label</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for h in holidays %}
+                    <tr>
+                        <td>{{ h.date|date:"d M Y" }}</td>
+                        <td>{{ h.label }}</td>
+                        <td class="text-end">
+                            <form method="post" class="d-inline">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="holiday_delete">
+                                <input type="hidden" name="holiday_id" value="{{ h.id }}">
+                                <button class="btn btn-sm btn-outline-danger" type="submit">Remove</button>
+                            </form>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="3" class="text-center text-muted">No holidays added.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

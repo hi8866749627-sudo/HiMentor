@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h4 class="mb-3">Daily Attendance Fill Status</h4>
+
+<form method="get" class="row g-2 align-items-end mb-3">
+    <div class="col-md-3">
+        <label class="form-label">Date</label>
+        <input type="date" name="date" class="form-control" value="{{ selected_date|date:'Y-m-d' }}">
+    </div>
+    <div class="col-md-2">
+        <button class="btn btn-primary" type="submit">Show</button>
+    </div>
+</form>
+
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Faculty</th>
+                        <th class="text-end">Expected</th>
+                        <th class="text-end">Marked</th>
+                        <th class="text-end">Pending</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for row in rows %}
+                    <tr>
+                        <td>{{ row.faculty }}</td>
+                        <td class="text-end">{{ row.expected }}</td>
+                        <td class="text-end">{{ row.marked }}</td>
+                        <td class="text-end">
+                            {% if row.pending %}
+                                <span class="badge bg-warning text-dark">{{ row.pending }}</span>
+                            {% else %}
+                                <span class="badge bg-success">Done</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% if row.pending %}
+                    <tr>
+                        <td colspan="4">
+                            <small class="text-muted">Missing:</small>
+                            <div class="d-flex flex-wrap gap-2 mt-1">
+                                {% for e in row.missing %}
+                                <span class="badge bg-light text-dark">
+                                    {{ e.batch }} · Lec {{ e.lecture_no }} · {{ e.subject }}
+                                </span>
+                                {% endfor %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endif %}
+                {% empty %}
+                    <tr><td colspan="4" class="text-center text-muted">No timetable entries found for this day.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

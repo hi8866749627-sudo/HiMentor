@@ -92,6 +92,142 @@ class Attendance(models.Model):
     def __str__(self):
         return f"{self.student.name} - Week {self.week_no}"
 
+class AttendanceWeekMeta(models.Model):
+    SOURCE_MANUAL = "manual"
+    SOURCE_AUTO = "auto"
+    SOURCE_CHOICES = [
+        (SOURCE_MANUAL, "Manual Upload"),
+        (SOURCE_AUTO, "Auto from Daily Attendance"),
+    ]
+
+    module = models.ForeignKey(AcademicModule, on_delete=models.CASCADE, related_name="attendance_week_meta")
+    week_no = models.IntegerField()
+    source = models.CharField(max_length=10, choices=SOURCE_CHOICES, default=SOURCE_MANUAL)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("module", "week_no")
+        ordering = ["-week_no"]
+
+    def __str__(self):
+        return f"{self.module.name} Week {self.week_no} ({self.source})"
+
+class AcademicCalendar(models.Model):
+    module = models.OneToOneField(AcademicModule, on_delete=models.CASCADE, related_name="attendance_calendar")
+    is_active = models.BooleanField(default=False)
+    t1_start = models.DateField(null=True, blank=True)
+    t1_end = models.DateField(null=True, blank=True)
+    t2_start = models.DateField(null=True, blank=True)
+    t2_end = models.DateField(null=True, blank=True)
+    t3_start = models.DateField(null=True, blank=True)
+    t3_end = models.DateField(null=True, blank=True)
+    t4_start = models.DateField(null=True, blank=True)
+    t4_end = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Academic Calendar ({self.module.name})"
+
+
+class AcademicHoliday(models.Model):
+    module = models.ForeignKey(AcademicModule, on_delete=models.CASCADE, related_name="attendance_holidays")
+    date = models.DateField()
+    label = models.CharField(max_length=120, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("module", "date")
+        ordering = ["-date", "-id"]
+
+    def __str__(self):
+        return f"{self.module.name} - {self.date:%Y-%m-%d}"
+
+
+class TimetableUpload(models.Model):
+    module = models.ForeignKey(AcademicModule, on_delete=models.CASCADE, related_name="timetable_uploads")
+    uploaded_by = models.CharField(max_length=120, blank=True)
+    source_name = models.CharField(max_length=255, blank=True)
+    rows_total = models.IntegerField(default=0)
+    rows_created = models.IntegerField(default=0)
+    rows_skipped = models.IntegerField(default=0)
+    uploaded_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-uploaded_at", "-id"]
+
+    def __str__(self):
+        return f"Timetable Upload {self.uploaded_at:%Y-%m-%d %H:%M}"
+
+
+class TimetableEntry(models.Model):
+    DAY_CHOICES = [
+        (0, "Monday"),
+        (1, "Tuesday"),
+        (2, "Wednesday"),
+        (3, "Thursday"),
+        (4, "Friday"),
+        (5, "Saturday"),
+        (6, "Sunday"),
+    ]
+
+    module = models.ForeignKey(AcademicModule, on_delete=models.CASCADE, related_name="timetable_entries")
+    day_of_week = models.IntegerField(choices=DAY_CHOICES)
+    lecture_no = models.IntegerField()
+    time_slot = models.CharField(max_length=60, blank=True)
+    batch = models.CharField(max_length=30)
+    subject = models.CharField(max_length=120, blank=True)
+    faculty = models.CharField(max_length=50, blank=True)
+    room = models.CharField(max_length=50, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("module", "day_of_week", "lecture_no", "batch")
+        ordering = ["day_of_week", "lecture_no", "batch"]
+
+    def __str__(self):
+        return f"{self.batch} - {self.subject} ({self.get_day_of_week_display()})"
+
+
+class LectureSession(models.Model):
+    module = models.ForeignKey(AcademicModule, on_delete=models.CASCADE, related_name="lecture_sessions")
+    timetable_entry = models.ForeignKey(TimetableEntry, on_delete=models.SET_NULL, null=True, blank=True)
+    date = models.DateField()
+    day_of_week = models.IntegerField()
+    lecture_no = models.IntegerField()
+    time_slot = models.CharField(max_length=60, blank=True)
+    batch = models.CharField(max_length=30)
+    subject = models.CharField(max_length=120, blank=True)
+    faculty = models.CharField(max_length=50, blank=True)
+    room = models.CharField(max_length=50, blank=True)
+    marked_by = models.ForeignKey(Mentor, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("module", "date", "lecture_no", "batch")
+        ordering = ["-date", "lecture_no", "batch"]
+
+    def __str__(self):
+        return f"{self.batch} - {self.subject} ({self.date:%Y-%m-%d})"
+
+
+class LectureAbsence(models.Model):
+    session = models.ForeignKey(LectureSession, on_delete=models.CASCADE, related_name="absences")
+    student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name="lecture_absences")
+    marked_by = models.ForeignKey(Mentor, on_delete=models.SET_NULL, null=True, blank=True)
+    marked_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("session", "student")
+        ordering = ["session_id", "student__roll_no"]
+
+    def __str__(self):
+        return f"{self.session} - {self.student.roll_no}"
+
 
 
 # ------------------ CALL RECORD ------------------

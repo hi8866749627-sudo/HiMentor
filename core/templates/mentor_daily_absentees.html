@@ -1,0 +1,379 @@
+{% extends "base.html" %}
+{% load phone_filters %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3 class="mb-0">Daily Absent Calls - {{ mentor.name }}</h3>
+</div>
+
+<form method="get" class="row g-2 align-items-end mb-3">
+    <div class="col-md-3">
+        <label class="form-label">Date</label>
+        <input type="date" name="date" class="form-control" value="{{ selected_date|date:'Y-m-d' }}">
+    </div>
+    <div class="col-md-2">
+        <button class="btn btn-primary" type="submit">Show</button>
+    </div>
+</form>
+
+{% if calendar and not calendar.is_active %}
+<div class="alert alert-warning">Academic calendar is inactive. Call logging may be incomplete.</div>
+{% endif %}
+
+<div class="card p-2 mb-3">
+    <input id="dailyCallSearch" class="form-control" placeholder="Search by Roll / Enrollment / Name">
+</div>
+
+{% if not records %}
+<div class="alert alert-info">No absentees found for this date.</div>
+{% endif %}
+
+<div class="desktop-view">
+<div class="table-responsive">
+<table class="table table-bordered table-hover align-middle">
+<thead class="table-dark text-center">
+<tr>
+<th>Roll</th>
+<th>Enrollment</th>
+<th>Name</th>
+<th>Absent Lectures</th>
+<th>Lectures Detail</th>
+<th>Status</th>
+<th>Call Student</th>
+<th>Call Father</th>
+</tr>
+</thead>
+<tbody>
+{% for item in records %}
+{% with c=item.call %}
+<tr class="daily-call-row"
+    data-roll="{{ c.student.roll_no|default:'' }}"
+    data-enrollment="{{ c.student.enrollment|default:'' }}"
+    data-name="{{ c.student.name|default:'' }}">
+<td>{{ c.student.roll_no }}</td>
+<td>{{ c.student.enrollment }}</td>
+<td>{{ c.student.name }}</td>
+<td class="text-center">{{ item.absent_count }}</td>
+<td>
+    {% for d in item.details %}
+        <span class="badge bg-light text-dark me-1">
+            Lec {{ d.lecture_no }} · {{ d.subject }} · {{ d.batch }}
+        </span>
+    {% endfor %}
+</td>
+<td class="text-center">
+    {% if c.final_status == "received" %}
+        <span class="badge bg-success">Received</span>
+    {% elif c.final_status == "not_received" %}
+        <span class="badge bg-warning text-dark">Not Received</span>
+    {% else %}
+        <span class="badge bg-primary">Pending</span>
+    {% endif %}
+</td>
+<td class="text-center">
+    <button class="btn btn-primary call-btn"
+        data-id="{{ c.id }}"
+        data-target="student"
+        data-phone="{{ c.student.student_mobile|e164_in }}"
+        data-week="{{ week_no }}"
+        data-day="{{ day_no }}">
+        Call Student
+    </button>
+</td>
+<td class="text-center">
+    <button class="btn btn-success call-btn"
+        data-id="{{ c.id }}"
+        data-target="father"
+        data-phone="{{ c.student.father_mobile|default:c.student.mother_mobile|e164_in }}"
+        data-week="{{ week_no }}"
+        data-day="{{ day_no }}">
+        Call Father
+    </button>
+</td>
+</tr>
+{% endwith %}
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+
+<div class="mobile-view">
+{% for item in records %}
+{% with c=item.call %}
+<div class="card shadow-sm mb-3 daily-call-card"
+     data-roll="{{ c.student.roll_no|default:'' }}"
+     data-enrollment="{{ c.student.enrollment|default:'' }}"
+     data-name="{{ c.student.name|default:'' }}">
+<div class="card-body p-3">
+    <div class="fw-bold fs-6">{{ c.student.roll_no }} - {{ c.student.name }}</div>
+    <div class="text-muted small mb-2">{{ c.student.batch|default:"-" }} - {{ c.student.enrollment }}</div>
+    <div class="mb-2">Absent Lectures: {{ item.absent_count }}</div>
+    <div class="mb-2 d-flex flex-wrap gap-2">
+        {% for d in item.details %}
+            <span class="badge bg-light text-dark">Lec {{ d.lecture_no }} · {{ d.subject }} · {{ d.batch }}</span>
+        {% endfor %}
+    </div>
+    <div class="mb-2">
+            {% if c.final_status == "received" %}
+                <span class="badge bg-success">Received</span>
+            {% elif c.final_status == "not_received" %}
+                <span class="badge bg-warning text-dark">Not Received</span>
+            {% else %}
+                <span class="badge bg-primary">Pending</span>
+            {% endif %}
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-primary w-50 call-btn"
+                    data-id="{{ c.id }}"
+                    data-target="student"
+                    data-phone="{{ c.student.student_mobile|e164_in }}"
+                    data-week="{{ week_no }}"
+                    data-day="{{ day_no }}">
+                Call Student
+            </button>
+            <button class="btn btn-success w-50 call-btn"
+                    data-id="{{ c.id }}"
+                    data-target="father"
+                    data-phone="{{ c.student.father_mobile|default:c.student.mother_mobile|e164_in }}"
+                    data-week="{{ week_no }}"
+                    data-day="{{ day_no }}">
+                Call Father
+            </button>
+        </div>
+    </div>
+</div>
+{% endwith %}
+{% endfor %}
+</div>
+
+<script>
+const PENDING_OTHER_CALL_KEY = "pending_other_call";
+const PENDING_OTHER_CALL_EXPECT_KEY = "pending_other_call_expect_modal";
+let modalShownForPending = false;
+
+function getPendingCall(){
+    try{ return JSON.parse(localStorage.getItem(PENDING_OTHER_CALL_KEY) || "null"); }catch(e){ return null; }
+}
+function setPendingCall(data){
+    localStorage.setItem(PENDING_OTHER_CALL_KEY, JSON.stringify(data));
+    modalShownForPending = false;
+}
+function clearPendingCall(){
+    localStorage.removeItem(PENDING_OTHER_CALL_KEY);
+    sessionStorage.removeItem(PENDING_OTHER_CALL_EXPECT_KEY);
+    modalShownForPending = false;
+}
+
+function openCallResultModalIfPending(){
+    const expectModal = sessionStorage.getItem(PENDING_OTHER_CALL_EXPECT_KEY) === "1";
+    if(!expectModal){ return; }
+    const pending = getPendingCall();
+    if(!pending || modalShownForPending){ return; }
+    if(!pending.id){ clearPendingCall(); return; }
+
+    const startedAt = Number(pending.started_at || 0);
+    const elapsedSec = startedAt ? Math.max(0, Math.round((Date.now() - startedAt) / 1000)) : 0;
+    const estimatedMinutes = elapsedSec ? Math.max(1, Math.round(elapsedSec / 60)) : "";
+
+    document.getElementById("call_id").value = pending.id;
+    document.getElementById("call_target").value = pending.target || "";
+    document.getElementById("duration").value = estimatedMinutes;
+    document.getElementById("call_category").value = "less_attendance";
+    document.getElementById("week_no").value = pending.week || "{{ week_no }}";
+    document.getElementById("day_no").value = pending.day || "{{ day_no }}";
+    document.getElementById("remark").value = "";
+    document.getElementById("call_reason").value = "";
+    document.getElementById("autoDurationNote").innerText =
+        elapsedSec ? `Auto-estimated duration: ${elapsedSec}s (editable)` : "";
+    onCategoryChange();
+
+    modalShownForPending = true;
+    sessionStorage.removeItem(PENDING_OTHER_CALL_EXPECT_KEY);
+    new bootstrap.Modal(document.getElementById("callResultModal")).show();
+}
+
+document.querySelectorAll(".call-btn").forEach(btn => {
+    btn.addEventListener("click", function(){
+        const phone = (this.dataset.phone || "").trim();
+        const callId = this.dataset.id;
+        const target = this.dataset.target || "";
+        if(!phone){
+            alert("Number not available");
+            return;
+        }
+        sessionStorage.setItem(PENDING_OTHER_CALL_EXPECT_KEY, "1");
+        setPendingCall({
+            id: callId,
+            phone: phone,
+            target: target,
+            week: this.dataset.week,
+            day: this.dataset.day,
+            started_at: Date.now()
+        });
+        window.location.href = "tel:" + phone;
+    });
+});
+
+window.addEventListener("focus", function(){ setTimeout(openCallResultModalIfPending, 350); });
+window.addEventListener("pageshow", function(){ setTimeout(openCallResultModalIfPending, 350); });
+document.addEventListener("visibilitychange", function(){
+    if(document.visibilityState === "visible"){
+        setTimeout(openCallResultModalIfPending, 350);
+    }
+});
+
+function markReceived(){
+    let id = document.getElementById("call_id").value;
+    let target = document.getElementById("call_target").value;
+    let talked = document.getElementById("talked").value;
+    let duration = document.getElementById("duration").value;
+    let remark = document.getElementById("remark").value;
+    let callReason = document.getElementById("call_reason").value;
+    let callCategory = document.getElementById("call_category").value;
+    let weekNo = document.getElementById("week_no").value;
+    let dayNo = document.getElementById("day_no").value;
+    if(callCategory === "less_attendance" && (!weekNo || !dayNo)){
+        alert("Please enter Week Number and Day Number.");
+        return;
+    }
+    fetch("/save-other-call/",{
+        method:"POST",
+        headers:{
+            "Content-Type":"application/x-www-form-urlencoded",
+            "X-CSRFToken":"{{csrf_token}}"
+        },
+        body:`id=${id}&target=${target}&status=received&talked=${talked}&duration=${duration}&call_category=${callCategory}&week_no=${encodeURIComponent(weekNo)}&day_no=${encodeURIComponent(dayNo)}&remark=${encodeURIComponent(remark)}&call_reason=${encodeURIComponent(callReason)}`
+    })
+    .then(r => r.json())
+    .then(data => {
+        if(!data.ok){
+            alert(data.msg || "Unable to save call");
+            return;
+        }
+        clearPendingCall();
+        location.reload();
+    });
+}
+
+function markNotReceived(){
+    let id = document.getElementById("call_id").value;
+    let target = document.getElementById("call_target").value;
+    let callReason = document.getElementById("call_reason").value;
+    let callCategory = document.getElementById("call_category").value;
+    let weekNo = document.getElementById("week_no").value;
+    let dayNo = document.getElementById("day_no").value;
+    if(callCategory === "less_attendance" && (!weekNo || !dayNo)){
+        alert("Please enter Week Number and Day Number.");
+        return;
+    }
+    fetch("/save-other-call/",{
+        method:"POST",
+        headers:{
+            "Content-Type":"application/x-www-form-urlencoded",
+            "X-CSRFToken":"{{csrf_token}}"
+        },
+        body:`id=${id}&target=${target}&status=not_received&call_category=${callCategory}&week_no=${encodeURIComponent(weekNo)}&day_no=${encodeURIComponent(dayNo)}&call_reason=${encodeURIComponent(callReason)}`
+    })
+    .then(r => r.json())
+    .then(data => {
+        if(!data.ok){
+            alert(data.msg || "Unable to save call");
+            return;
+        }
+        clearPendingCall();
+        location.reload();
+    });
+}
+
+function onCategoryChange(){
+    const category = document.getElementById("call_category").value;
+    const lessWrap = document.getElementById("lessAttendanceFields");
+    if(category === "less_attendance"){
+        lessWrap.classList.remove("d-none");
+    }else{
+        lessWrap.classList.add("d-none");
+    }
+}
+
+(function(){
+    const search = document.getElementById("dailyCallSearch");
+    if(!search){ return; }
+    const norm = (v) => (v || "").toString().toLowerCase().trim();
+    const rows = Array.from(document.querySelectorAll(".daily-call-row"));
+    const cards = Array.from(document.querySelectorAll(".daily-call-card"));
+    function applyFilter(){
+        const q = norm(search.value);
+        const match = (el) => {
+            const roll = norm(el.getAttribute("data-roll"));
+            const enr = norm(el.getAttribute("data-enrollment"));
+            const name = norm(el.getAttribute("data-name"));
+            return !q || roll.includes(q) || enr.includes(q) || name.includes(q);
+        };
+        rows.forEach((r) => { r.style.display = match(r) ? "" : "none"; });
+        cards.forEach((c) => { c.style.display = match(c) ? "" : "none"; });
+    }
+    search.addEventListener("input", applyFilter);
+    applyFilter();
+})();
+</script>
+
+<div class="modal fade" id="callResultModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Daily Call Result</h5>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="call_id">
+        <input type="hidden" id="call_target">
+
+        <div class="mb-2">
+            <label>Talked With</label>
+            <select id="talked" class="form-control">
+                <option value="student">Student</option>
+                <option value="father">Father</option>
+                <option value="mother">Mother</option>
+                <option value="guardian">Guardian</option>
+            </select>
+        </div>
+        <div class="mb-2">
+            <label>Duration (minutes)</label>
+            <input type="number" id="duration" class="form-control" min="1">
+            <small id="autoDurationNote" class="text-muted"></small>
+        </div>
+        <div class="mb-2">
+            <label>Call Type</label>
+            <select id="call_category" class="form-control" onchange="onCategoryChange()">
+                <option value="less_attendance" selected>Less Attendance</option>
+                <option value="other">Other</option>
+            </select>
+        </div>
+        <div id="lessAttendanceFields">
+            <div class="mb-2">
+                <label>Week Number</label>
+                <input type="number" id="week_no" class="form-control" min="1" value="{{ week_no }}">
+            </div>
+            <div class="mb-2">
+                <label>Day Number</label>
+                <input type="number" id="day_no" class="form-control" min="1" value="{{ day_no }}">
+            </div>
+        </div>
+        <div class="mb-2">
+            <label>Parents Remark</label>
+            <input type="text" id="remark" class="form-control">
+        </div>
+        <div class="mb-2">
+            <label>Call Done Reason</label>
+            <input type="text" id="call_reason" class="form-control">
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-success w-100" onclick="markReceived()">Received</button>
+            <button class="btn btn-warning w-100" onclick="markNotReceived()">Not Received</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

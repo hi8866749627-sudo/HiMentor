@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h4 class="mb-3">Upload Timetable</h4>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="post" enctype="multipart/form-data">
+            {% csrf_token %}
+            <div class="mb-3">
+                <label class="form-label">Timetable Excel</label>
+                {{ form.file }}
+                <div class="form-text">Upload the semester timetable Excel for the current module.</div>
+            </div>
+            <button class="btn btn-primary" type="submit">Upload</button>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">Recent Uploads</div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Uploaded At</th>
+                        <th>File</th>
+                        <th>Rows</th>
+                        <th>Created</th>
+                        <th>Skipped</th>
+                        <th>Uploaded By</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for u in uploads %}
+                    <tr>
+                        <td>{{ u.uploaded_at|date:"d M Y H:i" }}</td>
+                        <td>{{ u.source_name }}</td>
+                        <td>{{ u.rows_total }}</td>
+                        <td>{{ u.rows_created }}</td>
+                        <td>{{ u.rows_skipped }}</td>
+                        <td>{{ u.uploaded_by }}</td>
+                        <td class="text-nowrap">
+                            <a class="btn btn-sm btn-outline-secondary" href="/view-timetable/">View</a>
+                            <form method="post" class="d-inline" onsubmit="return confirm('Delete all timetable entries?')">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="delete_all">
+                                <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="7" class="text-center text-muted">No uploads yet.</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

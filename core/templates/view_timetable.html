@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% load get_item %}
+{% block content %}
+
+<h4 class="mb-3">Timetable</h4>
+
+<form method="get" class="row g-2 align-items-end mb-3">
+    <div class="col-md-2">
+        <label class="form-label">Day</label>
+        <select name="day" class="form-select">
+            <option value="">All</option>
+            {% for code,label in day_choices %}
+                <option value="{{ code }}" {% if day_filter|default:'' == code|stringformat:'s' %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">Batch</label>
+        <select name="batch" class="form-select">
+            <option value="">All</option>
+            {% for b in batches %}
+                <option value="{{ b }}" {% if batch_filter == b %}selected{% endif %}>{{ b }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">Faculty</label>
+        <input type="text" name="faculty" class="form-control" value="{{ faculty_filter }}">
+    </div>
+    <div class="col-md-2">
+        <button class="btn btn-primary" type="submit">Filter</button>
+        <a class="btn btn-outline-secondary ms-2" href="/view-timetable/">Clear</a>
+    </div>
+</form>
+
+{% for day in day_tables %}
+<div class="card mb-4">
+    <div class="card-header">{{ day.day }}</div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-bordered mb-0">
+                <thead>
+                    <tr>
+                        <th style="min-width:90px;">Lec No</th>
+                        <th style="min-width:140px;">Time</th>
+                        {% for b in day.batches %}
+                            <th>{{ b }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                {% for lec in day.lectures %}
+                    <tr>
+                        <td>{{ lec }}</td>
+                        <td>{{ day.time_map|get_item:lec }}</td>
+                        {% for b in day.batches %}
+                            {% with entry=day.cell_map|get_item:lec|get_item:b %}
+                            <td>
+                                {% if entry %}
+                                    <div class="fw-semibold">{{ entry.subject }}</div>
+                                    <div class="small text-muted">{{ entry.faculty }} · {{ entry.room }}</div>
+                                {% else %}
+                                    <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            {% endwith %}
+                        {% endfor %}
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% empty %}
+<div class="alert alert-info">No timetable entries.</div>
+{% endfor %}
+
+{% endblock %}
