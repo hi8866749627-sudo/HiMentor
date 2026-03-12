@@ -1,3 +1,4 @@
+from django.db.models import Q
 from .models import AcademicModule
 
 
@@ -31,7 +32,10 @@ def allowed_modules_for_user(request):
         if not mentor_code:
             return AcademicModule.objects.none()
         return (
-            AcademicModule.objects.filter(students__mentor__name__iexact=mentor_code)
+            AcademicModule.objects.filter(
+                Q(students__mentor__name__iexact=mentor_code)
+                | Q(timetable_entries__faculty__iexact=mentor_code)
+            )
             .distinct()
             .order_by("-id")
         )
@@ -67,4 +71,3 @@ def get_current_module(request):
     if module:
         request.session["current_module_id"] = module.id
     return module
-
