@@ -60,12 +60,12 @@
                 </div>
                 <div class="col-md-3">
                     <label class="form-label">Available Room</label>
-                    <select name="room_select" class="form-select">
+                    <select name="room_select" class="form-select"
+                            data-base-rooms='{{ row.available_rooms_json|escapejs }}'
+                            data-conflict-rooms='{{ row.conflict_rooms_json|escapejs }}'>
                         <option value="">Select</option>
                         {% for r in row.available_rooms %}
-                            <option value="{{ r.name }}" {% if r.is_conflict %}class="text-danger"{% endif %}>
-                                {{ r.name }}{% if r.is_conflict %} (Busy Faculty Room){% endif %}
-                            </option>
+                            <option value="{{ r }}">{{ r }}</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -99,16 +99,42 @@ document.querySelectorAll('form').forEach(form => {
     const subjectInput = form.querySelector('input[name="proxy_subject"]');
     const mergeInput = form.querySelector('input[name="merge_room"]');
     if (!facultySelect || !subjectInput || !mergeInput) return;
+    const roomSelect = form.querySelector('select[name="room_select"]');
+    function renderRooms(facultyName) {
+        if (!roomSelect) return;
+        const baseRooms = JSON.parse(roomSelect.getAttribute('data-base-rooms') || '[]');
+        const conflictRooms = JSON.parse(roomSelect.getAttribute('data-conflict-rooms') || '{}');
+        const busyRoom = conflictRooms[facultyName] || '';
+        const options = [''].concat(baseRooms);
+        if (busyRoom && options.indexOf(busyRoom) === -1) {
+            options.unshift(busyRoom);
+        }
+        roomSelect.innerHTML = '';
+        options.forEach((room) => {
+            const opt = document.createElement('option');
+            opt.value = room;
+            opt.textContent = room ? room : 'Select';
+            if (room && room === busyRoom) {
+                opt.textContent = room + ' (Busy)';
+                opt.classList.add('text-danger');
+            }
+            roomSelect.appendChild(opt);
+        });
+    }
+
     facultySelect.addEventListener('change', () => {
         const opt = facultySelect.selectedOptions[0];
         subjectInput.value = opt ? (opt.getAttribute('data-subject') || '') : '';
         const conflict = opt && opt.getAttribute('data-conflict') === '1';
+        const facName = opt ? opt.value : '';
+        renderRooms(facName);
         if (conflict) {
             const ok = window.confirm('Selected faculty already has a lecture in this slot. Merge?');
             if (!ok) {
                 facultySelect.value = '';
                 subjectInput.value = '';
                 mergeInput.value = '';
+                renderRooms('');
                 return;
             }
             const room = window.prompt('Enter merge room number (both batches will use this room):', '');
@@ -116,6 +142,7 @@ document.querySelectorAll('form').forEach(form => {
                 facultySelect.value = '';
                 subjectInput.value = '';
                 mergeInput.value = '';
+                renderRooms('');
                 return;
             }
             mergeInput.value = room;
@@ -123,5 +150,6 @@ document.querySelectorAll('form').forEach(form => {
             mergeInput.value = '';
         }
     });
+    renderRooms('');
 });
 </script>

@@ -6,6 +6,7 @@ import tempfile
 import threading
 import uuid
 import zipfile
+import json
 from datetime import datetime, date, timedelta, time
 from zoneinfo import ZoneInfo
 from django.core.management import call_command
@@ -4417,14 +4418,9 @@ def mentor_load_adjustment(request):
                 module=module, date=selected_date, lecture_no=entry.lecture_no, status=LectureAdjustment.STATUS_ACTIVE
             ).exclude(room="").values_list("room", flat=True)
         )
-        available_rooms = [{"name": r, "is_conflict": False} for r in sorted(r for r in rooms_base if r and r not in used_rooms)]
-        if entry.room and all(r["name"] != entry.room for r in available_rooms):
-            available_rooms.insert(0, {"name": entry.room, "is_conflict": False})
-        for fac, room in conflict_rooms.items():
-            if not room:
-                continue
-            if all(r["name"] != room for r in available_rooms):
-                available_rooms.insert(0, {"name": room, "is_conflict": True})
+        available_rooms = [r for r in sorted(r for r in rooms_base if r and r not in used_rooms)]
+        if entry.room and entry.room not in available_rooms:
+            available_rooms.insert(0, entry.room)
         rows.append(
             {
                 "entry": entry,
@@ -4433,6 +4429,8 @@ def mentor_load_adjustment(request):
                 "available_rooms": available_rooms,
                 "slot_started": slot_started,
                 "conflict_rooms": conflict_rooms,
+                "available_rooms_json": json.dumps(available_rooms),
+                "conflict_rooms_json": json.dumps(conflict_rooms),
             }
         )
 
