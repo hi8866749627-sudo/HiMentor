@@ -3873,6 +3873,24 @@ def _calendar_for_module(module):
     return AcademicCalendar.objects.filter(module=module).first()
 
 
+def _calendar_has_values(calendar):
+    if not calendar:
+        return False
+    return any(
+        [
+            calendar.is_active,
+            calendar.t1_start,
+            calendar.t1_end,
+            calendar.t2_start,
+            calendar.t2_end,
+            calendar.t3_start,
+            calendar.t3_end,
+            calendar.t4_start,
+            calendar.t4_end,
+        ]
+    )
+
+
 def _holiday_set(module):
     return set(
         AcademicHoliday.objects.filter(module=module, is_active=True).values_list("date", flat=True)
@@ -4289,9 +4307,17 @@ def academic_calendar(request):
     if request.session.get("mentor"):
         return redirect("/mentor-dashboard/")
 
+    is_superadmin = is_superadmin_user(request.user)
     module = _active_module(request)
     calendar, _ = AcademicCalendar.objects.get_or_create(module=module)
     holidays = AcademicHoliday.objects.filter(module=module).order_by("-date")
+    selected_year = (request.GET.get("year") or request.POST.get("year") or module.year_level or "FY").strip().upper()
+    year_choices = [code for code, _ in AcademicModule.YEAR_CHOICES]
+    if selected_year not in year_choices:
+        selected_year = "FY"
+    year_modules = list(
+        AcademicModule.objects.filter(is_active=True, year_level=selected_year).order_by("variant", "semester", "name")
+    )
 
     if request.method == "POST":
         action = (request.POST.get("action") or "").strip()
@@ -4308,6 +4334,50 @@ def academic_calendar(request):
             calendar.save()
             messages.success(request, "Academic calendar updated.")
             return redirect("/academic-calendar/")
+
+        if action == "bulk_apply" and is_superadmin:
+            module_ids = request.POST.getlist("module_ids")
+            apply_is_active = bool(request.POST.get("is_active"))
+            payload = {
+                "is_active": apply_is_active,
+                "t1_start": _parse_date_param(request.POST.get("t1_start")),
+                "t1_end": _parse_date_param(request.POST.get("t1_end")),
+                "t2_start": _parse_date_param(request.POST.get("t2_start")),
+                "t2_end": _parse_date_param(request.POST.get("t2_end")),
+                "t3_start": _parse_date_param(request.POST.get("t3_start")),
+                "t3_end": _parse_date_param(request.POST.get("t3_end")),
+                "t4_start": _parse_date_param(request.POST.get("t4_start")),
+                "t4_end": _parse_date_param(request.POST.get("t4_end")),
+            }
+            if not module_ids:
+                messages.error(request, "Select at least one module.")
+            else:
+                target_modules = AcademicModule.objects.filter(id__in=module_ids, is_active=True)
+                applied = []
+                skipped = []
+                for target in target_modules:
+                    target_calendar = AcademicCalendar.objects.filter(module=target).first()
+                    if _calendar_has_values(target_calendar):
+                        skipped.append(target.name)
+                        continue
+                    if not target_calendar:
+                        target_calendar = AcademicCalendar(module=target)
+                    target_calendar.is_active = payload["is_active"]
+                    target_calendar.t1_start = payload["t1_start"]
+                    target_calendar.t1_end = payload["t1_end"]
+                    target_calendar.t2_start = payload["t2_start"]
+                    target_calendar.t2_end = payload["t2_end"]
+                    target_calendar.t3_start = payload["t3_start"]
+                    target_calendar.t3_end = payload["t3_end"]
+                    target_calendar.t4_start = payload["t4_start"]
+                    target_calendar.t4_end = payload["t4_end"]
+                    target_calendar.save()
+                    applied.append(target.name)
+                if applied:
+                    messages.success(request, f"Applied calendar to {len(applied)} module(s).")
+                if skipped:
+                    messages.info(request, f"Skipped existing module calendars: {', '.join(skipped[:6])}{' ...' if len(skipped) > 6 else ''}")
+            return redirect(f"/academic-calendar/?year={selected_year}")
 
         if action == "holiday_add":
             holiday_date = _parse_date_param(request.POST.get("holiday_date"))
@@ -4353,7 +4423,15 @@ def academic_calendar(request):
     return render(
         request,
         "academic_calendar.html",
-        {"calendar": calendar, "holidays": holidays, "module": module},
+        {
+            "calendar": calendar,
+            "holidays": holidays,
+            "module": module,
+            "is_superadmin": is_superadmin,
+            "selected_year": selected_year,
+            "year_choices": year_choices,
+            "year_modules": year_modules,
+        },
     )
 
 

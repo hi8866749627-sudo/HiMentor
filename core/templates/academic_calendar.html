@@ -3,8 +3,98 @@
 
 <h4 class="mb-3">Academic Calendar</h4>
 
+{% if is_superadmin %}
 <div class="card mb-4">
+    <div class="card-header">Superadmin Bulk Apply</div>
     <div class="card-body">
+        <form method="get" class="row g-2 align-items-end mb-3">
+            <div class="col-md-3">
+                <label class="form-label">Year Group</label>
+                <select name="year" class="form-select" onchange="this.form.submit()">
+                    {% for y in year_choices %}
+                    <option value="{{ y }}" {% if selected_year == y %}selected{% endif %}>{{ y }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </form>
+
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="bulk_apply">
+            <input type="hidden" name="year" value="{{ selected_year }}">
+            <div class="form-check form-switch mb-3">
+                <input class="form-check-input" type="checkbox" name="is_active" id="bulk_is_active">
+                <label class="form-check-label" for="bulk_is_active">Activate calendar while applying</label>
+            </div>
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label">T1 Start</label>
+                    <input type="date" name="t1_start" class="form-control">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">T1 End</label>
+                    <input type="date" name="t1_end" class="form-control">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">T2 Start</label>
+                    <input type="date" name="t2_start" class="form-control">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">T2 End</label>
+                    <input type="date" name="t2_end" class="form-control">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">T3 Start</label>
+                    <input type="date" name="t3_start" class="form-control">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">T3 End</label>
+                    <input type="date" name="t3_end" class="form-control">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">T4 Start</label>
+                    <input type="date" name="t4_start" class="form-control">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">T4 End</label>
+                    <input type="date" name="t4_end" class="form-control">
+                </div>
+            </div>
+
+            <div class="mt-4">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div class="fw-semibold">Apply to {{ selected_year }} Modules</div>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="toggleAllModulesBtn">Select All</button>
+                </div>
+                <div class="row g-2">
+                    {% for m in year_modules %}
+                    <div class="col-md-4">
+                        <label class="form-check border rounded p-2 w-100">
+                            <input class="form-check-input module-check" type="checkbox" name="module_ids" value="{{ m.id }}">
+                            <span class="form-check-label ms-2">{{ m.name }}</span>
+                        </label>
+                    </div>
+                    {% empty %}
+                    <div class="text-muted small">No active modules found for this year group.</div>
+                    {% endfor %}
+                </div>
+                <div class="form-text mt-2">Modules that already have a coordinator-set calendar will be skipped automatically.</div>
+            </div>
+
+            <button class="btn btn-primary mt-3" type="submit">Apply to Selected Modules</button>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+<div class="card mb-4">
+    <div class="card-header">Module Calendar: {{ module.name }}</div>
+    <div class="card-body">
+        {% if is_superadmin %}
+        <div class="alert alert-light border py-2">
+            This module calendar can still be edited individually. Coordinators can later change these dates for their own department.
+        </div>
+        {% endif %}
         <form method="post">
             {% csrf_token %}
             <input type="hidden" name="action" value="calendar">
@@ -111,5 +201,18 @@
         </div>
     </div>
 </div>
+
+<script>
+(function(){
+    const btn = document.getElementById("toggleAllModulesBtn");
+    const checks = Array.from(document.querySelectorAll(".module-check"));
+    if(!btn || !checks.length){ return; }
+    btn.addEventListener("click", function(){
+        const shouldSelect = checks.some(c => !c.checked);
+        checks.forEach(c => c.checked = shouldSelect);
+        btn.textContent = shouldSelect ? "Clear All" : "Select All";
+    });
+})();
+</script>
 
 {% endblock %}
