@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h4 class="mb-3">Daily Absent (Live)</h4>
+
+<form method="get" class="row g-2 align-items-end mb-3">
+    <div class="col-md-3">
+        <label class="form-label">Date</label>
+        <input type="date" name="date" class="form-control" value="{{ selected_date|date:'Y-m-d' }}">
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">Batch (optional)</label>
+        <input type="text" name="batch" class="form-control" value="{{ batch_filter }}" placeholder="e.g. B-1">
+    </div>
+    {% if request.session.mentor %}
+    <input type="hidden" name="module_id" value="{{ module.id }}">
+    {% endif %}
+    <div class="col-md-2">
+        <button class="btn btn-primary" type="submit">Show</button>
+    </div>
+</form>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <div class="fw-bold">{{ module.name }}</div>
+        <div class="text-muted small">Date: {{ selected_date|date:"d M Y" }}</div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Lecture</th>
+                        <th>Time</th>
+                        <th>Batch</th>
+                        <th>Subject</th>
+                        <th>Faculty</th>
+                        <th>Room</th>
+                        <th>Absent Nos.</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for row in rows %}
+                    <tr>
+                        <td>{{ row.lecture_no }}</td>
+                        <td>{{ row.time_slot }}</td>
+                        <td>{{ row.batch }}</td>
+                        <td>{{ row.subject }}</td>
+                        <td>{{ row.faculty }}</td>
+                        <td>{{ row.room }}</td>
+                        <td>
+                            {% if row.absent_rolls %}
+                                {{ row.absent_rolls|join:", " }}
+                            {% else %}
+                                NIL
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="7" class="text-center text-muted">No lectures found.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

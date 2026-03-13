@@ -36,6 +36,7 @@
     </div>
     <div class="col-md-2 d-flex gap-2">
         <button class="btn btn-primary" type="submit">Show</button>
+        <a class="btn btn-outline-secondary" href="/attendance-analytics/weekly-live/?phase={{ phase }}&week={{ week_param }}">Live Sheet</a>
         {% if not request.session.mentor %}
         <a class="btn btn-outline-secondary" href="/attendance-analytics/weekly-excel/?phase={{ phase }}&week={{ week_param }}">Download</a>
         {% endif %}

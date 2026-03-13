@@ -78,6 +78,10 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
 ]
 
+# Enable local HTTPS dev server only in DEBUG mode.
+if DEBUG:
+    INSTALLED_APPS = ['sslserver'] + INSTALLED_APPS
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',

@@ -16,6 +16,7 @@ def module_context(request):
             "can_manage_modules": False,
             "home_url": home_url,
             "mentor_display_name": "",
+            "login_role_name": "",
         }
 
     current = get_current_module(request)
@@ -31,10 +32,14 @@ def module_context(request):
             mentor_display_name = mentor_obj.full_name or mentor_obj.name
         else:
             mentor_display_name = request.session.get("mentor")
+    login_role_name = ""
+    if request.user.is_authenticated and not request.session.get("mentor"):
+        login_role_name = "Superadmin" if is_superadmin_user(request.user) else "Coordinator"
     return {
         "module_list": modules,
         "current_module": current,
         "can_manage_modules": bool(request.user.is_authenticated and not request.session.get("mentor") and is_superadmin_user(request.user)),
         "home_url": home_url,
         "mentor_display_name": mentor_display_name,
+        "login_role_name": login_role_name,
     }

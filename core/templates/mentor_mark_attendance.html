@@ -81,13 +81,29 @@
         <label class="form-label">Date</label>
         <input type="date" name="date" class="form-control" value="{{ selected_date|date:'Y-m-d' }}">
     </div>
+    <input type="hidden" name="dept" value="{{ dept_filter|default:'ALL' }}">
     <div class="col-md-2">
         <button class="btn btn-primary" type="submit">Show</button>
     </div>
 </form>
 
-{% if calendar and not calendar.is_active %}
-<div class="alert alert-warning">Academic calendar is inactive. Attendance marking is paused.</div>
+<div class="btn-group mb-3" role="group" aria-label="Department filter">
+    <a class="btn btn-sm {% if dept_filter|default:'ALL' == 'ALL' %}btn-primary{% else %}btn-outline-primary{% endif %}"
+       href="?date={{ selected_date|date:'Y-m-d' }}&dept=ALL">All</a>
+    <a class="btn btn-sm {% if dept_filter == 'FY1' %}btn-primary{% else %}btn-outline-primary{% endif %}"
+       href="?date={{ selected_date|date:'Y-m-d' }}&dept=FY1">FY1</a>
+    <a class="btn btn-sm {% if dept_filter == 'FY2' %}btn-primary{% else %}btn-outline-primary{% endif %}"
+       href="?date={{ selected_date|date:'Y-m-d' }}&dept=FY2">FY2</a>
+    <a class="btn btn-sm {% if dept_filter == 'FY3' %}btn-primary{% else %}btn-outline-primary{% endif %}"
+       href="?date={{ selected_date|date:'Y-m-d' }}&dept=FY3">FY3</a>
+    <a class="btn btn-sm {% if dept_filter == 'FY4' %}btn-primary{% else %}btn-outline-primary{% endif %}"
+       href="?date={{ selected_date|date:'Y-m-d' }}&dept=FY4">FY4</a>
+    <a class="btn btn-sm {% if dept_filter == 'FY5' %}btn-primary{% else %}btn-outline-primary{% endif %}"
+       href="?date={{ selected_date|date:'Y-m-d' }}&dept=FY5">FY5</a>
+</div>
+
+{% if has_inactive_calendar %}
+<div class="alert alert-warning">Academic calendar is inactive for some departments. Attendance marking may be paused.</div>
 {% endif %}
 
 {% if is_holiday %}
@@ -99,12 +115,20 @@
     <div class="card-header d-flex justify-content-between align-items-center">
         <div>
             <div class="fw-bold">Batch: {{ batch.batch }}</div>
-            <div class="text-muted small">{{ batch.slots|length }} lecture{{ batch.slots|length|pluralize }} scheduled</div>
+            <div class="text-muted small">
+                {{ batch.module_name }} · {{ batch.slots|length }} lecture{{ batch.slots|length|pluralize }} scheduled
+            </div>
         </div>
-        <a class="btn btn-sm btn-outline-secondary"
-           href="/attendance-analytics/daily-excel/?date={{ selected_date|date:'Y-m-d' }}&batch={{ batch.batch|urlencode }}">
-           Download Excel
-        </a>
+        <div class="d-flex gap-2">
+            <a class="btn btn-sm btn-outline-secondary"
+               href="/attendance-analytics/daily-live/?date={{ selected_date|date:'Y-m-d' }}&batch={{ batch.batch|urlencode }}&module_id={{ batch.module.id }}">
+               View Live
+            </a>
+            <a class="btn btn-sm btn-outline-secondary"
+               href="/attendance-analytics/daily-excel/?date={{ selected_date|date:'Y-m-d' }}&batch={{ batch.batch|urlencode }}&module_id={{ batch.module.id }}">
+               Download Excel
+            </a>
+        </div>
     </div>
     <div class="card-body py-2">
         {% for slot in batch.slots %}
@@ -114,6 +138,7 @@
                 <input type="hidden" name="date" value="{{ selected_date|date:'Y-m-d' }}">
                 <input type="hidden" name="batch" value="{{ batch.batch }}">
                 <input type="hidden" name="lecture_no" value="{{ slot.entry.lecture_no }}">
+                <input type="hidden" name="module_id" value="{{ batch.module.id }}">
                 {% if slot.adjustment %}
                 <input type="hidden" name="adjustment_id" value="{{ slot.adjustment.id }}">
                 {% endif %}

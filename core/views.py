@@ -198,6 +198,37 @@ def _module_display_name(variant, semester, batch):
     return f"{variant}_{semester} - Batch {batch}"
 
 
+def _dept_matches_module(module, dept_key):
+    if not dept_key:
+        return True
+    dept_key = dept_key.upper()
+    if dept_key not in {"FY1", "FY2", "FY3", "FY4", "FY5"}:
+        return True
+    variant = (getattr(module, "variant", "") or "").upper()
+    name = (getattr(module, "name", "") or "").upper()
+    return variant.startswith(dept_key) or name.startswith(dept_key) or f"{dept_key}_" in name
+
+
+def _attendance_fully_marked_for_date(module, date_val):
+    day_of_week = date_val.weekday()
+    expected = set(
+        TimetableEntry.objects.filter(module=module, day_of_week=day_of_week).values_list("batch", "lecture_no")
+    )
+    if not expected:
+        return True
+    marked = set(LectureSession.objects.filter(module=module, date=date_val).values_list("batch", "lecture_no"))
+    return expected.issubset(marked)
+
+
+def _attendance_fully_marked_for_range(module, start_date, end_date):
+    cur = start_date
+    while cur <= end_date:
+        if not _attendance_fully_marked_for_date(module, cur):
+            return False
+        cur += timedelta(days=1)
+    return True
+
+
 def _sif_marks_rows_for_student(student, module):
     subjects = ordered_subjects(module)
     practical_map = {
@@ -4127,60 +4158,84 @@ def mentor_schedule(request):
     if not mentor:
         return redirect("/")
 
-    module = _active_module(request)
+    dept_filter = (request.GET.get("dept") or "").strip().upper()
+    modules = [m for m in allowed_modules_for_user(request) if m.is_active and _dept_matches_module(m, dept_filter)]
+    if not modules:
+        return render(
+            request,
+            "mentor_schedule.html",
+            {
+                "mentor": mentor,
+                "entries": [],
+                "selected_date": _parse_date_param(request.GET.get("date"), timezone.localdate()),
+                "has_proxy_alert": False,
+                "has_inactive_calendar": False,
+                "dept_filter": dept_filter or "ALL",
+            },
+        )
     selected_date = _parse_date_param(request.GET.get("date"), timezone.localdate())
     day_of_week = selected_date.weekday()
 
-    adjustments = list(
-        LectureAdjustment.objects.filter(module=module, date=selected_date, status=LectureAdjustment.STATUS_ACTIVE)
-        .select_related("proxy_faculty")
-    )
-    adj_map = {(a.batch, a.lecture_no): a for a in adjustments}
-
     entries = []
-    merge_room_map = {
-        (a.date, a.lecture_no): a.merge_room
-        for a in adjustments
-        if a.proxy_faculty and a.proxy_faculty.name.lower() == mentor.name.lower() and a.merge_room
-    }
-    original_entries = TimetableEntry.objects.filter(
-        module=module, day_of_week=day_of_week, faculty__iexact=mentor.name
-    )
-    for entry in original_entries:
-        merge_room = merge_room_map.get((selected_date, entry.lecture_no), "")
-        room_val = merge_room or entry.room
-        adj = adj_map.get((entry.batch, entry.lecture_no))
-        entries.append(
-            {
-                "lecture_no": entry.lecture_no,
-                "time_slot": entry.time_slot,
-                "batch": entry.batch,
-                "subject": entry.subject,
-                "room": room_val,
-                "status": "original",
-                "proxy_faculty": adj.proxy_faculty.name if adj and adj.proxy_faculty else "",
-                "has_proxy": bool(adj),
-            }
-        )
+    has_inactive_calendar = False
+    for module in modules:
+        calendar = _calendar_for_module(module)
+        if calendar and not calendar.is_active:
+            has_inactive_calendar = True
 
-    for adj in adjustments:
-        if adj.proxy_faculty and adj.proxy_faculty.name.lower() == mentor.name.lower():
+        adjustments = list(
+            LectureAdjustment.objects.filter(
+                module=module, date=selected_date, status=LectureAdjustment.STATUS_ACTIVE
+            ).select_related("proxy_faculty")
+        )
+        adj_map = {(a.batch, a.lecture_no): a for a in adjustments}
+
+        merge_room_map = {
+            (a.date, a.lecture_no): a.merge_room
+            for a in adjustments
+            if a.proxy_faculty and a.proxy_faculty.name.lower() == mentor.name.lower() and a.merge_room
+        }
+        original_entries = TimetableEntry.objects.filter(
+            module=module, day_of_week=day_of_week, faculty__iexact=mentor.name
+        )
+        for entry in original_entries:
+            merge_room = merge_room_map.get((selected_date, entry.lecture_no), "")
+            room_val = merge_room or entry.room
+            adj = adj_map.get((entry.batch, entry.lecture_no))
             entries.append(
                 {
-                    "lecture_no": adj.lecture_no,
-                    "time_slot": adj.time_slot,
-                    "batch": adj.batch,
-                    "subject": adj.subject,
-                    "room": adj.room,
-                    "status": "proxy",
-                    "proxy_for": adj.original_faculty,
-                    "has_proxy": True,
+                    "module": module,
+                    "module_name": module.name,
+                    "lecture_no": entry.lecture_no,
+                    "time_slot": entry.time_slot,
+                    "batch": entry.batch,
+                    "subject": entry.subject,
+                    "room": room_val,
+                    "status": "original",
+                    "proxy_faculty": adj.proxy_faculty.name if adj and adj.proxy_faculty else "",
+                    "has_proxy": bool(adj),
                 }
             )
 
+        for adj in adjustments:
+            if adj.proxy_faculty and adj.proxy_faculty.name.lower() == mentor.name.lower():
+                entries.append(
+                    {
+                        "module": module,
+                        "module_name": module.name,
+                        "lecture_no": adj.lecture_no,
+                        "time_slot": adj.time_slot,
+                        "batch": adj.batch,
+                        "subject": adj.subject,
+                        "room": adj.room,
+                        "status": "proxy",
+                        "proxy_for": adj.original_faculty,
+                        "has_proxy": True,
+                    }
+                )
+
     has_proxy_alert = any(e.get("status") == "proxy" for e in entries)
-    entries.sort(key=lambda x: (x["lecture_no"], x["time_slot"], x["batch"]))
-    calendar = _calendar_for_module(module)
+    entries.sort(key=lambda x: (x["lecture_no"], x["time_slot"], x["module_name"], x["batch"]))
     return render(
         request,
         "mentor_schedule.html",
@@ -4188,8 +4243,9 @@ def mentor_schedule(request):
             "mentor": mentor,
             "entries": entries,
             "selected_date": selected_date,
-            "calendar": calendar,
             "has_proxy_alert": has_proxy_alert,
+            "has_inactive_calendar": has_inactive_calendar,
+            "dept_filter": dept_filter or "ALL",
         },
     )
 
@@ -4199,13 +4255,26 @@ def mentor_mark_attendance(request):
     if not mentor:
         return redirect("/")
 
-    module = _active_module(request)
+    dept_filter = (request.GET.get("dept") or "").strip().upper()
+    modules = [m for m in allowed_modules_for_user(request) if m.is_active and _dept_matches_module(m, dept_filter)]
     selected_date = _parse_date_param(request.GET.get("date"), timezone.localdate())
-    day_of_week = selected_date.weekday()
-    calendar = _calendar_for_module(module)
-    holiday_dates = _holiday_set(module)
-    is_holiday = selected_date.weekday() == 6 or selected_date in holiday_dates
-    batch_rows = _build_attendance_batch_rows(module, selected_date, mentor=mentor, allow_override=False)
+    is_holiday = selected_date.weekday() == 6
+    has_inactive_calendar = False
+    for module in modules:
+        calendar = _calendar_for_module(module)
+        if calendar and not calendar.is_active:
+            has_inactive_calendar = True
+        if selected_date in _holiday_set(module):
+            is_holiday = True
+
+    batch_rows = []
+    for module in modules:
+        module_rows = _build_attendance_batch_rows(module, selected_date, mentor=mentor, allow_override=False)
+        for row in module_rows:
+            row["module"] = module
+            row["module_name"] = module.name
+        batch_rows.extend(module_rows)
+    batch_rows.sort(key=lambda row: (row.get("module_name", ""), row.get("batch", "")))
 
     return render(
         request,
@@ -4214,8 +4283,9 @@ def mentor_mark_attendance(request):
             "mentor": mentor,
             "batch_rows": batch_rows,
             "selected_date": selected_date,
-            "calendar": calendar,
             "is_holiday": is_holiday,
+            "has_inactive_calendar": has_inactive_calendar,
+            "dept_filter": dept_filter or "ALL",
         },
     )
 
@@ -4743,7 +4813,14 @@ def save_lecture_attendance(request):
     if not mentor and not is_coordinator:
         return JsonResponse({"ok": False, "msg": "Unauthorized"}, status=401)
 
-    module = _active_module(request)
+    module = None
+    module_id = (request.POST.get("module_id") or "").strip()
+    if mentor and module_id:
+        module = allowed_modules_for_user(request).filter(id=module_id, is_active=True).first()
+        if not module:
+            return JsonResponse({"ok": False, "msg": "Module not allowed"}, status=403)
+    if not module:
+        module = _active_module(request)
     date_val = _parse_date_param(request.POST.get("date"))
     batch = (request.POST.get("batch") or "").strip()
     lecture_no_raw = request.POST.get("lecture_no")
@@ -5000,9 +5077,20 @@ def daily_absent_excel(request):
     if not mentor and not request.user.is_authenticated:
         return redirect("/")
 
-    module = _active_module(request)
+    is_coordinator = bool(request.user.is_authenticated and not request.session.get("mentor") and not is_superadmin_user(request.user))
+    module = None
+    module_id = (request.GET.get("module_id") or "").strip()
+    if mentor and module_id:
+        module = allowed_modules_for_user(request).filter(id=module_id, is_active=True).first()
+        if not module:
+            return HttpResponse("Unauthorized", status=403)
+    if not module:
+        module = _active_module(request)
     date_val = _parse_date_param(request.GET.get("date"), timezone.localdate())
     batch_filter = (request.GET.get("batch") or "").strip()
+
+    if is_coordinator and not _attendance_fully_marked_for_date(module, date_val):
+        return HttpResponse("Attendance is not fully marked for this date.", status=400)
 
     sessions_qs = LectureSession.objects.filter(module=module, date=date_val)
     if batch_filter:
@@ -5093,6 +5181,190 @@ def daily_absent_excel(request):
     return response
 
 
+def daily_absent_live(request):
+    mentor = _session_mentor_obj(request)
+    if not mentor and not request.user.is_authenticated:
+        return redirect("/")
+
+    is_coordinator = bool(request.user.is_authenticated and not request.session.get("mentor") and not is_superadmin_user(request.user))
+    module = None
+    module_id = (request.GET.get("module_id") or "").strip()
+    if mentor and module_id:
+        module = allowed_modules_for_user(request).filter(id=module_id, is_active=True).first()
+        if not module:
+            return HttpResponse("Unauthorized", status=403)
+    if not module:
+        module = _active_module(request)
+
+    date_val = _parse_date_param(request.GET.get("date"), timezone.localdate())
+    batch_filter = (request.GET.get("batch") or "").strip()
+
+    if is_coordinator and not _attendance_fully_marked_for_date(module, date_val):
+        return HttpResponse("Attendance is not fully marked for this date.", status=400)
+
+    sessions_qs = LectureSession.objects.filter(module=module, date=date_val)
+    if batch_filter:
+        sessions_qs = sessions_qs.filter(batch=batch_filter)
+    sessions = list(sessions_qs.order_by("batch", "lecture_no"))
+
+    absences = LectureAbsence.objects.filter(session__in=sessions).select_related("student", "session")
+    absences_by_session = {}
+    for a in absences:
+        absences_by_session.setdefault(a.session_id, []).append(a)
+
+    batches = sorted({s.batch for s in sessions})
+    sessions_by_batch = {}
+    for s in sessions:
+        sessions_by_batch.setdefault(s.batch, []).append(s)
+
+    rows = []
+    for batch in batches:
+        for sess in sessions_by_batch.get(batch, []):
+            abs_list = absences_by_session.get(sess.id, [])
+            rolls = sorted([a.student.roll_no for a in abs_list if a.student.roll_no is not None])
+            rows.append(
+                {
+                    "lecture_no": sess.lecture_no,
+                    "time_slot": sess.time_slot,
+                    "batch": batch,
+                    "subject": sess.subject,
+                    "faculty": sess.faculty,
+                    "room": sess.room,
+                    "absent_rolls": rolls,
+                }
+            )
+    rows.sort(key=lambda r: (r["lecture_no"], r["time_slot"], r["batch"]))
+
+    return render(
+        request,
+        "daily_absent_live.html",
+        {
+            "module": module,
+            "selected_date": date_val,
+            "batch_filter": batch_filter,
+            "rows": rows,
+        },
+    )
+
+
+def weekly_attendance_live(request):
+    mentor = _session_mentor_obj(request)
+    if not mentor and not request.user.is_authenticated:
+        return redirect("/")
+
+    is_coordinator = bool(request.user.is_authenticated and not request.session.get("mentor") and not is_superadmin_user(request.user))
+    module = None
+    module_id = (request.GET.get("module_id") or "").strip()
+    if mentor and module_id:
+        module = allowed_modules_for_user(request).filter(id=module_id, is_active=True).first()
+        if not module:
+            return HttpResponse("Unauthorized", status=403)
+    if not module:
+        module = _active_module(request)
+
+    calendar = _calendar_for_module(module)
+    phase = (request.GET.get("phase") or "T1").upper()
+    week_param = (request.GET.get("week") or "all").strip().lower()
+    week_no = None if week_param in {"all", ""} else int(week_param) + 1
+
+    start, end = phase_range(calendar, phase)
+    if not start or not end:
+        return render(
+            request,
+            "weekly_attendance_live.html",
+            {
+                "module": module,
+                "calendar": calendar,
+                "phase": phase,
+                "week_param": week_param,
+                "subject_list": [],
+                "rows": [],
+                "message": "Academic calendar not configured.",
+            },
+        )
+
+    end_date = end_date_for_week(calendar, phase, week_no)
+    if end_date and end_date > end:
+        end_date = end
+
+    if is_coordinator and not _attendance_fully_marked_for_range(module, start, end_date or end):
+        return HttpResponse("Attendance is not fully marked for the selected range.", status=400)
+
+    sessions = list(
+        LectureSession.objects.filter(module=module, date__gte=start, date__lte=end_date or end)
+    )
+    session_ids = [s.id for s in sessions]
+    absences = LectureAbsence.objects.filter(session_id__in=session_ids).select_related("session", "student")
+
+    subject_list = sorted({(s.subject or "").strip() for s in sessions if (s.subject or "").strip()})
+    week_set = set()
+    for s in sessions:
+        _, week_idx = week_for_date(calendar, s.date)
+        if week_idx:
+            week_set.add(week_idx)
+    week_list = sorted(week_set)
+
+    held_by_batch_subject = {}
+    held_by_batch = {}
+    for s in sessions:
+        held_by_batch.setdefault(s.batch, 0)
+        held_by_batch[s.batch] += 1
+        subj = (s.subject or "").strip()
+        held_by_batch_subject.setdefault(s.batch, {}).setdefault(subj, 0)
+        held_by_batch_subject[s.batch][subj] += 1
+
+    absent_by_student_subject = {}
+    absent_by_student = {}
+    for a in absences:
+        sid = a.student_id
+        absent_by_student[sid] = absent_by_student.get(sid, 0) + 1
+        subj = (a.session.subject or "").strip()
+        absent_by_student_subject.setdefault(sid, {}).setdefault(subj, 0)
+        absent_by_student_subject[sid][subj] += 1
+
+    students = list(Student.objects.filter(module=module).order_by("roll_no", "name"))
+
+    rows = []
+    for student in students:
+        batch = student.batch or ""
+        held_total = held_by_batch.get(batch, 0)
+        absent_total = absent_by_student.get(student.id, 0)
+        attended_total = max(held_total - absent_total, 0)
+        overall_pct = round((attended_total / held_total) * 100, 2) if held_total else 0
+
+        subject_rows = []
+        for subj in subject_list:
+            held = held_by_batch_subject.get(batch, {}).get(subj, 0)
+            absent = absent_by_student_subject.get(student.id, {}).get(subj, 0)
+            attended = max(held - absent, 0)
+            pct = round((attended / held) * 100, 2) if held else 0
+            subject_rows.append({"attended": attended, "held": held, "percent": pct})
+
+        rows.append(
+            {
+                "student": student,
+                "subjects": subject_rows,
+                "attended_total": attended_total,
+                "held_total": held_total,
+                "overall_pct": overall_pct,
+            }
+        )
+
+    return render(
+        request,
+        "weekly_attendance_live.html",
+        {
+            "module": module,
+            "calendar": calendar,
+            "phase": phase,
+            "week_param": week_param,
+            "week_list": week_list,
+            "subject_list": subject_list,
+            "rows": rows,
+        },
+    )
+
+
 def weekly_attendance_excel(request):
     if request.session.get("mentor"):
         return HttpResponse("Forbidden", status=403)
@@ -5100,6 +5372,7 @@ def weekly_attendance_excel(request):
         return redirect("/")
 
     module = _active_module(request)
+    is_coordinator = bool(request.user.is_authenticated and not request.session.get("mentor") and not is_superadmin_user(request.user))
     calendar = _calendar_for_module(module)
     phase = (request.GET.get("phase") or "T1").upper()
     week_param = (request.GET.get("week") or "all").strip().lower()
@@ -5112,6 +5385,9 @@ def weekly_attendance_excel(request):
     end_date = end_date_for_week(calendar, phase, week_no)
     if end_date and end_date > end:
         end_date = end
+
+    if is_coordinator and not _attendance_fully_marked_for_range(module, start, end_date or end):
+        return HttpResponse("Attendance is not fully marked for the selected range.", status=400)
 
     sessions = list(
         LectureSession.objects.filter(module=module, date__gte=start, date__lte=end_date or end)

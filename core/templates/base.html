@@ -498,7 +498,9 @@
                 {% csrf_token %}
                 <input type="hidden" name="next" value="{{ request.get_full_path }}">
                 {% if request.session.mentor %}
-                <span class="text-white fw-semibold me-1">Hi {{ mentor_display_name }}</span>
+                <span class="text-white fw-semibold me-1">Hi, {{ mentor_display_name }}</span>
+                {% elif request.user.is_authenticated %}
+                <span class="text-white fw-semibold me-1">Hi, {{ login_role_name }}</span>
                 {% endif %}
                 <select name="module_id" class="form-select form-select-sm module-select"
                     onchange="this.form.submit()">

@@ -106,10 +106,16 @@
             <div class="fw-bold">Batch: {{ batch.batch }}</div>
             <div class="text-muted small">{{ batch.slots|length }} lecture{{ batch.slots|length|pluralize }} scheduled</div>
         </div>
-        <a class="btn btn-sm btn-outline-secondary"
-           href="/attendance-analytics/daily-excel/?date={{ selected_date|date:'Y-m-d' }}&batch={{ batch.batch|urlencode }}">
-            Download Excel
-        </a>
+        <div class="d-flex gap-2">
+            <a class="btn btn-sm btn-outline-secondary"
+               href="/attendance-analytics/daily-live/?date={{ selected_date|date:'Y-m-d' }}&batch={{ batch.batch|urlencode }}">
+                View Live
+            </a>
+            <a class="btn btn-sm btn-outline-secondary"
+               href="/attendance-analytics/daily-excel/?date={{ selected_date|date:'Y-m-d' }}&batch={{ batch.batch|urlencode }}">
+                Download Excel
+            </a>
+        </div>
     </div>
     <div class="card-body py-2">
         {% for slot in batch.slots %}
