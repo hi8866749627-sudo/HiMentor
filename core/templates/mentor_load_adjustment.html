@@ -93,7 +93,7 @@
                                     <option value="">Select</option>
                                     {% for f in row.faculties %}
                                         <option value="{{ f.name }}" data-subject="{{ f.subject }}" data-conflict="{{ f.has_conflict|yesno:'1,0' }}">
-                                            {{ f.name }}{% if f.subject %} - {{ f.subject }}{% endif %}{% if f.has_conflict %} (Busy){% endif %}
+                                            {{ f.name }}{% if f.subject %} - {{ f.subject }}{% endif %}{% if f.has_conflict %} (Busy{% if f.conflict_dept %} - {{ f.conflict_dept }}{% endif %}){% endif %}
                                         </option>
                                     {% endfor %}
                                 </select>

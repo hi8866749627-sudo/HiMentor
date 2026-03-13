@@ -4751,6 +4751,11 @@ def _build_adjustment_rows(module, selected_date, faculty_filter="", exclude_pro
             ).select_related("proxy_faculty")
         ]
         conflict_faculties = set(e.faculty for e in conflict_entries if e.faculty)
+        conflict_depts = {
+            str(e.faculty).strip().lower(): _dept_label_from_module(e.module)
+            for e in conflict_entries
+            if e.faculty
+        }
         conflict_rooms = {
             str(e.faculty).strip().lower(): e.room
             for e in conflict_entries
@@ -4761,6 +4766,7 @@ def _build_adjustment_rows(module, selected_date, faculty_filter="", exclude_pro
             if not faculty_name:
                 continue
             conflict_faculties.add(faculty_name)
+            conflict_depts.setdefault(faculty_name.lower(), _dept_label_from_module(item.module))
             if item.room:
                 conflict_rooms[faculty_name.lower()] = item.room
 
@@ -4779,6 +4785,7 @@ def _build_adjustment_rows(module, selected_date, faculty_filter="", exclude_pro
                     "name": fac,
                     "subject": subject_label,
                     "has_conflict": fac in conflict_faculties,
+                    "conflict_dept": conflict_depts.get(fac.lower(), ""),
                 }
             )
         batch_faculties.sort(key=lambda x: x["name"])
