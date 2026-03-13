@@ -19,11 +19,25 @@
             </tr>
             <tr>
                 <th><input id="f_roll" value="{{filters.roll}}" class="form-control form-control-sm"></th>
-                <th><input id="f_batch" value="{{filters.batch}}" class="form-control form-control-sm"></th>
+                <th>
+                    <select id="f_batch" class="form-select form-select-sm">
+                        <option value="">All</option>
+                        {% for b in batch_choices %}
+                        <option value="{{ b }}" {% if filters.batch == b %}selected{% endif %}>{{ b }}</option>
+                        {% endfor %}
+                    </select>
+                </th>
                 <th><input id="f_division" value="{{filters.division}}" class="form-control form-control-sm"></th>
                 <th><input id="f_enrollment" value="{{filters.enrollment}}" class="form-control form-control-sm"></th>
                 <th><input id="f_name" value="{{filters.name}}" class="form-control form-control-sm"></th>
-                <th><input id="f_mentor" value="{{filters.mentor}}" class="form-control form-control-sm"></th>
+                <th>
+                    <select id="f_mentor" class="form-select form-select-sm">
+                        <option value="">All</option>
+                        {% for m in mentor_choices %}
+                        <option value="{{ m }}" {% if filters.mentor == m %}selected{% endif %}>{{ m }}</option>
+                        {% endfor %}
+                    </select>
+                </th>
                 <th><input id="f_student_mobile" value="{{filters.student_mobile}}" class="form-control form-control-sm"></th>
                 <th>
                     <div class="d-flex gap-1">
@@ -111,6 +125,7 @@
     Object.values(inputs).forEach(function(el){
         if(!el){ return; }
         el.addEventListener("input", filterRows);
+        el.addEventListener("change", filterRows);
     });
     filterRows();
 })();

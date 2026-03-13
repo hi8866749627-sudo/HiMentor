@@ -3336,6 +3336,8 @@ def mentor_student_data(request):
 
     module = _active_module(request)
     qs = Student.objects.select_related("mentor").filter(module=module)
+    batch_choices = sorted({(v or "").strip() for v in qs.values_list("batch", flat=True) if (v or "").strip()})
+    mentor_choices = sorted({(v or "").strip() for v in qs.values_list("mentor__name", flat=True) if (v or "").strip()})
 
     filters = {
         "roll": (request.GET.get("f_roll") or "").strip(),
@@ -3393,6 +3395,8 @@ def mentor_student_data(request):
         {
             "students": students,
             "filters": filters,
+            "batch_choices": batch_choices,
+            "mentor_choices": mentor_choices,
             "sort": sort,
             "direction": direction,
             "dir_roll": next_dir("roll"),
@@ -5533,6 +5537,13 @@ def attendance_analytics(request):
     week_no = None if week_param in {"all", ""} else int(week_param) + 1
     batch_filter = (request.GET.get("batch") or "").strip()
     search = (request.GET.get("search") or "").strip()
+    batch_choices = sorted(
+        {
+            (v or "").strip()
+            for v in Student.objects.filter(module=module).values_list("batch", flat=True)
+            if (v or "").strip()
+        }
+    )
 
     start, end = phase_range(calendar, phase)
     if not start or not end:
@@ -5549,6 +5560,7 @@ def attendance_analytics(request):
                 "rows": [],
                 "week_list": [],
                 "subject_list": [],
+                "batch_choices": batch_choices,
                 "message": "Set the academic calendar first.",
             },
         )
@@ -5677,6 +5689,7 @@ def attendance_analytics(request):
             "rows": rows,
             "week_list": week_list,
             "subject_list": subject_list,
+            "batch_choices": batch_choices,
         },
     )
 

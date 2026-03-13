@@ -72,11 +72,11 @@
             </tr>
             <tr>
                 <th><input id="f_roll" class="form-control form-control-sm" placeholder="Filter"></th>
-                <th><input id="f_batch" class="form-control form-control-sm" placeholder="Filter"></th>
+                <th><select id="f_batch" class="form-select form-select-sm"><option value="">All</option></select></th>
                 <th><input id="f_division" class="form-control form-control-sm" placeholder="Filter"></th>
                 <th><input id="f_enrollment" class="form-control form-control-sm" placeholder="Filter"></th>
                 <th><input id="f_name" class="form-control form-control-sm" placeholder="Filter"></th>
-                <th><input id="f_mentor" class="form-control form-control-sm" placeholder="Filter"></th>
+                <th><select id="f_mentor" class="form-select form-select-sm"><option value="">All</option></select></th>
                 <th><input id="f_student_mobile" class="form-control form-control-sm" placeholder="Filter"></th>
                 <th>
                     <div class="d-flex gap-1">
@@ -123,6 +123,19 @@
 
         const norm = (v) => (v || "").toString().toLowerCase().trim();
 
+        function fillSelectOptions(selectEl, values) {
+            if (!selectEl) { return; }
+            const current = selectEl.value;
+            selectEl.innerHTML = '<option value="">All</option>';
+            values.forEach(function(v){
+                const opt = document.createElement("option");
+                opt.value = v;
+                opt.textContent = v;
+                if (current === v) { opt.selected = true; }
+                selectEl.appendChild(opt);
+            });
+        }
+
         function filterRows() {
             const q = {
                 roll: norm(inputs.roll.value),
@@ -161,11 +174,17 @@
             });
         }
 
+        const batchValues = Array.from(new Set(rows.map(r => norm(r.querySelectorAll("td")[1]?.innerText)).filter(Boolean))).sort();
+        const mentorValues = Array.from(new Set(rows.map(r => norm(r.querySelectorAll("td")[5]?.innerText)).filter(Boolean))).sort();
+        fillSelectOptions(inputs.batch, batchValues);
+        fillSelectOptions(inputs.mentor, mentorValues);
+
         const clearBtn = document.getElementById("clearFiltersBtn");
 
         Object.values(inputs).forEach(function (el) {
             if (!el) { return; }
             el.addEventListener("input", filterRows);
+            el.addEventListener("change", filterRows);
         });
 
         if (clearBtn) {
