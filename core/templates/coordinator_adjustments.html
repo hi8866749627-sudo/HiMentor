@@ -28,6 +28,7 @@
                         <th>Subject</th>
                         <th>Original</th>
                         <th>Proxy</th>
+                        <th>New Subject</th>
                         <th>Room</th>
                         <th>Status</th>
                         <th></th>
@@ -39,9 +40,10 @@
                         <td>{{ a.date|date:"d M Y" }}</td>
                         <td>{{ a.lecture_no }}</td>
                         <td>{{ a.batch }}</td>
-                        <td>{{ a.subject }}</td>
+                        <td>{{ a.timetable_entry.subject|default:a.subject }}</td>
                         <td>{{ a.original_faculty }}</td>
                         <td>{% if a.proxy_faculty %}{{ a.proxy_faculty.name }}{% endif %}</td>
+                        <td>{{ a.subject }}</td>
                         <td>{{ a.room }}</td>
                         <td>
                             {% if a.status == "active" %}

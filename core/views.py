@@ -209,6 +209,13 @@ def _dept_matches_module(module, dept_key):
     return variant.startswith(dept_key) or name.startswith(dept_key) or f"{dept_key}_" in name
 
 
+def _dept_label_from_module(module):
+    for key in ("FY1", "FY2", "FY3", "FY4", "FY5"):
+        if _dept_matches_module(module, key):
+            return key
+    return (getattr(module, "year_level", "") or "").upper() or "NA"
+
+
 def _attendance_fully_marked_for_date(module, date_val):
     day_of_week = date_val.weekday()
     expected = set(
@@ -445,13 +452,25 @@ def manage_mentors(request):
         return redirect("/mentor-dashboard/")
 
     module = _active_module(request)
+    faculty_names = sorted(
+        {
+            (name or "").strip()
+            for name in TimetableEntry.objects.filter(module=module)
+            .exclude(faculty="")
+            .values_list("faculty", flat=True)
+        }
+    )
+    faculty_names = [n for n in faculty_names if n]
+    for name in faculty_names:
+        Mentor.objects.get_or_create(name=name)
 
     if request.method == "POST":
         action = (request.POST.get("action") or "").strip()
         mentor_id = request.POST.get("mentor_id")
         mentor = Mentor.objects.filter(id=mentor_id).first() if mentor_id else None
         module_mentor_ids = set(Student.objects.filter(module=module).values_list("mentor_id", flat=True))
-        if not mentor or mentor.id not in module_mentor_ids:
+        module_faculty_names = {n.lower() for n in faculty_names}
+        if not mentor or (mentor.id not in module_mentor_ids and mentor.name.lower() not in module_faculty_names):
             messages.error(request, "Mentor not found for current module.")
             return redirect("/manage-mentors/")
 
@@ -472,7 +491,7 @@ def manage_mentors(request):
         return redirect("/manage-mentors/")
 
     mentors = (
-        Mentor.objects.filter(student__module=module)
+        Mentor.objects.filter(Q(student__module=module) | Q(name__in=faculty_names))
         .distinct()
         .annotate(student_count=Count("student", filter=Q(student__module=module)))
         .order_by("name")
@@ -4212,6 +4231,7 @@ def mentor_schedule(request):
                 {
                     "module": module,
                     "module_name": module.name,
+                    "dept_label": _dept_label_from_module(module),
                     "lecture_no": entry.lecture_no,
                     "time_slot": time_slot_val,
                     "batch": entry.batch,
@@ -4229,6 +4249,7 @@ def mentor_schedule(request):
                     {
                         "module": module,
                         "module_name": module.name,
+                        "dept_label": _dept_label_from_module(module),
                         "lecture_no": adj.lecture_no,
                         "time_slot": adj.time_slot,
                         "batch": adj.batch,
@@ -4279,6 +4300,7 @@ def mentor_mark_attendance(request):
         for row in module_rows:
             row["module"] = module
             row["module_name"] = module.name
+            row["dept_label"] = _dept_label_from_module(module)
         batch_rows.extend(module_rows)
     batch_rows.sort(key=lambda row: (row.get("module_name", ""), row.get("batch", "")))
 
@@ -4654,6 +4676,17 @@ def manage_rooms(request):
         return redirect("/mentor-dashboard/")
 
     module = _active_module(request)
+    timetable_rooms = sorted(
+        {
+            (r or "").strip()
+            for r in TimetableEntry.objects.filter(module=module)
+            .exclude(room="")
+            .values_list("room", flat=True)
+        }
+    )
+    timetable_rooms = [r for r in timetable_rooms if r]
+    for name in timetable_rooms:
+        Room.objects.update_or_create(module=module, name=name, defaults={"is_active": True})
     if request.method == "POST":
         action = (request.POST.get("action") or "").strip()
         if action == "add":
