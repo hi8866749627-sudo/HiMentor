@@ -209,6 +209,12 @@ function updateGlobalStatus() {
 
 function markDirty(form) {
     form.dataset.dirty = "1";
+    const saveBtn = form.querySelector('.save-btn');
+    if (saveBtn) {
+        saveBtn.textContent = "Save";
+        saveBtn.classList.remove('btn-warning', 'text-dark');
+        saveBtn.classList.add('btn-primary');
+    }
     const status = form.querySelector('.save-status');
     if (status) {
         status.textContent = "Unsaved changes";
@@ -220,6 +226,12 @@ function markDirty(form) {
 
 function markSaved(form) {
     form.dataset.dirty = "0";
+    const saveBtn = form.querySelector('.save-btn');
+    if (saveBtn) {
+        saveBtn.textContent = "SAVED";
+        saveBtn.classList.remove('btn-primary');
+        saveBtn.classList.add('btn-warning', 'text-dark');
+    }
     const status = form.querySelector('.save-status');
     if (status) {
         status.textContent = "All changes saved";
