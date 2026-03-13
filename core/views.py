@@ -4200,16 +4200,22 @@ def mentor_schedule(request):
         )
         for entry in original_entries:
             merge_room = merge_room_map.get((selected_date, entry.lecture_no), "")
-            room_val = merge_room or entry.room
             adj = adj_map.get((entry.batch, entry.lecture_no))
+            subject_val = entry.subject
+            time_slot_val = entry.time_slot
+            room_val = merge_room or entry.room
+            if adj and adj.proxy_faculty:
+                subject_val = adj.subject or subject_val
+                time_slot_val = adj.time_slot or time_slot_val
+                room_val = adj.room or room_val
             entries.append(
                 {
                     "module": module,
                     "module_name": module.name,
                     "lecture_no": entry.lecture_no,
-                    "time_slot": entry.time_slot,
+                    "time_slot": time_slot_val,
                     "batch": entry.batch,
-                    "subject": entry.subject,
+                    "subject": subject_val,
                     "room": room_val,
                     "status": "original",
                     "proxy_faculty": adj.proxy_faculty.name if adj and adj.proxy_faculty else "",
@@ -4351,10 +4357,12 @@ def _build_attendance_batch_rows(module, selected_date, mentor=None, allow_overr
         for item in batch_entries:
             entry = item["entry"]
             adj = item.get("adjustment")
-            if adj and adj.proxy_faculty:
+            if adj:
                 entry.subject = adj.subject or entry.subject
+                entry.time_slot = adj.time_slot or entry.time_slot
                 entry.room = adj.room or entry.room
-                entry.faculty = adj.proxy_faculty.name
+                if adj.proxy_faculty:
+                    entry.faculty = adj.proxy_faculty.name
             if mentor:
                 merge_room = merge_room_by_proxy.get((selected_date, entry.lecture_no, mentor.name.lower()), "")
                 if merge_room and entry.faculty.lower() == mentor.name.lower():
