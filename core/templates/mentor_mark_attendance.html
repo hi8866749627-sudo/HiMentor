@@ -49,6 +49,9 @@
     font-size: .76rem;
     border-radius: .35rem;
 }
+.roll-grid-compact .btn-success {
+    color: #fff;
+}
 .slot-actions {
     display: flex;
     flex-wrap: wrap;
@@ -117,6 +120,7 @@
                     <div class="slot-meta">
                         <div class="slot-title">L{{ slot.entry.lecture_no }} - {{ slot.entry.time_slot }}</div>
                         <div>{{ slot.entry.subject }}</div>
+                        <div class="slot-sub">Select only absent numbers. Rest are present by default. Then save.</div>
                         <div class="slot-sub">
                             {{ slot.entry.faculty }}
                             {% if slot.adjustment and slot.adjustment.proxy_faculty %}
@@ -135,7 +139,7 @@
                     <div class="roll-grid-compact">
                         {% for s in batch.students %}
                         <button type="button"
-                                class="btn btn-sm roll-btn {% if s.roll_no in slot.absent_rolls %}btn-danger{% else %}btn-outline-success{% endif %}"
+                                class="btn btn-sm roll-btn {% if s.roll_no in slot.absent_rolls %}btn-danger{% else %}btn-success{% endif %}"
                                 data-roll="{{ s.roll_no }}"
                                 data-absent="{% if s.roll_no in slot.absent_rolls %}1{% else %}0{% endif %}"
                                 {% if slot.adjustment and slot.adjustment.proxy_faculty and slot.adjustment.proxy_faculty.name != mentor.name %}disabled{% endif %}>
@@ -180,7 +184,7 @@ document.querySelectorAll('.attendance-form').forEach(form => {
             rollButtons.forEach(btn => {
                 btn.dataset.absent = "0";
                 btn.classList.remove('btn-danger');
-                btn.classList.add('btn-outline-success');
+                btn.classList.add('btn-success');
             });
             saveBtn.click();
         });
@@ -192,10 +196,10 @@ document.querySelectorAll('.attendance-form').forEach(form => {
             if (isAbsent) {
                 btn.dataset.absent = "0";
                 btn.classList.remove('btn-danger');
-                btn.classList.add('btn-outline-success');
+                btn.classList.add('btn-success');
             } else {
                 btn.dataset.absent = "1";
-                btn.classList.remove('btn-outline-success');
+                btn.classList.remove('btn-success');
                 btn.classList.add('btn-danger');
             }
         });

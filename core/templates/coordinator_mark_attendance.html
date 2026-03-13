@@ -54,6 +54,9 @@
     font-size: .76rem;
     border-radius: .35rem;
 }
+.roll-grid-compact .btn-success {
+    color: #fff;
+}
 .slot-actions {
     display: flex;
     flex-wrap: wrap;
@@ -121,6 +124,7 @@
                     <div class="slot-meta">
                         <div class="slot-title">L{{ slot.entry.lecture_no }} - {{ slot.entry.time_slot }}</div>
                         <div>{{ slot.entry.subject }}</div>
+                        <div class="slot-sub">Select only absent numbers. Rest are present by default. Then save.</div>
                         <div class="slot-sub">
                             {{ slot.entry.faculty }} · {{ slot.entry.room }}
                             {% if slot.adjustment and slot.adjustment.proxy_faculty %}
@@ -135,7 +139,7 @@
                     <div class="roll-grid-compact">
                         {% for s in batch.students %}
                         <button type="button"
-                                class="btn btn-sm roll-btn {% if s.roll_no in slot.absent_rolls %}btn-danger{% else %}btn-outline-success{% endif %}"
+                                class="btn btn-sm roll-btn {% if s.roll_no in slot.absent_rolls %}btn-danger{% else %}btn-success{% endif %}"
                                 data-roll="{{ s.roll_no }}"
                                 data-absent="{% if s.roll_no in slot.absent_rolls %}1{% else %}0{% endif %}">
                             {{ s.roll_no }}
@@ -168,7 +172,7 @@ function getCsrfToken(form) {
 function setRollState(btn, absent) {
     btn.dataset.absent = absent ? "1" : "0";
     btn.classList.toggle('btn-danger', absent);
-    btn.classList.toggle('btn-outline-success', !absent);
+    btn.classList.toggle('btn-success', !absent);
 }
 
 document.querySelectorAll('.attendance-form').forEach(form => {
