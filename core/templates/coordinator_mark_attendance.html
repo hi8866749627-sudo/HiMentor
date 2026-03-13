@@ -39,19 +39,18 @@
     font-size: .8rem;
 }
 .roll-grid-compact {
-    display: flex;
-    flex-wrap: wrap;
-    gap: .2rem;
+    display: grid;
+    grid-template-columns: repeat(16, minmax(0, 1fr));
+    gap: .28rem;
     min-width: 0;
-    align-content: flex-start;
     max-width: 100%;
 }
 .roll-grid-compact .roll-btn {
-    min-width: 30px;
-    flex: 0 0 auto;
-    padding: .1rem .3rem;
-    line-height: 1.1;
-    font-size: .76rem;
+    width: 100%;
+    min-width: 0;
+    padding: .28rem .2rem;
+    line-height: 1.15;
+    font-size: .84rem;
     border-radius: .35rem;
 }
 .roll-grid-compact .btn-success {
@@ -70,6 +69,9 @@
 @media (max-width: 991.98px) {
     .compact-slot-row {
         grid-template-columns: 1fr;
+    }
+    .roll-grid-compact {
+        grid-template-columns: repeat(10, minmax(0, 1fr));
     }
     .slot-actions {
         justify-content: flex-start;
