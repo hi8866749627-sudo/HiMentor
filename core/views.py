@@ -4704,7 +4704,7 @@ def _build_adjustment_rows(module, selected_date, faculty_filter="", exclude_pro
     faculty_choices = sorted(
         {
             (name or "").strip()
-            for name in TimetableEntry.objects.filter(module__in=active_modules, is_active=True)
+            for name in TimetableEntry.objects.filter(module=module, is_active=True)
             .exclude(faculty="")
             .values_list("faculty", flat=True)
         }
@@ -4727,7 +4727,7 @@ def _build_adjustment_rows(module, selected_date, faculty_filter="", exclude_pro
         slot_started = _slot_has_started(selected_date, (adj.time_slot if adj and adj.time_slot else entry.time_slot))
         slot_faculty_subjects = {}
         slot_entries = TimetableEntry.objects.filter(
-            module__in=active_modules, day_of_week=day_of_week, lecture_no=entry.lecture_no, is_active=True
+            module=module, day_of_week=day_of_week, lecture_no=entry.lecture_no, is_active=True
         ).exclude(faculty="")
         for se in slot_entries:
             slot_faculty_subjects.setdefault(se.faculty, set()).add(se.subject)
