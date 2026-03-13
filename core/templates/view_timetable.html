@@ -14,6 +14,15 @@
             {% endfor %}
         </select>
     </div>
+    <div class="col-md-2">
+        <label class="form-label">Lecture</label>
+        <select name="lecture_no" class="form-select">
+            <option value="">All</option>
+            {% for lec in lecture_choices %}
+                <option value="{{ lec }}" {% if lecture_filter == lec|stringformat:'s' %}selected{% endif %}>L{{ lec }}</option>
+            {% endfor %}
+        </select>
+    </div>
     <div class="col-md-3">
         <label class="form-label">Batch</label>
         <select name="batch" class="form-select">
@@ -24,8 +33,31 @@
         </select>
     </div>
     <div class="col-md-3">
+        <label class="form-label">Subject</label>
+        <select name="subject" class="form-select">
+            <option value="">All</option>
+            {% for s in subjects %}
+                <option value="{{ s }}" {% if subject_filter == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-md-3">
         <label class="form-label">Faculty</label>
-        <input type="text" name="faculty" class="form-control" value="{{ faculty_filter }}">
+        <select name="faculty" class="form-select">
+            <option value="">All</option>
+            {% for f in faculties %}
+                <option value="{{ f }}" {% if faculty_filter == f %}selected{% endif %}>{{ f }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-md-2">
+        <label class="form-label">Room</label>
+        <select name="room" class="form-select">
+            <option value="">All</option>
+            {% for r in rooms %}
+                <option value="{{ r }}" {% if room_filter == r %}selected{% endif %}>{{ r }}</option>
+            {% endfor %}
+        </select>
     </div>
     <div class="col-md-2">
         <button class="btn btn-primary" type="submit">Filter</button>
@@ -51,23 +83,48 @@
             </div>
             <div class="col-md-2">
                 <label class="form-label">Lecture</label>
-                <input type="number" name="lecture_no" class="form-control" min="1" required>
+                <select name="lecture_no" class="form-select" required>
+                    <option value="">Select</option>
+                    {% for lec in lecture_choices %}
+                        <option value="{{ lec }}">L{{ lec }}</option>
+                    {% endfor %}
+                </select>
             </div>
             <div class="col-md-2">
                 <label class="form-label">Batch</label>
-                <input type="text" name="batch" class="form-control" required>
+                <select name="batch" class="form-select" required>
+                    <option value="">Select</option>
+                    {% for b in batches %}
+                        <option value="{{ b }}">{{ b }}</option>
+                    {% endfor %}
+                </select>
             </div>
             <div class="col-md-2">
                 <label class="form-label">Subject</label>
-                <input type="text" name="subject" class="form-control" required>
+                <select name="subject" class="form-select" required>
+                    <option value="">Select</option>
+                    {% for s in subjects %}
+                        <option value="{{ s }}">{{ s }}</option>
+                    {% endfor %}
+                </select>
             </div>
             <div class="col-md-2">
                 <label class="form-label">Faculty</label>
-                <input type="text" name="faculty" class="form-control">
+                <select name="faculty" class="form-select">
+                    <option value="">Select</option>
+                    {% for f in faculties %}
+                        <option value="{{ f }}">{{ f }}</option>
+                    {% endfor %}
+                </select>
             </div>
             <div class="col-md-2">
                 <label class="form-label">Room</label>
-                <input type="text" name="room" class="form-control">
+                <select name="room" class="form-select">
+                    <option value="">Select</option>
+                    {% for r in rooms %}
+                        <option value="{{ r }}">{{ r }}</option>
+                    {% endfor %}
+                </select>
             </div>
             <div class="col-md-2">
                 <label class="form-label">Time</label>

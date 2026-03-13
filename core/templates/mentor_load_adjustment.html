@@ -25,25 +25,42 @@
         <button class="btn btn-primary" type="submit">Show</button>
     </div>
 </form>
-{% if is_coordinator %}
-<div class="alert alert-info py-2">You can assign any faculty. Conflicts are allowed.</div>
-{% endif %}
+
+<div class="alert alert-info py-2">
+    Proxy assigns a different faculty to the same lecture. Swap exchanges time slots on the same day, while each faculty keeps their own batch and subject.
+</div>
 
 {% for row in rows %}
 <div class="card mb-3">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <span>Lec {{ row.entry.lecture_no }} · {{ row.entry.time_slot }} · {{ row.entry.batch }} · {{ row.entry.subject }}</span>
+        <span>L{{ row.entry.lecture_no }} · {{ row.entry.time_slot }} · {{ row.entry.batch }} · {{ row.entry.subject }} · {{ row.entry.faculty }}</span>
         {% if row.adjustment %}
-            <span class="badge bg-warning text-dark">Proxy</span>
+            {% if row.adjustment.adjustment_type == "swap" %}
+                <span class="badge bg-info text-dark">Swap</span>
+            {% else %}
+                <span class="badge bg-warning text-dark">Proxy</span>
+            {% endif %}
         {% endif %}
     </div>
     <div class="card-body">
         <div class="mb-2 text-muted small">Room: {{ row.entry.room }}</div>
 
         {% if row.adjustment %}
-            <div class="alert alert-info">
-                Proxy assigned to <strong>{{ row.adjustment.proxy_faculty.name }}</strong> in room <strong>{{ row.adjustment.room }}</strong>.
-            </div>
+            {% if row.adjustment.adjustment_type == "swap" %}
+                <div class="alert alert-info">
+                    Swapped to <strong>{{ row.adjustment.time_slot }}</strong>.
+                    {% if row.adjustment.swap_batch and row.adjustment.swap_lecture_no %}
+                        Partner lecture: <strong>{{ row.adjustment.swap_batch }}</strong> · <strong>L{{ row.adjustment.swap_lecture_no }}</strong>
+                        {% if row.adjustment.swap_time_slot %} · {{ row.adjustment.swap_time_slot }}{% endif %}
+                    {% endif %}
+                    {% if row.adjustment.remarks %}<div class="small mt-1">Remarks: {{ row.adjustment.remarks }}</div>{% endif %}
+                </div>
+            {% else %}
+                <div class="alert alert-warning">
+                    Proxy assigned to <strong>{{ row.adjustment.proxy_faculty.name }}</strong> in room <strong>{{ row.adjustment.room }}</strong>.
+                    {% if row.adjustment.remarks %}<div class="small mt-1">Remarks: {{ row.adjustment.remarks }}</div>{% endif %}
+                </div>
+            {% endif %}
             <form method="post">
                 {% csrf_token %}
                 <input type="hidden" name="action" value="cancel">
@@ -52,60 +69,99 @@
                     <input type="hidden" name="faculty" value="{{ selected_faculty }}">
                 {% endif %}
                 <button class="btn btn-outline-danger" type="submit" {% if row.slot_started %}disabled{% endif %}>
-                    Cancel Proxy
+                    Cancel {{ row.adjustment.adjustment_type|title }}
                 </button>
                 {% if row.slot_started %}
                     <span class="text-muted small ms-2">Lecture already started.</span>
                 {% endif %}
             </form>
         {% else %}
-            <form method="post" class="row g-2 align-items-end" data-allow-conflict="{{ is_coordinator|yesno:'1,0' }}">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="create">
-                <input type="hidden" name="entry_id" value="{{ row.entry.id }}">
-                {% if is_coordinator and selected_faculty %}
-                    <input type="hidden" name="faculty" value="{{ selected_faculty }}">
-                {% endif %}
-                <div class="col-md-3">
-                    <label class="form-label">Proxy Faculty</label>
-                    <select name="proxy_faculty" class="form-select">
-                        <option value="">Select</option>
-                        {% for f in row.faculties %}
-                            <option value="{{ f.name }}" data-subject="{{ f.subject }}" data-conflict="{{ f.has_conflict|yesno:'1,0' }}"
-                                {% if f.has_conflict %}class="text-danger"{% endif %}>
-                                {{ f.name }}{% if f.subject %} - {{ f.subject }}{% endif %}{% if f.has_conflict %} (Busy){% endif %}
-                            </option>
-                        {% endfor %}
-                    </select>
-                    <input type="hidden" name="proxy_subject" value="">
-                    <input type="hidden" name="merge_room" value="">
+            <div class="row g-3">
+                <div class="col-lg-7">
+                    <div class="border rounded p-3 h-100">
+                        <div class="fw-semibold mb-2">Proxy Lecture</div>
+                        <form method="post" class="row g-2 align-items-end" data-allow-conflict="{{ is_coordinator|yesno:'1,0' }}">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="create_proxy">
+                            <input type="hidden" name="entry_id" value="{{ row.entry.id }}">
+                            {% if is_coordinator and selected_faculty %}
+                                <input type="hidden" name="faculty" value="{{ selected_faculty }}">
+                            {% endif %}
+                            <div class="col-md-5">
+                                <label class="form-label">Proxy Faculty</label>
+                                <select name="proxy_faculty" class="form-select">
+                                    <option value="">Select</option>
+                                    {% for f in row.faculties %}
+                                        <option value="{{ f.name }}" data-subject="{{ f.subject }}" data-conflict="{{ f.has_conflict|yesno:'1,0' }}">
+                                            {{ f.name }}{% if f.subject %} - {{ f.subject }}{% endif %}{% if f.has_conflict %} (Busy){% endif %}
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                                <input type="hidden" name="proxy_subject" value="">
+                                <input type="hidden" name="merge_room" value="">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Available Room</label>
+                                <select name="room_select" class="form-select"
+                                        data-base-rooms='{{ row.available_rooms_json|escapejs }}'
+                                        data-conflict-rooms='{{ row.conflict_rooms_json|escapejs }}'>
+                                    <option value="">Select</option>
+                                    {% for r in row.available_rooms %}
+                                        <option value="{{ r }}">{{ r }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Custom Room</label>
+                                <input type="text" name="room_custom" class="form-control" placeholder="Optional">
+                            </div>
+                            <div class="col-md-9">
+                                <label class="form-label">Remarks</label>
+                                <input type="text" name="remarks" class="form-control" placeholder="Optional">
+                            </div>
+                            <div class="col-md-3">
+                                <button class="btn btn-primary w-100" type="submit" {% if row.slot_started %}disabled{% endif %}>Save Proxy</button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
-                <div class="col-md-3">
-                    <label class="form-label">Available Room</label>
-                    <select name="room_select" class="form-select"
-                            data-base-rooms='{{ row.available_rooms_json|escapejs }}'
-                            data-conflict-rooms='{{ row.conflict_rooms_json|escapejs }}'>
-                        <option value="">Select</option>
-                        {% for r in row.available_rooms %}
-                            <option value="{{ r }}">{{ r }}</option>
-                        {% endfor %}
-                    </select>
+
+                <div class="col-lg-5">
+                    <div class="border rounded p-3 h-100">
+                        <div class="fw-semibold mb-2">Swap Lecture</div>
+                        <form method="post" class="row g-2 align-items-end">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="create_swap">
+                            <input type="hidden" name="entry_id" value="{{ row.entry.id }}">
+                            {% if is_coordinator and selected_faculty %}
+                                <input type="hidden" name="faculty" value="{{ selected_faculty }}">
+                            {% endif %}
+                            <div class="col-12">
+                                <label class="form-label">Swap With</label>
+                                <select name="swap_entry_id" class="form-select" {% if not row.swap_choices %}disabled{% endif %}>
+                                    <option value="">Select lecture</option>
+                                    {% for opt in row.swap_choices %}
+                                        <option value="{{ opt.id }}">{{ opt.label }}</option>
+                                    {% endfor %}
+                                </select>
+                                {% if not row.swap_choices %}
+                                    <div class="form-text">No same-day swap options available.</div>
+                                {% endif %}
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label">Remarks</label>
+                                <input type="text" name="remarks" class="form-control" placeholder="Optional">
+                            </div>
+                            <div class="col-12">
+                                <button class="btn btn-outline-primary w-100" type="submit" {% if row.slot_started or not row.swap_choices %}disabled{% endif %}>Save Swap</button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
-                <div class="col-md-2">
-                    <label class="form-label">Custom Room</label>
-                    <input type="text" name="room_custom" class="form-control" placeholder="Optional">
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label">Remarks</label>
-                    <input type="text" name="remarks" class="form-control" placeholder="Optional">
-                </div>
-                <div class="col-md-1">
-                    <button class="btn btn-primary" type="submit" {% if row.slot_started %}disabled{% endif %}>Save</button>
-                </div>
-                {% if row.slot_started %}
-                    <div class="col-12 text-muted small">Lecture already started. Adjustment not allowed.</div>
-                {% endif %}
-            </form>
+            </div>
+            {% if row.slot_started %}
+                <div class="text-muted small mt-2">Lecture already started. Changes are locked.</div>
+            {% endif %}
         {% endif %}
     </div>
 </div>
@@ -113,27 +169,26 @@
 <div class="alert alert-info">No lectures found for this date.</div>
 {% endfor %}
 
-{% endblock %}
-
 <script>
-document.querySelectorAll('form').forEach(form => {
+document.querySelectorAll('form[data-allow-conflict]').forEach(form => {
     const facultySelect = form.querySelector('select[name="proxy_faculty"]');
     const subjectInput = form.querySelector('input[name="proxy_subject"]');
     const mergeInput = form.querySelector('input[name="merge_room"]');
-    if (!facultySelect || !subjectInput || !mergeInput) return;
-    const allowConflict = form.getAttribute('data-allow-conflict') === '1';
     const roomSelect = form.querySelector('select[name="room_select"]');
+    if (!facultySelect || !subjectInput || !mergeInput || !roomSelect) return;
+
+    const allowConflict = form.getAttribute('data-allow-conflict') === '1';
+
     function renderRooms(facultyName) {
-        if (!roomSelect) return;
         const baseRooms = JSON.parse(roomSelect.getAttribute('data-base-rooms') || '[]');
         const conflictRooms = JSON.parse(roomSelect.getAttribute('data-conflict-rooms') || '{}');
         const busyRoom = conflictRooms[(facultyName || '').trim().toLowerCase()] || '';
         const options = [''].concat(baseRooms);
         if (busyRoom && options.indexOf(busyRoom) === -1) {
-            options.unshift(busyRoom);
+            options.push(busyRoom);
         }
         roomSelect.innerHTML = '';
-        options.forEach((room) => {
+        options.forEach(room => {
             const opt = document.createElement('option');
             opt.value = room;
             opt.textContent = room ? room : 'Select';
@@ -151,11 +206,7 @@ document.querySelectorAll('form').forEach(form => {
         const conflict = opt && opt.getAttribute('data-conflict') === '1';
         const facName = opt ? opt.value : '';
         renderRooms(facName);
-        if (conflict) {
-            if (allowConflict) {
-                mergeInput.value = '';
-                return;
-            }
+        if (conflict && !allowConflict) {
             const ok = window.confirm('Selected faculty already has a lecture in this slot. Merge?');
             if (!ok) {
                 facultySelect.value = '';
@@ -177,6 +228,9 @@ document.querySelectorAll('form').forEach(form => {
             mergeInput.value = '';
         }
     });
+
     renderRooms('');
 });
 </script>
+
+{% endblock %}

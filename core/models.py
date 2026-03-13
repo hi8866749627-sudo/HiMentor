@@ -249,6 +249,12 @@ class Room(models.Model):
 
 
 class LectureAdjustment(models.Model):
+    TYPE_PROXY = "proxy"
+    TYPE_SWAP = "swap"
+    TYPE_CHOICES = [
+        (TYPE_PROXY, "Proxy"),
+        (TYPE_SWAP, "Swap"),
+    ]
     STATUS_ACTIVE = "active"
     STATUS_CANCELLED = "cancelled"
     STATUS_CHOICES = [
@@ -264,9 +270,14 @@ class LectureAdjustment(models.Model):
     time_slot = models.CharField(max_length=60, blank=True)
     subject = models.CharField(max_length=120, blank=True)
     original_faculty = models.CharField(max_length=50, blank=True)
+    adjustment_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default=TYPE_PROXY)
     proxy_faculty = models.ForeignKey(Mentor, on_delete=models.SET_NULL, null=True, blank=True, related_name="proxy_adjustments")
     room = models.CharField(max_length=50, blank=True)
     merge_room = models.CharField(max_length=50, blank=True)
+    swap_pair_key = models.CharField(max_length=40, blank=True, db_index=True)
+    swap_batch = models.CharField(max_length=30, blank=True)
+    swap_lecture_no = models.IntegerField(null=True, blank=True)
+    swap_time_slot = models.CharField(max_length=60, blank=True)
     remarks = models.TextField(blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
     created_by = models.ForeignKey(Mentor, on_delete=models.SET_NULL, null=True, blank=True, related_name="created_adjustments")

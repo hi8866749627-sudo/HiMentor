@@ -60,7 +60,12 @@
                         <td>{{ e.batch }}</td>
                         <td>
                             {{ e.subject }}
-                            {% if e.status == "proxy" %}
+                            {% if e.adjustment_type == "swap" %}
+                                <span class="badge bg-info text-dark ms-1">Swapped</span>
+                                {% if e.swap_with %}
+                                    <span class="small text-muted ms-1">{{ e.swap_with }}</span>
+                                {% endif %}
+                            {% elif e.status == "proxy" %}
                                 <span class="badge bg-warning text-dark ms-1">Proxy</span>
                             {% elif e.has_proxy %}
                                 <span class="badge bg-info text-dark ms-1">Proxy Assigned</span>

@@ -23,11 +23,13 @@
                 <thead>
                     <tr>
                         <th>Date</th>
+                        <th>Type</th>
                         <th>Lecture</th>
                         <th>Batch</th>
                         <th>Subject</th>
                         <th>Original</th>
                         <th>Proxy</th>
+                        <th>Swap With</th>
                         <th>New Subject</th>
                         <th>Room</th>
                         <th>Status</th>
@@ -38,11 +40,19 @@
                 {% for a in adjustments %}
                     <tr>
                         <td>{{ a.date|date:"d M Y" }}</td>
+                        <td>
+                            {% if a.adjustment_type == "swap" %}
+                                <span class="badge bg-info text-dark">Swap</span>
+                            {% else %}
+                                <span class="badge bg-warning text-dark">Proxy</span>
+                            {% endif %}
+                        </td>
                         <td>{{ a.lecture_no }}</td>
                         <td>{{ a.batch }}</td>
                         <td>{{ a.timetable_entry.subject|default:a.subject }}</td>
                         <td>{{ a.original_faculty }}</td>
                         <td>{% if a.proxy_faculty %}{{ a.proxy_faculty.name }}{% endif %}</td>
+                        <td>{{ a.partner_label }}</td>
                         <td>{{ a.proxy_subject }}</td>
                         <td>{{ a.room }}</td>
                         <td>
@@ -64,7 +74,7 @@
                         </td>
                     </tr>
                 {% empty %}
-                    <tr><td colspan="9" class="text-center text-muted">No adjustments found.</td></tr>
+                    <tr><td colspan="11" class="text-center text-muted">No adjustments found.</td></tr>
                 {% endfor %}
                 </tbody>
             </table>
