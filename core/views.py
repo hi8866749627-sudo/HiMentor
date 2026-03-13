@@ -4904,23 +4904,6 @@ def coordinator_load_adjustment(request):
                 adj.save(update_fields=["status", "cancelled_by", "cancelled_at"])
                 messages.success(request, "Adjustment cancelled.")
         return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
-        elif action == "cancel":
-            adj_id = request.POST.get("adjustment_id")
-            adj = LectureAdjustment.objects.filter(id=adj_id, status=LectureAdjustment.STATUS_ACTIVE).first()
-            if not adj:
-                messages.error(request, "Adjustment not found.")
-            elif _slot_has_started(adj.date, adj.time_slot):
-                messages.error(request, "Lecture already started. Cancellation not allowed.")
-            else:
-                adj.status = LectureAdjustment.STATUS_CANCELLED
-                adj.cancelled_by = request.user.username
-                adj.cancelled_at = timezone.now()
-                adj.save(update_fields=["status", "cancelled_by", "cancelled_at"])
-                messages.success(request, "Adjustment cancelled.")
-        redirect_qs = f"?date={selected_date:%Y-%m-%d}"
-        if selected_faculty:
-            redirect_qs += f"&faculty={selected_faculty}"
-        return redirect(f"/coordinator-load-adjustment/{redirect_qs}")
 
     faculty_choices = sorted(
         {
