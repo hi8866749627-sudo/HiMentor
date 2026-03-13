@@ -18,6 +18,12 @@
     <div class="col-md-2">
         <button class="btn btn-primary" type="submit">Show</button>
     </div>
+    <div class="col-md-2">
+        <a class="btn btn-outline-secondary w-100"
+           href="/attendance-analytics/daily-live-pdf/?date={{ selected_date|date:'Y-m-d' }}{% if batch_filter %}&batch={{ batch_filter|urlencode }}{% endif %}{% if request.session.mentor %}&module_id={{ module.id }}{% endif %}">
+            Download PDF
+        </a>
+    </div>
 </form>
 
 <div class="card mb-3">
@@ -27,7 +33,12 @@
     </div>
 </div>
 
-<div class="card">
+{% for batch in batch_cards %}
+<div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <div class="fw-bold">Batch: {{ batch.batch }}</div>
+        <div class="text-muted small">Total Students: {{ batch.total_students }}</div>
+    </div>
     <div class="card-body p-0">
         <div class="table-responsive">
             <table class="table table-sm table-hover mb-0">
@@ -35,22 +46,20 @@
                     <tr>
                         <th>Lecture</th>
                         <th>Time</th>
-                        <th>Batch</th>
                         <th>Subject</th>
                         <th>Faculty</th>
-                        <th>Room</th>
                         <th>Absent Nos.</th>
+                        <th>Absent Count</th>
+                        <th>Present Count</th>
                     </tr>
                 </thead>
                 <tbody>
-                {% for row in rows %}
+                {% for row in batch.lectures %}
                     <tr>
                         <td>{{ row.lecture_no }}</td>
                         <td>{{ row.time_slot }}</td>
-                        <td>{{ row.batch }}</td>
                         <td>{{ row.subject }}</td>
                         <td>{{ row.faculty }}</td>
-                        <td>{{ row.room }}</td>
                         <td>
                             {% if row.absent_rolls %}
                                 {{ row.absent_rolls|join:", " }}
@@ -58,6 +67,8 @@
                                 NIL
                             {% endif %}
                         </td>
+                        <td>{{ row.absent_count }}</td>
+                        <td>{{ row.present_count }}</td>
                     </tr>
                 {% empty %}
                     <tr><td colspan="7" class="text-center text-muted">No lectures found.</td></tr>
@@ -67,5 +78,8 @@
         </div>
     </div>
 </div>
+{% empty %}
+<div class="alert alert-info">No lectures found.</div>
+{% endfor %}
 
 {% endblock %}

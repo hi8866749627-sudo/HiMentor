@@ -4492,7 +4492,7 @@ def _norm_batch_key(value):
     return "".join(ch for ch in str(value or "").upper() if ch.isalnum())
 
 
-def _build_attendance_batch_rows(module, selected_date, mentor=None, allow_override=False):
+def _build_attendance_batch_rows(module, selected_date, mentor=None, allow_override=False, prefill_absent=True):
     _ensure_active_timetable(module)
     day_of_week = selected_date.weekday()
     entries_qs = TimetableEntry.objects.filter(module=module, day_of_week=day_of_week, is_active=True)
@@ -4564,7 +4564,7 @@ def _build_attendance_batch_rows(module, selected_date, mentor=None, allow_overr
                 module=module, date=selected_date, lecture_no=entry.lecture_no, batch=batch
             ).first()
             absent_rolls = set()
-            if session:
+            if session and prefill_absent:
                 absences = LectureAbsence.objects.filter(session=session).select_related("student")
                 absent_rolls = {a.student.roll_no for a in absences if a.student.roll_no is not None}
             slots.append(
@@ -4594,7 +4594,9 @@ def coordinator_mark_attendance(request):
     calendar = _calendar_for_module(module)
     holiday_dates = _holiday_set(module)
     is_holiday = selected_date.weekday() == 6 or selected_date in holiday_dates
-    batch_rows = _build_attendance_batch_rows(module, selected_date, mentor=None, allow_override=True)
+    batch_rows = _build_attendance_batch_rows(
+        module, selected_date, mentor=None, allow_override=True, prefill_absent=False
+    )
 
     return render(
         request,
@@ -5321,6 +5323,7 @@ def save_lecture_attendance(request):
             return JsonResponse({"ok": False, "msg": "Module not allowed"}, status=403)
     if not module:
         module = _active_module(request)
+    _ensure_active_timetable(module)
     date_val = _parse_date_param(request.POST.get("date"))
     batch = (request.POST.get("batch") or "").strip()
     lecture_no_raw = request.POST.get("lecture_no")
@@ -5354,6 +5357,7 @@ def save_lecture_attendance(request):
             day_of_week=date_val.weekday(),
             lecture_no=lecture_no,
             batch=batch,
+            is_active=True,
         )
         if mentor:
             entry_qs = entry_qs.filter(faculty__iexact=mentor.name)
@@ -5681,6 +5685,62 @@ def daily_absent_excel(request):
     return response
 
 
+def _daily_absent_cards(module, date_val, batch_filter=""):
+    sessions_qs = LectureSession.objects.filter(module=module, date=date_val)
+    if batch_filter:
+        sessions_qs = sessions_qs.filter(batch=batch_filter)
+    sessions = list(sessions_qs.order_by("batch", "lecture_no", "time_slot"))
+    if not sessions:
+        return [], []
+
+    absences = LectureAbsence.objects.filter(session__in=sessions).select_related("student", "session")
+    absences_by_session = {}
+    for a in absences:
+        absences_by_session.setdefault(a.session_id, []).append(a)
+
+    batches = sorted({s.batch for s in sessions})
+    totals = {
+        row["batch"]: row["total"]
+        for row in Student.objects.filter(module=module, batch__in=batches)
+        .values("batch")
+        .annotate(total=Count("id"))
+    }
+
+    sessions_by_batch = {}
+    for s in sessions:
+        sessions_by_batch.setdefault(s.batch, []).append(s)
+
+    batch_cards = []
+    for batch in batches:
+        lectures = []
+        for sess in sessions_by_batch.get(batch, []):
+            abs_list = absences_by_session.get(sess.id, [])
+            rolls = sorted([a.student.roll_no for a in abs_list if a.student.roll_no is not None])
+            total_students = totals.get(batch, 0)
+            absent_count = len(rolls)
+            present_count = max(total_students - absent_count, 0) if total_students else 0
+            lectures.append(
+                {
+                    "lecture_no": sess.lecture_no,
+                    "time_slot": sess.time_slot,
+                    "subject": sess.subject,
+                    "faculty": sess.faculty,
+                    "absent_rolls": rolls,
+                    "absent_count": absent_count,
+                    "present_count": present_count,
+                }
+            )
+        lectures.sort(key=lambda r: (r["lecture_no"], r["time_slot"]))
+        batch_cards.append(
+            {
+                "batch": batch,
+                "total_students": totals.get(batch, 0),
+                "lectures": lectures,
+            }
+        )
+    return batch_cards, batches
+
+
 def daily_absent_live(request):
     mentor = _session_mentor_obj(request)
     if not mentor and not request.user.is_authenticated:
@@ -5702,39 +5762,7 @@ def daily_absent_live(request):
     if is_coordinator and not _attendance_fully_marked_for_date(module, date_val):
         return HttpResponse("Attendance is not fully marked for this date.", status=400)
 
-    sessions_qs = LectureSession.objects.filter(module=module, date=date_val)
-    if batch_filter:
-        sessions_qs = sessions_qs.filter(batch=batch_filter)
-    sessions = list(sessions_qs.order_by("batch", "lecture_no"))
-
-    absences = LectureAbsence.objects.filter(session__in=sessions).select_related("student", "session")
-    absences_by_session = {}
-    for a in absences:
-        absences_by_session.setdefault(a.session_id, []).append(a)
-
-    batches = sorted({s.batch for s in sessions})
-    sessions_by_batch = {}
-    for s in sessions:
-        sessions_by_batch.setdefault(s.batch, []).append(s)
-
-    rows = []
-    for batch in batches:
-        for sess in sessions_by_batch.get(batch, []):
-            abs_list = absences_by_session.get(sess.id, [])
-            rolls = sorted([a.student.roll_no for a in abs_list if a.student.roll_no is not None])
-            rows.append(
-                {
-                    "lecture_no": sess.lecture_no,
-                    "time_slot": sess.time_slot,
-                    "batch": batch,
-                    "subject": sess.subject,
-                    "faculty": sess.faculty,
-                    "room": sess.room,
-                    "absent_rolls": rolls,
-                }
-            )
-    rows.sort(key=lambda r: (r["lecture_no"], r["time_slot"], r["batch"]))
-
+    batch_cards, batches = _daily_absent_cards(module, date_val, batch_filter)
     return render(
         request,
         "daily_absent_live.html",
@@ -5742,9 +5770,89 @@ def daily_absent_live(request):
             "module": module,
             "selected_date": date_val,
             "batch_filter": batch_filter,
-            "rows": rows,
+            "batch_cards": batch_cards,
+            "batches": batches,
         },
     )
+
+
+def daily_absent_live_pdf(request):
+    mentor = _session_mentor_obj(request)
+    if not mentor and not request.user.is_authenticated:
+        return redirect("/")
+
+    is_coordinator = bool(
+        request.user.is_authenticated and not request.session.get("mentor") and not is_superadmin_user(request.user)
+    )
+    module = None
+    module_id = (request.GET.get("module_id") or "").strip()
+    if mentor and module_id:
+        module = allowed_modules_for_user(request).filter(id=module_id, is_active=True).first()
+        if not module:
+            return HttpResponse("Unauthorized", status=403)
+    if not module:
+        module = _active_module(request)
+
+    date_val = _parse_date_param(request.GET.get("date"), timezone.localdate())
+    batch_filter = (request.GET.get("batch") or "").strip()
+
+    if is_coordinator and not _attendance_fully_marked_for_date(module, date_val):
+        return HttpResponse("Attendance is not fully marked for this date.", status=400)
+
+    batch_cards, _ = _daily_absent_cards(module, date_val, batch_filter)
+    response = HttpResponse(content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="Daily_Absent_{date_val:%Y-%m-%d}.pdf"'
+
+    doc = SimpleDocTemplate(
+        response,
+        pagesize=landscape(A4),
+        leftMargin=12,
+        rightMargin=12,
+        topMargin=14,
+        bottomMargin=12,
+    )
+    styles = getSampleStyleSheet()
+    story = [
+        Paragraph(f"Daily Absent Sheet - {module.name}", styles["Heading3"]),
+        Paragraph(date_val.strftime("%d %b %Y (%A)"), styles["Normal"]),
+        Spacer(1, 8),
+    ]
+
+    for card in batch_cards:
+        story.append(Paragraph(f"Batch: {card['batch']}", styles["Heading4"]))
+        table_data = [
+            ["Lec", "Time", "Subject", "Faculty", "Absent Nos.", "Absent", "Present"]
+        ]
+        for row in card["lectures"]:
+            absent_text = ", ".join(str(x) for x in row["absent_rolls"]) if row["absent_rolls"] else "NIL"
+            table_data.append(
+                [
+                    row["lecture_no"],
+                    row["time_slot"],
+                    row["subject"],
+                    row["faculty"],
+                    absent_text,
+                    row["absent_count"],
+                    row["present_count"],
+                ]
+            )
+        table = Table(table_data, repeatRows=1)
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f3f5")),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#d7dce1")),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ]
+            )
+        )
+        story.append(table)
+        story.append(Spacer(1, 8))
+
+    doc.build(story)
+    return response
 
 
 def weekly_attendance_live(request):
