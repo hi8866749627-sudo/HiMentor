@@ -4939,7 +4939,7 @@ def coordinator_mark_attendance(request):
     holiday_dates = _holiday_set(module)
     is_holiday = selected_date.weekday() == 6 or selected_date in holiday_dates
     batch_rows = _build_attendance_batch_rows(
-        module, selected_date, mentor=None, allow_override=True, prefill_absent=False
+        module, selected_date, mentor=None, allow_override=True, prefill_absent=True
     )
 
     return render(

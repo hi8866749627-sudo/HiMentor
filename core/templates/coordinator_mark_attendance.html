@@ -166,8 +166,8 @@
                     <div class="slot-actions">
                         <button type="button" class="btn btn-success btn-sm all-present-btn">All Present</button>
                         <button type="button" class="btn btn-outline-secondary btn-sm copy-prev-btn">Copy Prev</button>
-                        <button type="button" class="btn btn-primary btn-sm save-btn">Save</button>
-                        <span class="small save-status align-self-center text-success">All changes saved</span>
+                        <button type="button" class="btn btn-sm save-btn {% if slot.session %}btn-warning text-dark{% else %}btn-primary{% endif %}">{% if slot.session %}SAVED{% else %}Save{% endif %}</button>
+                        <span class="small save-status align-self-center {% if slot.session %}text-success{% else %}text-success{% endif %}">All changes saved</span>
                     </div>
                 </div>
             </form>

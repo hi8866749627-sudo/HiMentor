@@ -183,8 +183,8 @@
                             <span class="text-muted small align-self-center">Proxy assigned. Attendance can be marked by {{ slot.adjustment.proxy_faculty.name }}.</span>
                         {% else %}
                             <button type="button" class="btn btn-success btn-sm all-present-btn">All Present</button>
-                            <button type="button" class="btn btn-primary btn-sm save-btn">Save</button>
-                            <span class="text-success small d-none save-status align-self-center">Saved</span>
+                            <button type="button" class="btn btn-sm save-btn {% if slot.session %}btn-warning text-dark{% else %}btn-primary{% endif %}">{% if slot.session %}SAVED{% else %}Save{% endif %}</button>
+                            <span class="text-success small {% if not slot.session %}d-none{% endif %} save-status align-self-center">All changes saved</span>
                         {% endif %}
                     </div>
                 </div>
