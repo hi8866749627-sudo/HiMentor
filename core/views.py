@@ -4700,10 +4700,11 @@ def _build_adjustment_rows(module, selected_date, faculty_filter="", exclude_pro
     day_of_week = selected_date.weekday()
     active_adjustments = _active_adjustments_for_date(module, selected_date)
     adjustment_map = {(a.batch, a.lecture_no): a for a in active_adjustments}
+    active_modules = AcademicModule.objects.filter(is_active=True)
     faculty_choices = sorted(
         {
             (name or "").strip()
-            for name in TimetableEntry.objects.filter(module=module, is_active=True)
+            for name in TimetableEntry.objects.filter(module__in=active_modules, is_active=True)
             .exclude(faculty="")
             .values_list("faculty", flat=True)
         }
@@ -4726,25 +4727,28 @@ def _build_adjustment_rows(module, selected_date, faculty_filter="", exclude_pro
         slot_started = _slot_has_started(selected_date, (adj.time_slot if adj and adj.time_slot else entry.time_slot))
         slot_faculty_subjects = {}
         slot_entries = TimetableEntry.objects.filter(
-            module=module, day_of_week=day_of_week, lecture_no=entry.lecture_no, is_active=True
+            module__in=active_modules, day_of_week=day_of_week, lecture_no=entry.lecture_no, is_active=True
         ).exclude(faculty="")
         for se in slot_entries:
             slot_faculty_subjects.setdefault(se.faculty, set()).add(se.subject)
 
         conflict_entries = list(
             TimetableEntry.objects.filter(
-                module=module,
+                module__in=active_modules,
                 day_of_week=day_of_week,
                 lecture_no=entry.lecture_no,
                 is_active=True,
             )
-            .exclude(batch=entry.batch)
             .exclude(faculty="")
         )
         conflict_adjustments = [
             item
-            for item in active_adjustments
-            if item.lecture_no == entry.lecture_no and item.batch != entry.batch
+            for item in LectureAdjustment.objects.filter(
+                module__in=active_modules,
+                date=selected_date,
+                lecture_no=entry.lecture_no,
+                status=LectureAdjustment.STATUS_ACTIVE,
+            ).select_related("proxy_faculty")
         ]
         conflict_faculties = set(e.faculty for e in conflict_entries if e.faculty)
         conflict_rooms = {
@@ -4979,19 +4983,20 @@ def mentor_load_adjustment(request):
                 return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
 
             room = merge_room or room_custom or room_select or entry.room
+            active_modules = AcademicModule.objects.filter(is_active=True)
             conflict = TimetableEntry.objects.filter(
-                module=module,
+                module__in=active_modules,
                 day_of_week=day_of_week,
                 lecture_no=entry.lecture_no,
                 faculty__iexact=proxy.name,
                 is_active=True,
-            ).exclude(batch=entry.batch).exists()
+            ).exists()
             if conflict and not merge_room:
                 messages.error(request, "Proxy faculty already has a lecture. Merge room required.")
                 return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
             proxy_slot_subject = (
                 TimetableEntry.objects.filter(
-                    module=module,
+                    module__in=active_modules,
                     day_of_week=day_of_week,
                     lecture_no=entry.lecture_no,
                     faculty__iexact=proxy.name,
@@ -5126,9 +5131,20 @@ def coordinator_load_adjustment(request):
                 return redirect(f"/coordinator-load-adjustment/?date={selected_date:%Y-%m-%d}")
 
             room = merge_room or room_custom or room_select or entry.room
+            active_modules = AcademicModule.objects.filter(is_active=True)
+            conflict = TimetableEntry.objects.filter(
+                module__in=active_modules,
+                day_of_week=day_of_week,
+                lecture_no=entry.lecture_no,
+                faculty__iexact=proxy.name,
+                is_active=True,
+            ).exists()
+            if conflict and not merge_room:
+                messages.error(request, "Proxy faculty already has a lecture. Merge room required.")
+                return redirect(f"/coordinator-load-adjustment/?date={selected_date:%Y-%m-%d}")
             proxy_slot_subject = (
                 TimetableEntry.objects.filter(
-                    module=module,
+                    module__in=active_modules,
                     day_of_week=day_of_week,
                     lecture_no=entry.lecture_no,
                     faculty__iexact=proxy.name,
