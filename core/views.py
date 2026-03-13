@@ -5550,10 +5550,15 @@ def save_lecture_attendance(request):
             lecture_no=lecture_no,
             status=LectureAdjustment.STATUS_ACTIVE,
         ).first()
-        if adjustment and mentor and (not adjustment.proxy_faculty or adjustment.proxy_faculty.name.lower() != mentor.name.lower()):
+        if (
+            adjustment
+            and adjustment.adjustment_type == LectureAdjustment.TYPE_PROXY
+            and mentor
+            and (not adjustment.proxy_faculty or adjustment.proxy_faculty.name.lower() != mentor.name.lower())
+        ):
             adjustment = None
         if not adjustment:
-            return JsonResponse({"ok": False, "msg": "Proxy adjustment not found"}, status=404)
+            return JsonResponse({"ok": False, "msg": "Adjustment not found"}, status=404)
     else:
         entry_qs = TimetableEntry.objects.filter(
             module=module,
@@ -5613,7 +5618,12 @@ def save_lecture_attendance(request):
             roll_no = int(str(roll).strip())
         except Exception:
             continue
-        student = Student.objects.filter(module=module, batch=batch, roll_no=roll_no).first()
+        student = Student.objects.filter(
+            module=module,
+            roll_no=roll_no,
+        ).filter(
+            Q(batch__iexact=batch) | Q(division__iexact=batch)
+        ).first()
         if not student:
             continue
         LectureAbsence.objects.create(session=session, student=student, marked_by=mentor)
@@ -5874,7 +5884,7 @@ def daily_absent_excel(request):
                 s = left_sessions[j]
                 abs_list = absences_by_session.get(s.id, [])
                 rolls = sorted([a.student.roll_no for a in abs_list if a.student.roll_no is not None])
-                absent_str = ",".join(str(x) for x in rolls) if rolls else "NIL"
+                absent_str = ", ".join(str(x) for x in rolls) if rolls else "NIL"
                 ws.cell(row=row_cursor, column=1, value=s.lecture_no)
                 ws.cell(row=row_cursor, column=2, value=len(rolls))
                 ws.cell(row=row_cursor, column=3, value=s.subject)
@@ -5884,7 +5894,7 @@ def daily_absent_excel(request):
                 s = right_sessions[j]
                 abs_list = absences_by_session.get(s.id, [])
                 rolls = sorted([a.student.roll_no for a in abs_list if a.student.roll_no is not None])
-                absent_str = ",".join(str(x) for x in rolls) if rolls else "NIL"
+                absent_str = ", ".join(str(x) for x in rolls) if rolls else "NIL"
                 ws.cell(row=row_cursor, column=7, value=s.lecture_no)
                 ws.cell(row=row_cursor, column=8, value=len(rolls))
                 ws.cell(row=row_cursor, column=9, value=s.subject)
@@ -5920,12 +5930,11 @@ def _daily_absent_cards(module, date_val, batch_filter=""):
         absences_by_session.setdefault(a.session_id, []).append(a)
 
     batches = sorted({s.batch for s in sessions})
-    totals = {
-        row["batch"]: row["total"]
-        for row in Student.objects.filter(module=module, batch__in=batches)
-        .values("batch")
-        .annotate(total=Count("id"))
-    }
+    totals = {}
+    for student in Student.objects.filter(module=module):
+        for key in {_norm_batch_key(student.batch), _norm_batch_key(student.division)}:
+            if key:
+                totals[key] = totals.get(key, 0) + 1
 
     sessions_by_batch = {}
     for s in sessions:
@@ -5937,7 +5946,7 @@ def _daily_absent_cards(module, date_val, batch_filter=""):
         for sess in sessions_by_batch.get(batch, []):
             abs_list = absences_by_session.get(sess.id, [])
             rolls = sorted([a.student.roll_no for a in abs_list if a.student.roll_no is not None])
-            total_students = totals.get(batch, 0)
+            total_students = totals.get(_norm_batch_key(batch), 0)
             absent_count = len(rolls)
             present_count = max(total_students - absent_count, 0) if total_students else 0
             lectures.append(
@@ -5947,6 +5956,7 @@ def _daily_absent_cards(module, date_val, batch_filter=""):
                     "subject": sess.subject,
                     "faculty": sess.faculty,
                     "absent_rolls": rolls,
+                    "absent_text": ", ".join(str(x) for x in rolls) if rolls else "NIL",
                     "absent_count": absent_count,
                     "present_count": present_count,
                 }
@@ -5955,7 +5965,7 @@ def _daily_absent_cards(module, date_val, batch_filter=""):
         batch_cards.append(
             {
                 "batch": batch,
-                "total_students": totals.get(batch, 0),
+                "total_students": totals.get(_norm_batch_key(batch), 0),
                 "lectures": lectures,
             }
         )

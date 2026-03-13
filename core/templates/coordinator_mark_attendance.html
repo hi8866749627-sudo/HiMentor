@@ -102,6 +102,11 @@
 <div class="alert alert-info">Selected date is a holiday or Sunday.</div>
 {% endif %}
 
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div id="globalSaveStatus" class="fw-semibold text-success">All changes saved</div>
+    <button type="button" class="btn btn-primary" id="saveAllBtn" disabled>Save All</button>
+</div>
+
 {% for batch in batch_rows %}
 <div class="card mb-3 compact-batch-card">
     <div class="card-header d-flex justify-content-between align-items-center">
@@ -162,7 +167,7 @@
                         <button type="button" class="btn btn-success btn-sm all-present-btn">All Present</button>
                         <button type="button" class="btn btn-outline-secondary btn-sm copy-prev-btn">Copy Prev</button>
                         <button type="button" class="btn btn-primary btn-sm save-btn">Save</button>
-                        <span class="text-success small d-none save-status align-self-center">Saved</span>
+                        <span class="small save-status align-self-center text-success">All changes saved</span>
                     </div>
                 </div>
             </form>
@@ -191,19 +196,37 @@ function hasUnsavedChanges() {
         .some(form => form.dataset.dirty === "1");
 }
 
+function updateGlobalStatus() {
+    const saveAllBtn = document.getElementById('saveAllBtn');
+    const status = document.getElementById('globalSaveStatus');
+    const dirty = hasUnsavedChanges();
+    if (saveAllBtn) saveAllBtn.disabled = !dirty;
+    if (!status) return;
+    status.textContent = dirty ? 'Unsaved changes' : 'All changes saved';
+    status.classList.toggle('text-warning', dirty);
+    status.classList.toggle('text-success', !dirty);
+}
+
 function markDirty(form) {
     form.dataset.dirty = "1";
     const status = form.querySelector('.save-status');
-    if (status) status.classList.add('d-none');
+    if (status) {
+        status.textContent = "Unsaved changes";
+        status.classList.remove('text-success');
+        status.classList.add('text-warning');
+    }
+    updateGlobalStatus();
 }
 
 function markSaved(form) {
     form.dataset.dirty = "0";
     const status = form.querySelector('.save-status');
     if (status) {
-        status.textContent = "Saved";
-        status.classList.remove('d-none');
+        status.textContent = "All changes saved";
+        status.classList.remove('text-warning');
+        status.classList.add('text-success');
     }
+    updateGlobalStatus();
 }
 
 function buildFormData(form, rollButtons) {
@@ -223,16 +246,7 @@ function saveAttendance(form, rollButtons) {
     }).then(r => r.json());
 }
 
-let pendingNavigation = null;
-
-function showUnsavedModal(continueFn) {
-    pendingNavigation = continueFn;
-    const modalEl = document.getElementById('unsavedModal');
-    const modal = new bootstrap.Modal(modalEl);
-    modal.show();
-}
-
-async function saveAllAndContinue() {
+async function saveAllForms() {
     const forms = Array.from(document.querySelectorAll('.attendance-form'))
         .filter(f => f.dataset.dirty === "1");
     for (const form of forms) {
@@ -244,23 +258,13 @@ async function saveAllAndContinue() {
         }
         markSaved(form);
     }
-    const modalEl = document.getElementById('unsavedModal');
-    bootstrap.Modal.getInstance(modalEl).hide();
-    if (pendingNavigation) pendingNavigation();
-}
-
-function discardAndContinue() {
-    document.querySelectorAll('.attendance-form').forEach(f => f.dataset.dirty = "0");
-    const modalEl = document.getElementById('unsavedModal');
-    bootstrap.Modal.getInstance(modalEl).hide();
-    if (pendingNavigation) pendingNavigation();
 }
 
 document.querySelectorAll('.attendance-form').forEach(form => {
+    form.dataset.dirty = "0";
     const saveBtn = form.querySelector('.save-btn');
     const allPresentBtn = form.querySelector('.all-present-btn');
     const copyPrevBtn = form.querySelector('.copy-prev-btn');
-    const status = form.querySelector('.save-status');
     const rollButtons = Array.from(form.querySelectorAll('.roll-btn'));
     const slotCard = form.closest('.slot-card');
 
@@ -294,51 +298,19 @@ document.querySelectorAll('.attendance-form').forEach(form => {
                 return;
             }
             markSaved(form);
+        }).catch(() => {
+            alert('Unable to save attendance.');
         });
     });
 });
 
-document.querySelector('form[method="get"]')?.addEventListener('submit', function (e) {
-    if (hasUnsavedChanges()) {
-        e.preventDefault();
-        showUnsavedModal(() => this.submit());
-    }
+document.getElementById('saveAllBtn')?.addEventListener('click', () => {
+    saveAllForms().catch(() => {
+        alert('Unable to save all attendance.');
+    });
 });
 
-document.addEventListener('click', function (e) {
-    const link = e.target.closest('a[href]');
-    if (!link) return;
-    const href = link.getAttribute('href') || '';
-    if (href.startsWith('#') || href.startsWith('javascript:')) return;
-    if (hasUnsavedChanges()) {
-        e.preventDefault();
-        showUnsavedModal(() => { window.location.href = href; });
-    }
-});
-
-window.addEventListener('beforeunload', function (e) {
-    if (!hasUnsavedChanges()) return;
-    e.preventDefault();
-    e.returnValue = '';
-});
+updateGlobalStatus();
 </script>
-
-<div class="modal fade" id="unsavedModal" tabindex="-1">
-  <div class="modal-dialog">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">Unsaved Changes</h5>
-      </div>
-      <div class="modal-body">
-        You have unsaved attendance changes. Save before leaving?
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stay</button>
-        <button type="button" class="btn btn-outline-danger" onclick="discardAndContinue()">Discard</button>
-        <button type="button" class="btn btn-primary" onclick="saveAllAndContinue()">Save All & Continue</button>
-      </div>
-    </div>
-  </div>
-</div>
 
 {% endblock %}

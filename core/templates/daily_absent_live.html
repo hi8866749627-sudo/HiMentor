@@ -66,11 +66,7 @@
                         <td>{{ row.subject }}</td>
                         <td>{{ row.faculty }}</td>
                         <td>
-                            {% if row.absent_rolls %}
-                                {{ row.absent_rolls|join:", " }}
-                            {% else %}
-                                NIL
-                            {% endif %}
+                            {{ row.absent_text }}
                         </td>
                         <td>{{ row.absent_count }}</td>
                         <td>{{ row.present_count }}</td>
