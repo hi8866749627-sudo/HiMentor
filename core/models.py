@@ -152,6 +152,8 @@ class TimetableUpload(models.Model):
     rows_total = models.IntegerField(default=0)
     rows_created = models.IntegerField(default=0)
     rows_skipped = models.IntegerField(default=0)
+    is_active = models.BooleanField(default=False)
+    effective_from = models.DateTimeField(null=True, blank=True)
     uploaded_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -173,6 +175,9 @@ class TimetableEntry(models.Model):
     ]
 
     module = models.ForeignKey(AcademicModule, on_delete=models.CASCADE, related_name="timetable_entries")
+    upload = models.ForeignKey(
+        TimetableUpload, on_delete=models.SET_NULL, null=True, blank=True, related_name="entries"
+    )
     day_of_week = models.IntegerField(choices=DAY_CHOICES)
     lecture_no = models.IntegerField()
     time_slot = models.CharField(max_length=60, blank=True)
@@ -185,7 +190,7 @@ class TimetableEntry(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ("module", "day_of_week", "lecture_no", "batch")
+        unique_together = ("module", "day_of_week", "lecture_no", "batch", "upload")
         ordering = ["day_of_week", "lecture_no", "batch"]
 
     def __str__(self):

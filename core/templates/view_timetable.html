@@ -34,6 +34,53 @@
     </div>
 </form>
 
+<div class="card mb-4">
+    <div class="card-header">Edit Timetable</div>
+    <div class="card-body">
+        <form method="post" class="row g-2 align-items-end">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="edit">
+            <div class="col-md-2">
+                <label class="form-label">Day</label>
+                <select name="day" class="form-select" required>
+                    <option value="">Select</option>
+                    {% for code,label in day_choices %}
+                        <option value="{{ code }}">{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Lecture</label>
+                <input type="number" name="lecture_no" class="form-control" min="1" required>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Batch</label>
+                <input type="text" name="batch" class="form-control" required>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Subject</label>
+                <input type="text" name="subject" class="form-control" required>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Faculty</label>
+                <input type="text" name="faculty" class="form-control">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Room</label>
+                <input type="text" name="room" class="form-control">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Time</label>
+                <input type="text" name="time_slot" class="form-control" placeholder="10:00-11:00">
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-primary" type="submit">Edit Timetable</button>
+            </div>
+        </form>
+        <div class="form-text mt-2">Edits apply to the active timetable immediately.</div>
+    </div>
+</div>
+
 {% for day in day_tables %}
 <div class="card mb-4">
     <div class="card-header">{{ day.day }}</div>

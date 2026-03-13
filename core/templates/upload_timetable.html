@@ -3,16 +3,47 @@
 
 <h4 class="mb-3">Upload Timetable</h4>
 
+{% if messages %}
+    {% for m in messages %}
+        <div class="alert alert-{{ m.tags|default:'info' }}">{{ m }}</div>
+    {% endfor %}
+{% endif %}
+
 <div class="card mb-4">
     <div class="card-body">
-        <form method="post" enctype="multipart/form-data">
+        <form method="post" enctype="multipart/form-data" id="uploadForm">
             {% csrf_token %}
             <div class="mb-3">
                 <label class="form-label">Timetable Excel</label>
                 {{ form.file }}
                 <div class="form-text">Upload the semester timetable Excel for the current module.</div>
             </div>
-            <button class="btn btn-primary" type="submit">Upload</button>
+            <div class="mb-3">
+                <label class="form-label">Activation</label>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="activate_mode" id="activateNow" value="now" checked>
+                    <label class="form-check-label" for="activateNow">Implement Now</label>
+                </div>
+                <div class="form-check mt-2">
+                    <input class="form-check-input" type="radio" name="activate_mode" id="activateLater" value="later">
+                    <label class="form-check-label" for="activateLater">Schedule Later</label>
+                </div>
+                <div class="row g-2 mt-2 d-none" id="scheduleFields">
+                    <div class="col-md-3">
+                        <label class="form-label">Date</label>
+                        <input type="date" name="schedule_date" class="form-control">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Time</label>
+                        <input type="time" name="schedule_time" class="form-control" value="00:00">
+                    </div>
+                </div>
+            </div>
+            <button class="btn btn-primary" type="submit" id="uploadBtn">Upload</button>
+            <span class="ms-2 text-muted d-none" id="uploadStatus">
+                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                Uploading & processing…
+            </span>
         </form>
     </div>
 </div>
@@ -25,11 +56,13 @@
                 <thead>
                     <tr>
                         <th>Uploaded At</th>
+                        <th>Effective From</th>
                         <th>File</th>
                         <th>Rows</th>
                         <th>Created</th>
                         <th>Skipped</th>
                         <th>Uploaded By</th>
+                        <th>Status</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -37,11 +70,21 @@
                 {% for u in uploads %}
                     <tr>
                         <td>{{ u.uploaded_at|date:"d M Y H:i" }}</td>
+                        <td>{{ u.effective_from|date:"d M Y H:i" }}</td>
                         <td>{{ u.source_name }}</td>
                         <td>{{ u.rows_total }}</td>
                         <td>{{ u.rows_created }}</td>
                         <td>{{ u.rows_skipped }}</td>
                         <td>{{ u.uploaded_by }}</td>
+                        <td>
+                            {% if u.is_active %}
+                                <span class="badge bg-success">Active</span>
+                            {% elif u.effective_from and now and u.effective_from > now %}
+                                <span class="badge bg-info text-dark">Scheduled</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Inactive</span>
+                            {% endif %}
+                        </td>
                         <td class="text-nowrap">
                             <a class="btn btn-sm btn-outline-secondary" href="/view-timetable/">View</a>
                             <a class="btn btn-sm btn-outline-secondary" href="/timetable-excel/">Download</a>
@@ -54,7 +97,7 @@
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="7" class="text-center text-muted">No uploads yet.</td>
+                        <td colspan="9" class="text-center text-muted">No uploads yet.</td>
                     </tr>
                 {% endfor %}
                 </tbody>
@@ -64,3 +107,29 @@
 </div>
 
 {% endblock %}
+
+<script>
+const uploadForm = document.getElementById("uploadForm");
+if (uploadForm) {
+    uploadForm.addEventListener("submit", function () {
+        const btn = document.getElementById("uploadBtn");
+        const status = document.getElementById("uploadStatus");
+        if (btn) btn.disabled = true;
+        if (status) status.classList.remove("d-none");
+    });
+}
+const scheduleFields = document.getElementById("scheduleFields");
+function toggleScheduleFields() {
+    const later = document.getElementById("activateLater");
+    if (!scheduleFields) return;
+    if (later && later.checked) {
+        scheduleFields.classList.remove("d-none");
+    } else {
+        scheduleFields.classList.add("d-none");
+    }
+}
+document.querySelectorAll('input[name="activate_mode"]').forEach((input) => {
+    input.addEventListener("change", toggleScheduleFields);
+});
+toggleScheduleFields();
+</script>

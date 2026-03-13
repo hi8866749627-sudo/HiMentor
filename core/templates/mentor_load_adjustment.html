@@ -1,17 +1,33 @@
 {% extends "base.html" %}
 {% block content %}
 
-<h4 class="mb-3">Load Adjustment</h4>
+<h4 class="mb-3">
+    {% if is_coordinator %}Load Adjustment (Coordinator){% else %}Load Adjustment{% endif %}
+</h4>
 
 <form method="get" class="row g-2 align-items-end mb-3">
     <div class="col-md-3">
         <label class="form-label">Date</label>
         <input type="date" name="date" class="form-control" value="{{ selected_date|date:'Y-m-d' }}">
     </div>
+    {% if is_coordinator %}
+    <div class="col-md-4">
+        <label class="form-label">Faculty</label>
+        <select name="faculty" class="form-select">
+            <option value="">All</option>
+            {% for f in faculty_choices %}
+                <option value="{{ f }}" {% if selected_faculty == f %}selected{% endif %}>{{ f }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    {% endif %}
     <div class="col-md-2">
         <button class="btn btn-primary" type="submit">Show</button>
     </div>
 </form>
+{% if is_coordinator %}
+<div class="alert alert-info py-2">You can assign any faculty. Conflicts are allowed.</div>
+{% endif %}
 
 {% for row in rows %}
 <div class="card mb-3">
@@ -32,6 +48,9 @@
                 {% csrf_token %}
                 <input type="hidden" name="action" value="cancel">
                 <input type="hidden" name="adjustment_id" value="{{ row.adjustment.id }}">
+                {% if is_coordinator and selected_faculty %}
+                    <input type="hidden" name="faculty" value="{{ selected_faculty }}">
+                {% endif %}
                 <button class="btn btn-outline-danger" type="submit" {% if row.slot_started %}disabled{% endif %}>
                     Cancel Proxy
                 </button>
@@ -40,10 +59,13 @@
                 {% endif %}
             </form>
         {% else %}
-            <form method="post" class="row g-2 align-items-end">
+            <form method="post" class="row g-2 align-items-end" data-allow-conflict="{{ is_coordinator|yesno:'1,0' }}">
                 {% csrf_token %}
                 <input type="hidden" name="action" value="create">
                 <input type="hidden" name="entry_id" value="{{ row.entry.id }}">
+                {% if is_coordinator and selected_faculty %}
+                    <input type="hidden" name="faculty" value="{{ selected_faculty }}">
+                {% endif %}
                 <div class="col-md-3">
                     <label class="form-label">Proxy Faculty</label>
                     <select name="proxy_faculty" class="form-select">
@@ -99,6 +121,7 @@ document.querySelectorAll('form').forEach(form => {
     const subjectInput = form.querySelector('input[name="proxy_subject"]');
     const mergeInput = form.querySelector('input[name="merge_room"]');
     if (!facultySelect || !subjectInput || !mergeInput) return;
+    const allowConflict = form.getAttribute('data-allow-conflict') === '1';
     const roomSelect = form.querySelector('select[name="room_select"]');
     function renderRooms(facultyName) {
         if (!roomSelect) return;
@@ -129,6 +152,10 @@ document.querySelectorAll('form').forEach(form => {
         const facName = opt ? opt.value : '';
         renderRooms(facName);
         if (conflict) {
+            if (allowConflict) {
+                mergeInput.value = '';
+                return;
+            }
             const ok = window.confirm('Selected faculty already has a lecture in this slot. Merge?');
             if (!ok) {
                 facultySelect.value = '';
