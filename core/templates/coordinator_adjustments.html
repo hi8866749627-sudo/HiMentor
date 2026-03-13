@@ -43,7 +43,7 @@
                         <td>{{ a.timetable_entry.subject|default:a.subject }}</td>
                         <td>{{ a.original_faculty }}</td>
                         <td>{% if a.proxy_faculty %}{{ a.proxy_faculty.name }}{% endif %}</td>
-                        <td>{{ a.subject }}</td>
+                        <td>{{ a.proxy_subject }}</td>
                         <td>{{ a.room }}</td>
                         <td>
                             {% if a.status == "active" %}

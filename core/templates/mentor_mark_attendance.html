@@ -61,6 +61,9 @@
     padding: .22rem .5rem;
     font-size: .78rem;
 }
+.save-status {
+    font-weight: 600;
+}
 @media (max-width: 991.98px) {
     .compact-slot-row {
         grid-template-columns: 1fr;
@@ -200,6 +203,76 @@ function getCsrfToken(form) {
     return input ? input.value : '';
 }
 
+function hasUnsavedChanges() {
+    return Array.from(document.querySelectorAll('.attendance-form'))
+        .some(form => form.dataset.dirty === "1");
+}
+
+function markDirty(form) {
+    form.dataset.dirty = "1";
+    const status = form.querySelector('.save-status');
+    if (status) status.classList.add('d-none');
+}
+
+function markSaved(form) {
+    form.dataset.dirty = "0";
+    const status = form.querySelector('.save-status');
+    if (status) {
+        status.textContent = "Saved";
+        status.classList.remove('d-none');
+        setTimeout(() => status.classList.add('d-none'), 2000);
+    }
+}
+
+function buildFormData(form) {
+    const data = new FormData(form);
+    form.querySelectorAll('.roll-btn[data-absent="1"]').forEach(btn => {
+        data.append('absent_roll_numbers', btn.getAttribute('data-roll'));
+    });
+    return data;
+}
+
+function saveAttendance(form) {
+    const data = buildFormData(form);
+    return fetch('/mentor-mark-attendance/save/', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': getCsrfToken(form) },
+        body: data
+    }).then(r => r.json());
+}
+
+let pendingNavigation = null;
+
+function showUnsavedModal(continueFn) {
+    pendingNavigation = continueFn;
+    const modalEl = document.getElementById('unsavedModal');
+    const modal = new bootstrap.Modal(modalEl);
+    modal.show();
+}
+
+async function saveAllAndContinue() {
+    const forms = Array.from(document.querySelectorAll('.attendance-form'))
+        .filter(f => f.dataset.dirty === "1");
+    for (const form of forms) {
+        const resp = await saveAttendance(form);
+        if (!resp.ok) {
+            alert(resp.msg || 'Unable to save attendance.');
+            return;
+        }
+        markSaved(form);
+    }
+    const modalEl = document.getElementById('unsavedModal');
+    bootstrap.Modal.getInstance(modalEl).hide();
+    if (pendingNavigation) pendingNavigation();
+}
+
+function discardAndContinue() {
+    document.querySelectorAll('.attendance-form').forEach(f => f.dataset.dirty = "0");
+    const modalEl = document.getElementById('unsavedModal');
+    bootstrap.Modal.getInstance(modalEl).hide();
+    if (pendingNavigation) pendingNavigation();
+}
+
 document.querySelectorAll('.attendance-form').forEach(form => {
     const saveBtn = form.querySelector('.save-btn');
     const allPresentBtn = form.querySelector('.all-present-btn');
@@ -213,6 +286,7 @@ document.querySelectorAll('.attendance-form').forEach(form => {
                 btn.classList.remove('btn-danger');
                 btn.classList.add('btn-success');
             });
+            markDirty(form);
             saveBtn.click();
         });
     }
@@ -229,33 +303,64 @@ document.querySelectorAll('.attendance-form').forEach(form => {
                 btn.classList.remove('btn-success');
                 btn.classList.add('btn-danger');
             }
+            markDirty(form);
         });
     });
 
     if (saveBtn) {
         saveBtn.addEventListener('click', () => {
-            const data = new FormData(form);
-            form.querySelectorAll('.roll-btn[data-absent="1"]').forEach(btn => {
-                data.append('absent_roll_numbers', btn.getAttribute('data-roll'));
+            saveAttendance(form).then(resp => {
+                if (!resp.ok) {
+                    alert(resp.msg || 'Unable to save attendance.');
+                    return;
+                }
+                markSaved(form);
             });
-            fetch('/mentor-mark-attendance/save/', {
-                method: 'POST',
-                headers: { 'X-CSRFToken': getCsrfToken(form) },
-                body: data
-            }).then(r => r.json())
-              .then(resp => {
-                  if (!resp.ok) {
-                      alert(resp.msg || 'Unable to save attendance.');
-                      return;
-                  }
-                  if (status) {
-                      status.classList.remove('d-none');
-                      setTimeout(() => status.classList.add('d-none'), 1500);
-                  }
-              });
         });
     }
 });
+
+document.querySelector('form[method="get"]')?.addEventListener('submit', function (e) {
+    if (hasUnsavedChanges()) {
+        e.preventDefault();
+        showUnsavedModal(() => this.submit());
+    }
+});
+
+document.addEventListener('click', function (e) {
+    const link = e.target.closest('a[href]');
+    if (!link) return;
+    const href = link.getAttribute('href') || '';
+    if (href.startsWith('#') || href.startsWith('javascript:')) return;
+    if (hasUnsavedChanges()) {
+        e.preventDefault();
+        showUnsavedModal(() => { window.location.href = href; });
+    }
+});
+
+window.addEventListener('beforeunload', function (e) {
+    if (!hasUnsavedChanges()) return;
+    e.preventDefault();
+    e.returnValue = '';
+});
 </script>
+
+<div class="modal fade" id="unsavedModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Unsaved Changes</h5>
+      </div>
+      <div class="modal-body">
+        You have unsaved attendance changes. Save before leaving?
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stay</button>
+        <button type="button" class="btn btn-outline-danger" onclick="discardAndContinue()">Discard</button>
+        <button type="button" class="btn btn-primary" onclick="saveAllAndContinue()">Save All & Continue</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 {% endblock %}

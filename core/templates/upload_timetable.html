@@ -44,6 +44,7 @@
                         <td>{{ u.uploaded_by }}</td>
                         <td class="text-nowrap">
                             <a class="btn btn-sm btn-outline-secondary" href="/view-timetable/">View</a>
+                            <a class="btn btn-sm btn-outline-secondary" href="/timetable-excel/">Download</a>
                             <form method="post" class="d-inline" onsubmit="return confirm('Delete all timetable entries?')">
                                 {% csrf_token %}
                                 <input type="hidden" name="action" value="delete_all">

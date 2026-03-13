@@ -35,6 +35,7 @@ from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+import pandas as pd
 # ---------- LOCAL FORMS ----------
 from .forms import UploadFileForm
 
@@ -4100,6 +4101,63 @@ def view_timetable(request):
 
 
 @login_required
+def download_timetable_excel(request):
+    if request.session.get("mentor"):
+        return redirect("/mentor-dashboard/")
+
+    module = _active_module(request)
+    entries = list(
+        TimetableEntry.objects.filter(module=module).order_by("day_of_week", "lecture_no", "batch")
+    )
+    if not entries:
+        return HttpResponse("No timetable entries found.", status=404)
+
+    day_labels = dict(TimetableEntry.DAY_CHOICES)
+    batches = sorted({e.batch for e in entries if e.batch})
+    day_lecture_map = {}
+    time_map = {}
+    cell_map = {}
+    for e in entries:
+        day_lecture_map.setdefault(e.day_of_week, set()).add(e.lecture_no)
+        if e.time_slot:
+            time_map.setdefault((e.day_of_week, e.lecture_no), e.time_slot)
+        cell_map.setdefault((e.day_of_week, e.lecture_no), {})[e.batch] = e
+
+    header = ["Day", "Lecture", "Time"]
+    division_row = ["", "", ""]
+    for b in batches:
+        division_row.extend([b, "", ""])
+        header.extend(["Subject", "Faculty", "Room"])
+
+    rows = [division_row, header]
+    for day in sorted(day_lecture_map.keys()):
+        lectures = sorted(day_lecture_map.get(day, []))
+        for lec in lectures:
+            row = [day_labels.get(day, str(day)), lec, time_map.get((day, lec), "")]
+            for b in batches:
+                entry = cell_map.get((day, lec), {}).get(b)
+                if entry:
+                    row.extend([entry.subject, entry.faculty, entry.room])
+                else:
+                    row.extend(["", "", ""])
+            rows.append(row)
+
+    df = pd.DataFrame(rows)
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, header=False, sheet_name="Timetable")
+    buffer.seek(0)
+
+    filename = f"Timetable_{module.name.replace(' ', '_')}.xlsx"
+    response = HttpResponse(
+        buffer.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+@login_required
 def academic_calendar(request):
     if request.session.get("mentor"):
         return redirect("/mentor-dashboard/")
@@ -4657,13 +4715,45 @@ def coordinator_adjustments(request):
         date__gte=week_start,
         date__lte=week_end,
     ).select_related("proxy_faculty", "created_by")
+    adj_list = list(adjustments)
+    if adj_list:
+        day_set = {a.date.weekday() for a in adj_list}
+        lecture_set = {a.lecture_no for a in adj_list}
+        entries = list(
+            TimetableEntry.objects.filter(
+                module=module,
+                day_of_week__in=list(day_set),
+                lecture_no__in=list(lecture_set),
+            )
+        )
+        entry_by_batch_fac = {}
+        entry_by_fac = {}
+        for e in entries:
+            key = (e.day_of_week, e.lecture_no, (e.faculty or "").strip().lower(), (e.batch or "").strip().lower())
+            entry_by_batch_fac[key] = e
+            fac_key = (e.day_of_week, e.lecture_no, (e.faculty or "").strip().lower())
+            entry_by_fac.setdefault(fac_key, []).append(e)
+        for a in adj_list:
+            proxy_name = (a.proxy_faculty.name if a.proxy_faculty else "").strip().lower()
+            proxy_subject = ""
+            if proxy_name:
+                key = (a.date.weekday(), a.lecture_no, proxy_name, (a.batch or "").strip().lower())
+                match = entry_by_batch_fac.get(key)
+                if not match:
+                    fac_list = entry_by_fac.get((a.date.weekday(), a.lecture_no, proxy_name), [])
+                    match = fac_list[0] if fac_list else None
+                if match:
+                    proxy_subject = match.subject or ""
+            if not proxy_subject:
+                proxy_subject = a.subject or ""
+            a.proxy_subject = proxy_subject
 
     return render(
         request,
         "coordinator_adjustments.html",
         {
             "module": module,
-            "adjustments": adjustments,
+            "adjustments": adj_list,
             "week_start": week_start,
             "week_end": week_end,
         },
