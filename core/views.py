@@ -3337,6 +3337,7 @@ def mentor_student_data(request):
     module = _active_module(request)
     qs = Student.objects.select_related("mentor").filter(module=module)
     batch_choices = sorted({(v or "").strip() for v in qs.values_list("batch", flat=True) if (v or "").strip()})
+    division_choices = sorted({(v or "").strip() for v in qs.values_list("division", flat=True) if (v or "").strip()})
     mentor_choices = sorted({(v or "").strip() for v in qs.values_list("mentor__name", flat=True) if (v or "").strip()})
 
     filters = {
@@ -3396,6 +3397,7 @@ def mentor_student_data(request):
             "students": students,
             "filters": filters,
             "batch_choices": batch_choices,
+            "division_choices": division_choices,
             "mentor_choices": mentor_choices,
             "sort": sort,
             "direction": direction,

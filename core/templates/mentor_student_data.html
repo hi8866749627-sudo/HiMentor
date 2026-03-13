@@ -27,7 +27,14 @@
                         {% endfor %}
                     </select>
                 </th>
-                <th><input id="f_division" value="{{filters.division}}" class="form-control form-control-sm"></th>
+                <th>
+                    <select id="f_division" class="form-select form-select-sm">
+                        <option value="">All</option>
+                        {% for d in division_choices %}
+                        <option value="{{ d }}" {% if filters.division == d %}selected{% endif %}>{{ d }}</option>
+                        {% endfor %}
+                    </select>
+                </th>
                 <th><input id="f_enrollment" value="{{filters.enrollment}}" class="form-control form-control-sm"></th>
                 <th><input id="f_name" value="{{filters.name}}" class="form-control form-control-sm"></th>
                 <th>

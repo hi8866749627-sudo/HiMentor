@@ -73,7 +73,7 @@
             <tr>
                 <th><input id="f_roll" class="form-control form-control-sm" placeholder="Filter"></th>
                 <th><select id="f_batch" class="form-select form-select-sm"><option value="">All</option></select></th>
-                <th><input id="f_division" class="form-control form-control-sm" placeholder="Filter"></th>
+                <th><select id="f_division" class="form-select form-select-sm"><option value="">All</option></select></th>
                 <th><input id="f_enrollment" class="form-control form-control-sm" placeholder="Filter"></th>
                 <th><input id="f_name" class="form-control form-control-sm" placeholder="Filter"></th>
                 <th><select id="f_mentor" class="form-select form-select-sm"><option value="">All</option></select></th>
@@ -175,8 +175,10 @@
         }
 
         const batchValues = Array.from(new Set(rows.map(r => norm(r.querySelectorAll("td")[1]?.innerText)).filter(Boolean))).sort();
+        const divisionValues = Array.from(new Set(rows.map(r => norm(r.querySelectorAll("td")[2]?.innerText)).filter(Boolean))).sort();
         const mentorValues = Array.from(new Set(rows.map(r => norm(r.querySelectorAll("td")[5]?.innerText)).filter(Boolean))).sort();
         fillSelectOptions(inputs.batch, batchValues);
+        fillSelectOptions(inputs.division, divisionValues);
         fillSelectOptions(inputs.mentor, mentorValues);
 
         const clearBtn = document.getElementById("clearFiltersBtn");
