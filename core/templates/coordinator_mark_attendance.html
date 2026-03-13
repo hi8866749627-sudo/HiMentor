@@ -7,7 +7,7 @@
 }
 .compact-slot-row {
     display: grid;
-    grid-template-columns: 240px 1fr 170px;
+    grid-template-columns: 210px 1fr 150px;
     gap: .6rem;
     align-items: start;
     padding: .55rem 0;
@@ -40,21 +40,18 @@
 }
 .roll-grid-compact {
     display: flex;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     gap: .2rem;
     min-width: 0;
-    overflow-x: auto;
-    overflow-y: hidden;
-    white-space: nowrap;
-    padding-bottom: .2rem;
-    scrollbar-width: thin;
+    align-content: flex-start;
+    max-width: 100%;
 }
 .roll-grid-compact .roll-btn {
-    min-width: 34px;
+    min-width: 30px;
     flex: 0 0 auto;
-    padding: .12rem .35rem;
+    padding: .1rem .3rem;
     line-height: 1.1;
-    font-size: .8rem;
+    font-size: .76rem;
     border-radius: .35rem;
 }
 .slot-actions {
