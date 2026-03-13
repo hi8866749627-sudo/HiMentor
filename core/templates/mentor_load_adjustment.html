@@ -33,7 +33,7 @@
 {% for row in rows %}
 <div class="card mb-3">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <span>L{{ row.entry.lecture_no }} · {{ row.entry.time_slot }} · {{ row.entry.batch }} · {{ row.entry.subject }} · {{ row.entry.faculty }}</span>
+        <span>L{{ row.entry.lecture_no }} · {{ row.entry.time_slot }} · {{ row.entry.batch }} · {{ row.entry.subject }} · {{ row.entry.faculty }} · {{ row.entry.room }}</span>
         {% if row.adjustment %}
             {% if row.adjustment.adjustment_type == "swap" %}
                 <span class="badge bg-info text-dark">Swap</span>
