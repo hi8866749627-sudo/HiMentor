@@ -8,6 +8,7 @@ import threading
 import uuid
 import zipfile
 import json
+from types import SimpleNamespace
 from datetime import datetime, date, timedelta, time
 from zoneinfo import ZoneInfo
 from django.core.management import call_command
@@ -1990,10 +1991,14 @@ def mentor_dashboard(request):
 
     # build attendance map
     attendance_map = {}
+    actionable_student_ids = []
     if selected_week:
-        atts = Attendance.objects.filter(week_no=selected_week, student__mentor=mentor, student__module=module)
+        atts = Attendance.objects.filter(week_no=selected_week, student__mentor=mentor, student__module=module).filter(
+            Q(call_required=True) | Q(week_percentage__lt=80) | Q(overall_percentage__lt=80)
+        )
         for a in atts:
             attendance_map[a.student_id] = a
+            actionable_student_ids.append(a.student_id)
     
     all_done = False
     not_connected = []
@@ -2002,7 +2007,14 @@ def mentor_dashboard(request):
         latest_by_student = _latest_attendance_calls_map(module, selected_week, mentor=mentor)
         status_weight = {None: 0, "": 0, "not_received": 1, "received": 2}
         records = sorted(
-            list(latest_by_student.values()),
+            [
+                latest_by_student.get(student_id) or SimpleNamespace(
+                    student=attendance_map[student_id].student,
+                    final_status=None,
+                )
+                for student_id in actionable_student_ids
+                if student_id in attendance_map
+            ],
             key=lambda c: (status_weight.get(c.final_status, 0), c.student.roll_no or 999999),
         )
         total = len(records)
