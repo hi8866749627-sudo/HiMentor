@@ -39,11 +39,14 @@
         <label class="form-label">Search (roll/name/enroll)</label>
         <input type="text" name="search" class="form-control" value="{{ search }}">
     </div>
-    <div class="col-md-2 d-flex gap-2">
+    <div class="col-md-3 d-flex gap-2 flex-wrap">
         <button class="btn btn-primary" type="submit">Show</button>
         <a class="btn btn-outline-secondary" href="/attendance-analytics/weekly-live/?phase={{ phase }}&week={{ week_param }}">Live Sheet</a>
         {% if not request.session.mentor %}
-        <a class="btn btn-outline-secondary" href="/attendance-analytics/weekly-excel/?phase={{ phase }}&week={{ week_param }}">Download</a>
+        <a class="btn btn-outline-secondary" href="/attendance-analytics/weekly-excel/?phase={{ phase }}&week={{ week_param }}&batch={{ batch_filter }}&format=compiled">Compiled</a>
+        <a class="btn btn-outline-secondary" href="/attendance-analytics/weekly-excel/?phase={{ phase }}&week={{ week_param }}&batch={{ batch_filter }}&format=batchwise">Batchwise</a>
+        <a class="btn btn-outline-secondary" href="/attendance-analytics/weekly-excel/?phase={{ phase }}&week={{ week_param }}&batch={{ batch_filter }}&format=subjectwise">Subjectwise</a>
+        <a class="btn btn-outline-secondary" href="/attendance-analytics/weekly-excel/?phase={{ phase }}&week={{ week_param }}&batch={{ batch_filter }}&format=register">Register</a>
         {% endif %}
     </div>
 </form>

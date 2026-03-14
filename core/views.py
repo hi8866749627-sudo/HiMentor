@@ -31,6 +31,8 @@ from django.db.models import Q
 from urllib.parse import quote
 from django.core.paginator import Paginator
 from openpyxl import Workbook
+from openpyxl.styles import PatternFill, Font, Alignment
+from openpyxl.utils import get_column_letter
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
@@ -1496,25 +1498,28 @@ def add_subject(request):
         result_format = Subject.FORMAT_FULL
     if result_format not in {Subject.FORMAT_FULL, Subject.FORMAT_T4_ONLY}:
         result_format = Subject.FORMAT_FULL
-    subject, created = Subject.objects.get_or_create(
-        module=module,
-        name=name,
-        defaults={
-            "is_active": True,
-            "result_format": result_format,
-            "short_name": short_name,
-            "display_order": (Subject.objects.filter(module=module).aggregate(mx=Max("display_order")).get("mx") or 0) + 1,
-            "has_theory": has_theory,
-            "has_practical": has_practical,
-        },
-    )
+    subject = Subject.objects.filter(module=module, name__iexact=name).first()
+    created = False
+    if not subject:
+        subject = Subject.objects.create(
+            module=module,
+            name=name,
+            is_active=True,
+            result_format=result_format,
+            short_name=short_name,
+            display_order=(Subject.objects.filter(module=module).aggregate(mx=Max("display_order")).get("mx") or 0) + 1,
+            has_theory=has_theory,
+            has_practical=has_practical,
+        )
+        created = True
     if not created:
+        subject.name = name
         subject.short_name = short_name
         subject.result_format = result_format
         subject.has_theory = has_theory
         subject.has_practical = has_practical
         subject.is_active = True
-        subject.save(update_fields=["short_name", "result_format", "has_theory", "has_practical", "is_active"])
+        subject.save(update_fields=["name", "short_name", "result_format", "has_theory", "has_practical", "is_active"])
     if is_superadmin_user(getattr(request, "user", None)):
         template, _ = SubjectTemplate.objects.update_or_create(
             name=name,
@@ -1549,6 +1554,10 @@ def edit_subject(request, subject_id):
         return redirect("/subjects/")
     subject = Subject.objects.filter(id=subject_id, module=module).first()
     if subject:
+        duplicate = Subject.objects.filter(module=module, name__iexact=name).exclude(id=subject.id).first()
+        if duplicate:
+            messages.error(request, "A subject with this name already exists in the module.")
+            return redirect("/subjects/")
         subject.name = name
         subject.short_name = short_name or name
         if not has_theory:
@@ -4104,12 +4113,14 @@ def upload_timetable(request):
             upload.save(update_fields=["is_active"])
             TimetableEntry.objects.filter(module=module).update(is_active=False)
             TimetableEntry.objects.filter(module=module, upload=upload).update(is_active=True)
+            _sync_subjects_from_timetable(module)
             messages.success(
                 request,
                 f"Timetable uploaded ({sheet_name}). Entries created: {created}, skipped: {skipped}. Activated now.",
             )
         else:
             TimetableEntry.objects.filter(module=module, upload=upload).update(is_active=False)
+            _sync_subjects_from_timetable(module)
             messages.success(
                 request,
                 f"Timetable uploaded ({sheet_name}). Entries created: {created}, skipped: {skipped}. Scheduled from {effective_from:%d %b %Y %H:%M}.",
@@ -4171,6 +4182,7 @@ def view_timetable(request):
                             lecture_no=lecture_no,
                             batch=batch,
                         ).exclude(id=entry.id).update(is_active=False)
+                        _sync_subjects_from_timetable(module)
                         messages.success(request, "Timetable updated.")
             return redirect("/view-timetable/")
     day_filter = request.GET.get("day")
@@ -4603,6 +4615,63 @@ def _timetable_choice_lists(module):
         "faculty_choices": sorted({(v or "").strip() for v in qs.values_list("faculty", flat=True) if (v or "").strip()}),
         "room_choices": sorted({(v or "").strip() for v in qs.values_list("room", flat=True) if (v or "").strip()}),
     }
+
+
+def _sync_subjects_from_timetable(module):
+    timetable_subjects = sorted(
+        {
+            (name or "").strip()
+            for name in TimetableEntry.objects.filter(module=module, is_active=True).values_list("subject", flat=True)
+            if (name or "").strip()
+        }
+    )
+    if not timetable_subjects:
+        return 0
+
+    existing_by_name = {
+        (s.name or "").strip().lower(): s
+        for s in Subject.objects.filter(module=module)
+    }
+    templates_by_name = {
+        (t.name or "").strip().lower(): t
+        for t in SubjectTemplate.objects.filter(is_active=True)
+    }
+    next_order = (Subject.objects.filter(module=module).aggregate(mx=Max("display_order")).get("mx") or 0) + 1
+    created_count = 0
+
+    for subject_name in timetable_subjects:
+        key = subject_name.lower()
+        existing = existing_by_name.get(key)
+        template = templates_by_name.get(key)
+        if existing:
+            update_fields = []
+            if not existing.is_active:
+                existing.is_active = True
+                update_fields.append("is_active")
+            if template and existing.source_template_id != template.id:
+                existing.source_template = template
+                update_fields.append("source_template")
+            if not existing.short_name:
+                existing.short_name = template.short_name if template and template.short_name else subject_name
+                update_fields.append("short_name")
+            if update_fields:
+                existing.save(update_fields=update_fields)
+            continue
+
+        Subject.objects.create(
+            module=module,
+            source_template=template,
+            name=subject_name,
+            short_name=(template.short_name if template and template.short_name else subject_name),
+            display_order=next_order,
+            has_theory=(template.has_theory if template else True),
+            has_practical=(template.has_practical if template else True),
+            result_format=(template.result_format if template else Subject.FORMAT_FULL),
+            is_active=True,
+        )
+        next_order += 1
+        created_count += 1
+    return created_count
 
 
 def _active_adjustments_for_date(module, selected_date):
@@ -5649,6 +5718,7 @@ def attendance_analytics(request):
     week_param = (request.GET.get("week") or "all").strip().lower()
     week_no = None if week_param in {"all", ""} else int(week_param) + 1
     batch_filter = (request.GET.get("batch") or "").strip()
+    batch_filter = (request.GET.get("batch") or "").strip()
     search = (request.GET.get("search") or "").strip()
     batch_choices = sorted(
         {
@@ -6204,6 +6274,339 @@ def weekly_attendance_live(request):
     )
 
 
+def _safe_sheet_title(title):
+    cleaned = re.sub(r"[:\\/?*\[\]]", "_", str(title or "").strip())
+    return (cleaned or "Sheet")[:31]
+
+
+def _highlight_low_percent(cell, ratio_value):
+    if ratio_value is None:
+        return
+    try:
+        numeric = float(ratio_value)
+    except Exception:
+        return
+    if numeric < 0.8:
+        cell.fill = PatternFill(fill_type="solid", fgColor="F8CBAD")
+        cell.font = Font(color="9C0006", bold=True)
+
+
+def _student_batch_keys(student):
+    return {
+        key
+        for key in {
+            _norm_batch_key(student.batch),
+            _norm_batch_key(student.division),
+        }
+        if key
+    }
+
+
+def _ordered_subject_names_for_module(module, sessions):
+    session_subjects = {
+        (session.subject or "").strip()
+        for session in sessions
+        if (session.subject or "").strip()
+    }
+    ordered = []
+    seen = set()
+    for subject in Subject.objects.filter(module=module, is_active=True).order_by("display_order", "name"):
+        name = (subject.name or "").strip()
+        if name and name in session_subjects and name not in seen:
+            ordered.append(name)
+            seen.add(name)
+    for name in sorted(session_subjects):
+        if name not in seen:
+            ordered.append(name)
+    return ordered
+
+
+def _weekly_export_data(module, calendar, phase, week_no, batch_filter=""):
+    start, end = phase_range(calendar, phase)
+    if not start or not end:
+        return None
+
+    end_date = end_date_for_week(calendar, phase, week_no)
+    if end_date and end_date > end:
+        end_date = end
+    range_end = end_date or end
+
+    batch_filter_key = _norm_batch_key(batch_filter)
+
+    students = list(
+        Student.objects.filter(module=module)
+        .select_related("mentor")
+        .order_by("batch", "roll_no", "name")
+    )
+    if batch_filter_key:
+        students = [student for student in students if batch_filter_key in _student_batch_keys(student)]
+    student_keys = {student.id: _student_batch_keys(student) for student in students}
+    students_by_batch = {}
+    for student in students:
+        batch_label = (student.batch or student.division or "").strip() or "Unassigned"
+        students_by_batch.setdefault(batch_label, []).append(student)
+
+    sessions = list(
+        LectureSession.objects.filter(module=module, date__gte=start, date__lte=range_end)
+        .order_by("date", "lecture_no", "batch", "time_slot")
+    )
+    if batch_filter_key:
+        sessions = [session for session in sessions if _norm_batch_key(session.batch) == batch_filter_key]
+    session_ids = [session.id for session in sessions]
+    absences = list(
+        LectureAbsence.objects.filter(session_id__in=session_ids)
+        .select_related("student", "session")
+    )
+    absences_by_session = {}
+    for absence in absences:
+        absences_by_session.setdefault(absence.session_id, set()).add(absence.student_id)
+
+    per_student = {
+        student.id: {
+            "held_total": 0,
+            "attended_total": 0,
+            "subject": {},
+            "week": {},
+            "session": {},
+        }
+        for student in students
+    }
+    session_entries = []
+    batch_session_map = {}
+    week_numbers = set()
+
+    for session in sessions:
+        batch_key = _norm_batch_key(session.batch)
+        matched_students = []
+        for student in students:
+            if batch_key and batch_key in student_keys.get(student.id, set()):
+                matched_students.append(student)
+        session_absent_ids = absences_by_session.get(session.id, set())
+        _, session_week_no = week_for_date(calendar, session.date)
+        if session_week_no:
+            week_numbers.add(session_week_no)
+        subject_name = (session.subject or "").strip()
+        batch_session_map.setdefault(session.batch, []).append(session)
+
+        session_entry = {
+            "session": session,
+            "student_ids": [student.id for student in matched_students],
+            "subject": subject_name,
+            "week_no": session_week_no,
+        }
+        session_entries.append(session_entry)
+
+        for student in matched_students:
+            stats = per_student[student.id]
+            stats["held_total"] += 1
+            attended = student.id not in session_absent_ids
+            if attended:
+                stats["attended_total"] += 1
+            if subject_name:
+                subj_stats = stats["subject"].setdefault(subject_name, {"held": 0, "attended": 0})
+                subj_stats["held"] += 1
+                if attended:
+                    subj_stats["attended"] += 1
+            if session_week_no:
+                wk_stats = stats["week"].setdefault(session_week_no, {"held": 0, "attended": 0})
+                wk_stats["held"] += 1
+                if attended:
+                    wk_stats["attended"] += 1
+            stats["session"][session.id] = attended
+
+    ordered_subjects = _ordered_subject_names_for_module(module, sessions)
+    ordered_batches = sorted(students_by_batch.keys())
+    ordered_weeks = sorted(week_numbers)
+
+    return {
+        "start": start,
+        "end": range_end,
+        "students": students,
+        "students_by_batch": students_by_batch,
+        "ordered_batches": ordered_batches,
+        "sessions": sessions,
+        "batch_session_map": batch_session_map,
+        "session_entries": session_entries,
+        "subjects": ordered_subjects,
+        "weeks": ordered_weeks,
+        "per_student": per_student,
+    }
+
+
+def _autosize_sheet(ws, min_width=10, max_width=28):
+    for column_cells in ws.columns:
+        lengths = [len(str(cell.value or "")) for cell in column_cells]
+        width = max(lengths or [min_width]) + 2
+        letter = get_column_letter(column_cells[0].column)
+        ws.column_dimensions[letter].width = max(min_width, min(width, max_width))
+
+
+def _write_compiled_sheet(ws, module, phase, export_data):
+    ws.title = "Compiled"
+    ws.cell(row=1, column=1, value="L.J. Institute of Engineering and Technology")
+    ws.cell(row=2, column=1, value=module.name)
+    ws.cell(row=3, column=1, value=f"Weekly Attendance - {phase}")
+    headers = ["Roll No", "Batch", "Division", "Student Name", "Enrollment No", "Mentor"]
+    row_no = 6
+    col_no = 1
+    for label in headers:
+        ws.cell(row=row_no, column=col_no, value=label)
+        ws.cell(row=row_no, column=col_no).font = Font(bold=True)
+        col_no += 1
+    for subject_name in export_data["subjects"]:
+        ws.cell(row=row_no, column=col_no, value=subject_name)
+        ws.cell(row=row_no + 1, column=col_no, value="Att")
+        ws.cell(row=row_no + 1, column=col_no + 1, value="Held")
+        ws.cell(row=row_no + 1, column=col_no + 2, value="%")
+        col_no += 3
+    ws.cell(row=row_no, column=col_no, value="Overall")
+    ws.cell(row=row_no + 1, column=col_no, value="Att")
+    ws.cell(row=row_no + 1, column=col_no + 1, value="Held")
+    ws.cell(row=row_no + 1, column=col_no + 2, value="%")
+
+    data_row = 8
+    for student in export_data["students"]:
+        stats = export_data["per_student"][student.id]
+        row = [
+            student.roll_no,
+            student.batch or "",
+            student.division or "",
+            student.name,
+            student.enrollment,
+            student.mentor.name if student.mentor else "",
+        ]
+        for idx, value in enumerate(row, start=1):
+            ws.cell(row=data_row, column=idx, value=value)
+        col_no = 7
+        for subject_name in export_data["subjects"]:
+            subject_stats = stats["subject"].get(subject_name, {"held": 0, "attended": 0})
+            held = subject_stats["held"]
+            attended = subject_stats["attended"]
+            ratio = (attended / held) if held else None
+            ws.cell(row=data_row, column=col_no, value=attended)
+            ws.cell(row=data_row, column=col_no + 1, value=held)
+            pct_cell = ws.cell(row=data_row, column=col_no + 2, value=ratio if ratio is not None else "")
+            if ratio is not None:
+                pct_cell.number_format = "0.0%"
+                _highlight_low_percent(pct_cell, ratio)
+            col_no += 3
+        held_total = stats["held_total"]
+        attended_total = stats["attended_total"]
+        overall_ratio = (attended_total / held_total) if held_total else None
+        ws.cell(row=data_row, column=col_no, value=attended_total)
+        ws.cell(row=data_row, column=col_no + 1, value=held_total)
+        pct_cell = ws.cell(row=data_row, column=col_no + 2, value=overall_ratio if overall_ratio is not None else "")
+        if overall_ratio is not None:
+            pct_cell.number_format = "0.0%"
+            _highlight_low_percent(pct_cell, overall_ratio)
+        data_row += 1
+    _autosize_sheet(ws)
+
+
+def _write_batchwise_sheets(workbook, export_data):
+    for batch in export_data["ordered_batches"]:
+        ws = workbook.create_sheet(title=_safe_sheet_title(batch))
+        ws.append(["Roll No", "Student Name", "Enrollment No", "Mentor", "Attended", "Held", "%"])
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+        for student in export_data["students_by_batch"].get(batch, []):
+            stats = export_data["per_student"][student.id]
+            held_total = stats["held_total"]
+            attended_total = stats["attended_total"]
+            ratio = (attended_total / held_total) if held_total else None
+            ws.append([
+                student.roll_no,
+                student.name,
+                student.enrollment,
+                student.mentor.name if student.mentor else "",
+                attended_total,
+                held_total,
+                ratio if ratio is not None else "",
+            ])
+            if ratio is not None:
+                pct_cell = ws.cell(row=ws.max_row, column=7)
+                pct_cell.number_format = "0.0%"
+                _highlight_low_percent(pct_cell, ratio)
+        _autosize_sheet(ws)
+
+
+def _write_subjectwise_sheets(workbook, export_data):
+    for subject_name in export_data["subjects"]:
+        ws = workbook.create_sheet(title=_safe_sheet_title(subject_name))
+        ws.append(["Roll No", "Student Name", "Batch", "Enrollment No", "Attended", "Held", "%", "Overall %"])
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+        for student in export_data["students"]:
+            stats = export_data["per_student"][student.id]
+            subject_stats = stats["subject"].get(subject_name, {"held": 0, "attended": 0})
+            held = subject_stats["held"]
+            attended = subject_stats["attended"]
+            ratio = (attended / held) if held else None
+            overall_ratio = (stats["attended_total"] / stats["held_total"]) if stats["held_total"] else None
+            ws.append([
+                student.roll_no,
+                student.name,
+                student.batch or student.division or "",
+                student.enrollment,
+                attended,
+                held,
+                ratio if ratio is not None else "",
+                overall_ratio if overall_ratio is not None else "",
+            ])
+            if ratio is not None:
+                pct_cell = ws.cell(row=ws.max_row, column=7)
+                pct_cell.number_format = "0.0%"
+                _highlight_low_percent(pct_cell, ratio)
+            if overall_ratio is not None:
+                pct_cell = ws.cell(row=ws.max_row, column=8)
+                pct_cell.number_format = "0.0%"
+                _highlight_low_percent(pct_cell, overall_ratio)
+        _autosize_sheet(ws)
+
+
+def _write_register_sheets(workbook, export_data):
+    for batch in export_data["ordered_batches"]:
+        sessions = [
+            session
+            for session in export_data["batch_session_map"].get(batch, [])
+            if _norm_batch_key(session.batch) == _norm_batch_key(batch)
+        ]
+        ws = workbook.create_sheet(title=_safe_sheet_title(f"{batch} Register"))
+        headers = ["Roll No", "Student Name", "Enrollment No"]
+        session_labels = [
+            f"{session.date:%d-%b} L{session.lecture_no} {((session.subject or '').strip() or 'Lecture')}"
+            for session in sessions
+        ]
+        ws.append(headers + session_labels + ["Attended", "Held", "%"])
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        for student in export_data["students_by_batch"].get(batch, []):
+            stats = export_data["per_student"][student.id]
+            row = [student.roll_no, student.name, student.enrollment]
+            attended_count = 0
+            held_count = 0
+            for session in sessions:
+                attended = stats["session"].get(session.id)
+                if attended is None:
+                    row.append("")
+                    continue
+                held_count += 1
+                if attended:
+                    attended_count += 1
+                    row.append("P")
+                else:
+                    row.append("A")
+            ratio = (attended_count / held_count) if held_count else None
+            row.extend([attended_count, held_count, ratio if ratio is not None else ""])
+            ws.append(row)
+            if ratio is not None:
+                pct_cell = ws.cell(row=ws.max_row, column=len(row))
+                pct_cell.number_format = "0.0%"
+                _highlight_low_percent(pct_cell, ratio)
+        _autosize_sheet(ws, min_width=8, max_width=18)
+
+
 def weekly_attendance_excel(request):
     if request.session.get("mentor"):
         return HttpResponse("Forbidden", status=403)
@@ -6228,102 +6631,35 @@ def weekly_attendance_excel(request):
     if is_coordinator and not _attendance_fully_marked_for_range(module, start, end_date or end):
         return HttpResponse("Attendance is not fully marked for the selected range.", status=400)
 
-    sessions = list(
-        LectureSession.objects.filter(module=module, date__gte=start, date__lte=end_date or end)
-    )
-    session_ids = [s.id for s in sessions]
-    absences = LectureAbsence.objects.filter(session_id__in=session_ids).select_related("session", "student")
-
-    subject_set = sorted({(s.subject or "").strip() for s in sessions if (s.subject or "").strip()})
-
-    held_by_batch_subject = {}
-    held_by_batch = {}
-    for s in sessions:
-        held_by_batch.setdefault(s.batch, 0)
-        held_by_batch[s.batch] += 1
-        subj = (s.subject or "").strip()
-        held_by_batch_subject.setdefault(s.batch, {}).setdefault(subj, 0)
-        held_by_batch_subject[s.batch][subj] += 1
-
-    absent_by_student_subject = {}
-    absent_by_student = {}
-    for a in absences:
-        sid = a.student_id
-        absent_by_student[sid] = absent_by_student.get(sid, 0) + 1
-        subj = (a.session.subject or "").strip()
-        absent_by_student_subject.setdefault(sid, {}).setdefault(subj, 0)
-        absent_by_student_subject[sid][subj] += 1
-
-    students = list(Student.objects.filter(module=module).order_by("roll_no", "name"))
+    export_format = (request.GET.get("format") or "compiled").strip().lower()
+    export_data = _weekly_export_data(module, calendar, phase, week_no, batch_filter=batch_filter)
+    if export_data is None:
+        return HttpResponse("Academic calendar not configured.", status=400)
 
     wb = Workbook()
-    ws = wb.active
-    ws.title = "Compiled"
-    ws.cell(row=1, column=1, value="L.J.INSTITUTE OF ENGINEERING AND TECHNOLOGY")
-    ws.cell(row=2, column=1, value=f"{module.name}")
-    ws.cell(row=3, column=1, value=f"ATTENDANCE RECORD - {phase}")
-
-    base_cols = ["Roll No", "Branch", "Div", "Student Name", "Enrollment No", "Mentor Name"]
-    col = 1
-    header_row = 6
-    sub_header_row = 7
-    for label in base_cols:
-        ws.cell(row=header_row, column=col, value=label)
-        col += 1
-
-    for subj in subject_set:
-        ws.cell(row=header_row, column=col, value=subj)
-        ws.cell(row=sub_header_row, column=col, value="A")
-        ws.cell(row=sub_header_row, column=col + 1, value="B")
-        ws.cell(row=sub_header_row, column=col + 2, value="Overall %")
-        col += 3
-
-    ws.cell(row=header_row, column=col, value="Attendance")
-    ws.cell(row=sub_header_row, column=col, value="A")
-    ws.cell(row=sub_header_row, column=col + 1, value="B")
-    ws.cell(row=sub_header_row, column=col + 2, value="Overall %")
-
-    row_cursor = 9
-    for student in students:
-        batch = student.batch or ""
-        held_total = held_by_batch.get(batch, 0)
-        absent_total = absent_by_student.get(student.id, 0)
-        attended_total = max(held_total - absent_total, 0)
-        overall_pct = round(attended_total / held_total, 4) if held_total else 0
-
-        col_cursor = 1
-        ws.cell(row=row_cursor, column=col_cursor, value=student.roll_no)
-        col_cursor += 1
-        ws.cell(row=row_cursor, column=col_cursor, value=student.batch or "")
-        col_cursor += 1
-        ws.cell(row=row_cursor, column=col_cursor, value=student.division or student.batch or "")
-        col_cursor += 1
-        ws.cell(row=row_cursor, column=col_cursor, value=student.name)
-        col_cursor += 1
-        ws.cell(row=row_cursor, column=col_cursor, value=student.enrollment)
-        col_cursor += 1
-        ws.cell(row=row_cursor, column=col_cursor, value=student.mentor.name if student.mentor else "")
-        col_cursor += 1
-
-        for subj in subject_set:
-            held = held_by_batch_subject.get(batch, {}).get(subj, 0)
-            absent = absent_by_student_subject.get(student.id, {}).get(subj, 0)
-            attended = max(held - absent, 0)
-            pct = round(attended / held, 4) if held else 0
-            ws.cell(row=row_cursor, column=col_cursor, value=attended)
-            ws.cell(row=row_cursor, column=col_cursor + 1, value=held)
-            ws.cell(row=row_cursor, column=col_cursor + 2, value=pct)
-            col_cursor += 3
-
-        ws.cell(row=row_cursor, column=col_cursor, value=attended_total)
-        ws.cell(row=row_cursor, column=col_cursor + 1, value=held_total)
-        ws.cell(row=row_cursor, column=col_cursor + 2, value=overall_pct)
-        row_cursor += 1
+    primary_ws = wb.active
+    _write_compiled_sheet(primary_ws, module, phase, export_data)
+    if export_format == "batchwise":
+        _write_batchwise_sheets(wb, export_data)
+        if wb.sheetnames and wb.sheetnames[0] == "Compiled":
+            del wb["Compiled"]
+    elif export_format == "subjectwise":
+        _write_subjectwise_sheets(wb, export_data)
+        if wb.sheetnames and wb.sheetnames[0] == "Compiled":
+            del wb["Compiled"]
+    elif export_format == "register":
+        _write_register_sheets(wb, export_data)
+        if wb.sheetnames and wb.sheetnames[0] == "Compiled":
+            del wb["Compiled"]
+    else:
+        _write_batchwise_sheets(wb, export_data)
+        _write_subjectwise_sheets(wb, export_data)
+        _write_register_sheets(wb, export_data)
 
     buffer = io.BytesIO()
     wb.save(buffer)
     buffer.seek(0)
-    filename = f"Weekly_Attendance_{phase}_{date.today():%Y-%m-%d}.xlsx"
+    filename = f"Weekly_Attendance_{phase}_{export_format}_{date.today():%Y-%m-%d}.xlsx"
     response = HttpResponse(
         buffer.getvalue(),
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
