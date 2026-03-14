@@ -4748,6 +4748,162 @@ def academic_calendar(request):
     )
 
 
+def _schedule_entries_for_faculty(modules, selected_date, faculty_name):
+    day_of_week = selected_date.weekday()
+    entries = []
+    has_inactive_calendar = False
+    today = timezone.localdate()
+    for module in modules:
+        _ensure_active_timetable(module)
+        calendar = _calendar_for_module(module)
+        if calendar and not calendar.is_active:
+            has_inactive_calendar = True
+
+        adjustments = _active_adjustments_for_date(module, selected_date)
+        adj_map = {(a.batch, a.lecture_no): a for a in adjustments}
+        students_all = list(Student.objects.filter(module=module).only("batch", "division"))
+        batch_totals = {}
+        for student in students_all:
+            for key in {_norm_batch_key(student.batch), _norm_batch_key(student.division)}:
+                if key:
+                    batch_totals[key] = batch_totals.get(key, 0) + 1
+        slot_time_map = {}
+        slot_numbers = set()
+        for tt_entry in TimetableEntry.objects.filter(module=module, is_active=True).order_by("lecture_no"):
+            if tt_entry.lecture_no:
+                slot_numbers.add(tt_entry.lecture_no)
+                if tt_entry.time_slot and tt_entry.lecture_no not in slot_time_map:
+                    slot_time_map[tt_entry.lecture_no] = tt_entry.time_slot
+        slot_numbers.update({1, 2, 3, 4})
+
+        merge_room_map = {
+            (a.date, a.lecture_no): a.merge_room
+            for a in adjustments
+            if a.proxy_faculty and a.proxy_faculty.name.lower() == faculty_name.lower() and a.merge_room
+        }
+        original_entries = TimetableEntry.objects.filter(
+            module=module, day_of_week=day_of_week, faculty__iexact=faculty_name, is_active=True
+        )
+        for entry in original_entries:
+            merge_room = merge_room_map.get((selected_date, entry.lecture_no), "")
+            adj = adj_map.get((entry.batch, entry.lecture_no))
+            session = LectureSession.objects.filter(
+                module=module,
+                date=selected_date,
+                lecture_no=entry.lecture_no,
+                batch=entry.batch,
+            ).first()
+            total_count = batch_totals.get(_norm_batch_key(entry.batch), 0)
+            absent_count = LectureAbsence.objects.filter(session=session).count() if session else None
+            present_count = (max(total_count - absent_count, 0) if session else None) if total_count else (0 if session else None)
+            subject_val = entry.subject
+            time_slot_val = entry.time_slot
+            room_val = merge_room or entry.room
+            if adj:
+                subject_val = adj.subject or subject_val
+                time_slot_val = adj.time_slot or time_slot_val
+                room_val = adj.room or room_val
+            row_highlight = ""
+            if adj and adj.adjustment_type == LectureAdjustment.TYPE_SWAP:
+                row_highlight = "swap"
+            elif adj and adj.adjustment_type == LectureAdjustment.TYPE_PROXY and adj.proxy_faculty and adj.proxy_faculty.name.lower() == faculty_name.lower():
+                row_highlight = "proxy"
+            elif (session and total_count and absent_count == total_count) or (
+                not session and (selected_date < today or (selected_date == today and _slot_has_started(selected_date, time_slot_val)))
+            ):
+                row_highlight = "mass_bunk"
+            entries.append(
+                {
+                    "module": module,
+                    "module_name": module.name,
+                    "dept_label": _dept_label_from_module(module),
+                    "lecture_no": entry.lecture_no,
+                    "time_slot": time_slot_val,
+                    "batch": entry.batch,
+                    "subject": subject_val,
+                    "room": room_val,
+                    "status": "original",
+                    "proxy_faculty": adj.proxy_faculty.name if adj and adj.proxy_faculty else "",
+                    "has_proxy": bool(adj),
+                    "adjustment_type": adj.adjustment_type if adj else "",
+                    "swap_with": f"{adj.swap_batch} L{adj.swap_lecture_no}" if adj and adj.adjustment_type == LectureAdjustment.TYPE_SWAP and adj.swap_batch and adj.swap_lecture_no else "",
+                    "total_count": total_count,
+                    "absent_count": absent_count,
+                    "present_count": present_count,
+                    "row_highlight": row_highlight,
+                    "is_placeholder": False,
+                }
+            )
+
+        for adj in adjustments:
+            if adj.adjustment_type == LectureAdjustment.TYPE_PROXY and adj.proxy_faculty and adj.proxy_faculty.name.lower() == faculty_name.lower():
+                session = LectureSession.objects.filter(
+                    module=module,
+                    date=selected_date,
+                    lecture_no=adj.lecture_no,
+                    batch=adj.batch,
+                ).first()
+                total_count = batch_totals.get(_norm_batch_key(adj.batch), 0)
+                absent_count = LectureAbsence.objects.filter(session=session).count() if session else None
+                present_count = (max(total_count - absent_count, 0) if session else None) if total_count else (0 if session else None)
+                entries.append(
+                    {
+                        "module": module,
+                        "module_name": module.name,
+                        "dept_label": _dept_label_from_module(module),
+                        "lecture_no": adj.lecture_no,
+                        "time_slot": adj.time_slot,
+                        "batch": adj.batch,
+                        "subject": adj.subject,
+                        "room": adj.room,
+                        "status": "proxy",
+                        "proxy_for": adj.original_faculty,
+                        "has_proxy": True,
+                        "adjustment_type": adj.adjustment_type,
+                        "total_count": total_count,
+                        "absent_count": absent_count,
+                        "present_count": present_count,
+                        "row_highlight": "proxy",
+                        "is_placeholder": False,
+                    }
+                )
+
+        existing_slot_keys = {
+            (item["module"].id, item["lecture_no"])
+            for item in entries
+            if item["module"].id == module.id
+        }
+        for lecture_no in sorted(slot_numbers):
+            if (module.id, lecture_no) in existing_slot_keys:
+                continue
+            entries.append(
+                {
+                    "module": module,
+                    "module_name": module.name,
+                    "dept_label": _dept_label_from_module(module),
+                    "lecture_no": lecture_no,
+                    "time_slot": slot_time_map.get(lecture_no, "-"),
+                    "batch": "-",
+                    "subject": "-",
+                    "room": "-",
+                    "status": "empty",
+                    "proxy_faculty": "",
+                    "has_proxy": False,
+                    "adjustment_type": "",
+                    "swap_with": "",
+                    "total_count": "-",
+                    "absent_count": "-",
+                    "present_count": "-",
+                    "row_highlight": "",
+                    "is_placeholder": True,
+                }
+                )
+
+    has_proxy_alert = any(e.get("status") == "proxy" for e in entries)
+    entries.sort(key=lambda x: (_slot_sort_key(x.get("time_slot")), x["lecture_no"], x["module_name"], x["batch"]))
+    return entries, has_proxy_alert, has_inactive_calendar
+
+
 def mentor_schedule(request):
     mentor = _session_mentor_obj(request)
     if not mentor:
@@ -4769,76 +4925,7 @@ def mentor_schedule(request):
             },
         )
     selected_date = _parse_date_param(request.GET.get("date"), timezone.localdate())
-    day_of_week = selected_date.weekday()
-
-    entries = []
-    has_inactive_calendar = False
-    for module in modules:
-        _ensure_active_timetable(module)
-        calendar = _calendar_for_module(module)
-        if calendar and not calendar.is_active:
-            has_inactive_calendar = True
-
-        adjustments = _active_adjustments_for_date(module, selected_date)
-        adj_map = {(a.batch, a.lecture_no): a for a in adjustments}
-
-        merge_room_map = {
-            (a.date, a.lecture_no): a.merge_room
-            for a in adjustments
-            if a.proxy_faculty and a.proxy_faculty.name.lower() == mentor.name.lower() and a.merge_room
-        }
-        original_entries = TimetableEntry.objects.filter(
-            module=module, day_of_week=day_of_week, faculty__iexact=mentor.name, is_active=True
-        )
-        for entry in original_entries:
-            merge_room = merge_room_map.get((selected_date, entry.lecture_no), "")
-            adj = adj_map.get((entry.batch, entry.lecture_no))
-            subject_val = entry.subject
-            time_slot_val = entry.time_slot
-            room_val = merge_room or entry.room
-            if adj:
-                subject_val = adj.subject or subject_val
-                time_slot_val = adj.time_slot or time_slot_val
-                room_val = adj.room or room_val
-            entries.append(
-                {
-                    "module": module,
-                    "module_name": module.name,
-                    "dept_label": _dept_label_from_module(module),
-                    "lecture_no": entry.lecture_no,
-                    "time_slot": time_slot_val,
-                    "batch": entry.batch,
-                    "subject": subject_val,
-                    "room": room_val,
-                    "status": "original",
-                    "proxy_faculty": adj.proxy_faculty.name if adj and adj.proxy_faculty else "",
-                    "has_proxy": bool(adj),
-                    "adjustment_type": adj.adjustment_type if adj else "",
-                    "swap_with": f"{adj.swap_batch} L{adj.swap_lecture_no}" if adj and adj.adjustment_type == LectureAdjustment.TYPE_SWAP and adj.swap_batch and adj.swap_lecture_no else "",
-                }
-            )
-
-        for adj in adjustments:
-            if adj.adjustment_type == LectureAdjustment.TYPE_PROXY and adj.proxy_faculty and adj.proxy_faculty.name.lower() == mentor.name.lower():
-                entries.append(
-                    {
-                        "module": module,
-                        "module_name": module.name,
-                        "dept_label": _dept_label_from_module(module),
-                        "lecture_no": adj.lecture_no,
-                        "time_slot": adj.time_slot,
-                        "batch": adj.batch,
-                        "subject": adj.subject,
-                        "room": adj.room,
-                        "status": "proxy",
-                        "proxy_for": adj.original_faculty,
-                        "has_proxy": True,
-                        "adjustment_type": adj.adjustment_type,
-                    }
-                )
-
-    has_proxy_alert = any(e.get("status") == "proxy" for e in entries)
-    entries.sort(key=lambda x: (_slot_sort_key(x.get("time_slot")), x["lecture_no"], x["module_name"], x["batch"]))
+    entries, has_proxy_alert, has_inactive_calendar = _schedule_entries_for_faculty(modules, selected_date, mentor.name)
     return render(
         request,
         "mentor_schedule.html",
@@ -4851,6 +4938,133 @@ def mentor_schedule(request):
             "dept_filter": dept_filter or "ALL",
         },
     )
+
+
+@login_required
+def coordinator_daily_weekly_report(request):
+    if request.session.get("mentor"):
+        return redirect("/mentor-dashboard/")
+
+    module = _active_module(request)
+    selected_date = _parse_date_param(request.GET.get("date"), timezone.localdate())
+    mode = (request.GET.get("mode") or "daily").strip().lower()
+    if mode not in {"daily", "weekly"}:
+        mode = "daily"
+
+    faculty_names = sorted(
+        {
+            (name or "").strip()
+            for name in TimetableEntry.objects.filter(module=module, is_active=True).values_list("faculty", flat=True)
+            if (name or "").strip()
+        }
+    )
+    faculty_cards = []
+    for faculty_name in faculty_names:
+        entries, has_proxy_alert, _ = _schedule_entries_for_faculty([module], selected_date, faculty_name)
+        if not entries:
+            continue
+        faculty_cards.append(
+            {
+                "faculty_name": faculty_name,
+                "entries": entries,
+                "has_proxy_alert": has_proxy_alert,
+            }
+        )
+
+    week_rows = []
+    if mode == "weekly":
+        week_start = selected_date - timedelta(days=selected_date.weekday())
+        week_end = min(week_start + timedelta(days=5), timezone.localdate())
+        sessions = list(
+            LectureSession.objects.filter(module=module, date__gte=week_start, date__lte=week_end).order_by("faculty", "batch", "date", "lecture_no")
+        )
+        summary = {}
+        for session in sessions:
+            faculty_key = (session.faculty or "").strip() or "-"
+            batch_key = (session.batch or "").strip() or "-"
+            faculty_bucket = summary.setdefault(faculty_key, {"batches": {}, "grand_total": 0})
+            faculty_bucket["batches"][batch_key] = faculty_bucket["batches"].get(batch_key, 0) + 1
+            faculty_bucket["grand_total"] += 1
+        week_rows = [
+            {
+                "faculty_name": faculty_name,
+                "batch_counts": [{"batch": batch, "count": count} for batch, count in sorted(payload["batches"].items())],
+                "grand_total": payload["grand_total"],
+            }
+            for faculty_name, payload in sorted(summary.items())
+        ]
+
+    return render(
+        request,
+        "coordinator_daily_weekly_report.html",
+        {
+            "module": module,
+            "selected_date": selected_date,
+            "mode": mode,
+            "faculty_cards": faculty_cards,
+            "week_rows": week_rows,
+        },
+    )
+
+
+@login_required
+def coordinator_daily_weekly_report_pdf(request):
+    if request.session.get("mentor"):
+        return HttpResponse("Forbidden", status=403)
+
+    module = _active_module(request)
+    selected_date = _parse_date_param(request.GET.get("date"), timezone.localdate())
+    faculty_names = sorted(
+        {
+            (name or "").strip()
+            for name in TimetableEntry.objects.filter(module=module, is_active=True).values_list("faculty", flat=True)
+            if (name or "").strip()
+        }
+    )
+    faculty_cards = []
+    for faculty_name in faculty_names:
+        entries, _, _ = _schedule_entries_for_faculty([module], selected_date, faculty_name)
+        if entries:
+            faculty_cards.append({"faculty_name": faculty_name, "entries": entries})
+
+    response = HttpResponse(content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="Daily_Weekly_Report_{selected_date:%Y-%m-%d}.pdf"'
+    doc = SimpleDocTemplate(response, pagesize=landscape(A4), leftMargin=12, rightMargin=12, topMargin=14, bottomMargin=12)
+    styles = getSampleStyleSheet()
+    story = [
+        Paragraph(f"Daily / Weekly Report - {module.name}", styles["Heading3"]),
+        Paragraph(selected_date.strftime("%d %b %Y (%A)"), styles["Normal"]),
+        Spacer(1, 8),
+    ]
+    for card in faculty_cards:
+        story.append(Paragraph(card["faculty_name"], styles["Heading4"]))
+        table_data = [["Lecture", "Time", "Department", "Batch", "Subject", "Room", "Present", "Absent", "Total"]]
+        for entry in card["entries"]:
+            table_data.append([
+                entry["lecture_no"],
+                entry["time_slot"],
+                entry["dept_label"],
+                entry["batch"],
+                entry["subject"],
+                entry["room"],
+                entry["present_count"] if entry["present_count"] != "-" else "",
+                entry["absent_count"] if entry["absent_count"] != "-" else "",
+                entry["total_count"] if entry["total_count"] != "-" else "",
+            ])
+        table = Table(table_data, repeatRows=1)
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f3f5")),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#d7dce1")),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ]
+            )
+        )
+        story.extend([table, Spacer(1, 10)])
+    doc.build(story)
+    return response
 
 
 def mentor_mark_attendance(request):

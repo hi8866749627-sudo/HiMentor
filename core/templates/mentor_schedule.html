@@ -1,6 +1,18 @@
 {% extends "base.html" %}
 {% block content %}
 
+<style>
+.schedule-row-proxy {
+    background: #d1e7dd;
+}
+.schedule-row-mass-bunk {
+    background: #f8d7da;
+}
+.schedule-row-swap {
+    background: #e2d9f3;
+}
+</style>
+
 <h4 class="mb-3">My Schedule</h4>
 
 <form method="get" class="row g-2 align-items-end mb-3">
@@ -44,32 +56,38 @@
                         <th>Batch</th>
                         <th>Subject</th>
                         <th>Room</th>
+                        <th>Present Count</th>
+                        <th>Absent Count</th>
+                        <th>Total Count</th>
                     </tr>
                 </thead>
                 <tbody>
                 {% for e in entries %}
-                    <tr>
+                    <tr class="{% if e.row_highlight == 'proxy' %}schedule-row-proxy{% elif e.row_highlight == 'mass_bunk' %}schedule-row-mass-bunk{% elif e.row_highlight == 'swap' %}schedule-row-swap{% endif %}">
                         <td>{{ e.lecture_no }}</td>
                         <td>{{ e.time_slot }}</td>
                         <td>{{ e.dept_label }}</td>
                         <td>{{ e.batch }}</td>
                         <td>
                             {{ e.subject }}
-                            {% if e.adjustment_type == "swap" %}
+                            {% if not e.is_placeholder and e.adjustment_type == "swap" %}
                                 <span class="badge bg-info text-dark ms-1">Swapped</span>
                                 {% if e.swap_with %}
                                     <span class="small text-muted ms-1">{{ e.swap_with }}</span>
                                 {% endif %}
-                            {% elif e.status == "proxy" %}
+                            {% elif not e.is_placeholder and e.status == "proxy" %}
                                 <span class="badge bg-warning text-dark ms-1">Proxy</span>
-                            {% elif e.has_proxy %}
+                            {% elif not e.is_placeholder and e.has_proxy %}
                                 <span class="badge bg-info text-dark ms-1">Proxy Assigned</span>
                             {% endif %}
                         </td>
                         <td>{{ e.room }}</td>
+                        <td class="text-center">{{ e.present_count|default:"-" }}</td>
+                        <td class="text-center">{{ e.absent_count|default:"-" }}</td>
+                        <td class="text-center">{{ e.total_count|default:"-" }}</td>
                     </tr>
                 {% empty %}
-                    <tr><td colspan="6" class="text-center text-muted">No lectures found.</td></tr>
+                    <tr><td colspan="9" class="text-center text-muted">No lectures found.</td></tr>
                 {% endfor %}
                 </tbody>
             </table>

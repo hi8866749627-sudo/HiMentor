@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h4 class="mb-3">Daily / Weekly Report</h4>
+
+<form method="get" class="row g-2 align-items-end mb-3">
+    <div class="col-md-3">
+        <label class="form-label">Date</label>
+        <input type="date" name="date" class="form-control" value="{{ selected_date|date:'Y-m-d' }}">
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">Mode</label>
+        <select name="mode" class="form-select">
+            <option value="daily" {% if mode == "daily" %}selected{% endif %}>Daily</option>
+            <option value="weekly" {% if mode == "weekly" %}selected{% endif %}>Weekly Sheet</option>
+        </select>
+    </div>
+    <div class="col-md-2">
+        <button class="btn btn-primary" type="submit">Show</button>
+    </div>
+    <div class="col-md-2">
+        <a class="btn btn-outline-secondary w-100" href="/coordinator-daily-weekly-report/pdf/?date={{ selected_date|date:'Y-m-d' }}">Download PDF</a>
+    </div>
+</form>
+
+{% if mode == "weekly" %}
+<div class="card">
+    <div class="card-header">Weekly Sheet</div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Faculty</th>
+                        <th>Batch-wise Total</th>
+                        <th class="text-center">Grand Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for row in week_rows %}
+                    <tr>
+                        <td>{{ row.faculty_name }}</td>
+                        <td>
+                            {% for item in row.batch_counts %}
+                                <span class="badge bg-light text-dark border me-1">{{ item.batch }}: {{ item.count }}</span>
+                            {% empty %}
+                                -
+                            {% endfor %}
+                        </td>
+                        <td class="text-center fw-bold">{{ row.grand_total }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="3" class="text-center text-muted">No weekly data found.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% else %}
+    {% for card in faculty_cards %}
+    <div class="card mb-3">
+        <div class="card-header fw-bold">{{ card.faculty_name }}</div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Lecture</th>
+                            <th>Time</th>
+                            <th>Department</th>
+                            <th>Batch</th>
+                            <th>Subject</th>
+                            <th>Room</th>
+                            <th class="text-center">Present</th>
+                            <th class="text-center">Absent</th>
+                            <th class="text-center">Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for e in card.entries %}
+                        <tr>
+                            <td>{{ e.lecture_no }}</td>
+                            <td>{{ e.time_slot }}</td>
+                            <td>{{ e.dept_label }}</td>
+                            <td>{{ e.batch }}</td>
+                            <td>{{ e.subject }}</td>
+                            <td>{{ e.room }}</td>
+                            <td class="text-center">{{ e.present_count|default:"-" }}</td>
+                            <td class="text-center">{{ e.absent_count|default:"-" }}</td>
+                            <td class="text-center">{{ e.total_count|default:"-" }}</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% empty %}
+    <div class="alert alert-info">No faculty schedule found.</div>
+    {% endfor %}
+{% endif %}
+
+{% endblock %}
