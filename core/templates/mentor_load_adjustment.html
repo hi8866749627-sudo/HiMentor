@@ -68,10 +68,10 @@
                 {% if is_coordinator and selected_faculty %}
                     <input type="hidden" name="faculty" value="{{ selected_faculty }}">
                 {% endif %}
-                <button class="btn btn-outline-danger" type="submit" {% if row.slot_started %}disabled{% endif %}>
+                <button class="btn btn-outline-danger" type="submit" {% if row.cancel_locked %}disabled{% endif %}>
                     Cancel {{ row.adjustment.adjustment_type|title }}
                 </button>
-                {% if row.slot_started %}
+                {% if row.cancel_locked %}
                     <span class="text-muted small ms-2">Lecture already started.</span>
                 {% endif %}
             </form>
@@ -120,7 +120,7 @@
                                 <input type="text" name="remarks" class="form-control" placeholder="Optional">
                             </div>
                             <div class="col-md-3">
-                                <button class="btn btn-primary w-100" type="submit" {% if row.slot_started %}disabled{% endif %}>Save Proxy</button>
+                                <button class="btn btn-primary w-100" type="submit" {% if row.create_locked %}disabled{% endif %}>Save Proxy</button>
                             </div>
                         </form>
                     </div>
@@ -153,13 +153,13 @@
                                 <input type="text" name="remarks" class="form-control" placeholder="Optional">
                             </div>
                             <div class="col-12">
-                                <button class="btn btn-outline-primary w-100" type="submit" {% if row.slot_started or not row.swap_choices %}disabled{% endif %}>Save Swap</button>
+                                <button class="btn btn-outline-primary w-100" type="submit" {% if row.create_locked or not row.swap_choices %}disabled{% endif %}>Save Swap</button>
                             </div>
                         </form>
                     </div>
                 </div>
             </div>
-            {% if row.slot_started %}
+            {% if row.create_locked %}
                 <div class="text-muted small mt-2">Lecture already started. Changes are locked.</div>
             {% endif %}
         {% endif %}

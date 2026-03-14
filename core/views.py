@@ -5254,7 +5254,14 @@ def _cancel_adjustment_with_pair(adjustment, cancelled_by):
     )
 
 
-def _swap_partner_choices(module, selected_date, source_entry, active_adjustments, include_same_faculty=False):
+def _swap_partner_choices(
+    module,
+    selected_date,
+    source_entry,
+    active_adjustments,
+    include_same_faculty=False,
+    allow_started=False,
+):
     adjusted_keys = {(a.batch, a.lecture_no) for a in active_adjustments}
     entries = (
         TimetableEntry.objects.filter(module=module, day_of_week=selected_date.weekday(), is_active=True)
@@ -5270,7 +5277,7 @@ def _swap_partner_choices(module, selected_date, source_entry, active_adjustment
             continue
         if not include_same_faculty and (candidate.faculty or "").strip().lower() == (source_entry.faculty or "").strip().lower():
             continue
-        if _slot_has_started(selected_date, candidate.time_slot):
+        if not allow_started and _slot_has_started(selected_date, candidate.time_slot):
             continue
         partners.append(
             {
@@ -5419,7 +5426,13 @@ def _trigger_weekly_recompute_for_date(module, selected_date):
     ).start()
 
 
-def _build_adjustment_rows(module, selected_date, faculty_filter="", exclude_proxy_name=""):
+def _build_adjustment_rows(
+    module,
+    selected_date,
+    faculty_filter="",
+    exclude_proxy_name="",
+    allow_started_adjustments=False,
+):
     day_of_week = selected_date.weekday()
     active_adjustments = _active_adjustments_for_date(module, selected_date)
     adjustment_map = {(a.batch, a.lecture_no): a for a in active_adjustments}
@@ -5536,10 +5549,18 @@ def _build_adjustment_rows(module, selected_date, faculty_filter="", exclude_pro
                 "faculties": batch_faculties,
                 "available_rooms": available_rooms,
                 "slot_started": slot_started,
+                "create_locked": bool(slot_started and not allow_started_adjustments),
+                "cancel_locked": bool(slot_started),
                 "conflict_rooms": conflict_rooms,
                 "available_rooms_json": json.dumps(available_rooms),
                 "conflict_rooms_json": json.dumps(conflict_rooms),
-                "swap_choices": _swap_partner_choices(module, selected_date, entry, active_adjustments),
+                "swap_choices": _swap_partner_choices(
+                    module,
+                    selected_date,
+                    entry,
+                    active_adjustments,
+                    allow_started=allow_started_adjustments,
+                ),
             }
         )
     return rows, faculty_choices
@@ -5808,7 +5829,12 @@ def mentor_load_adjustment(request):
             messages.success(request, "Adjustment cancelled.")
             return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
 
-    rows, _ = _build_adjustment_rows(module, selected_date, faculty_filter=mentor.name, exclude_proxy_name=mentor.name)
+    rows, _ = _build_adjustment_rows(
+        module,
+        selected_date,
+        faculty_filter=mentor.name,
+        exclude_proxy_name=mentor.name,
+    )
 
     return render(
         request,
@@ -5958,7 +5984,12 @@ def coordinator_load_adjustment(request):
                 messages.success(request, "Adjustment cancelled.")
         return redirect(f"/coordinator-load-adjustment/?date={selected_date:%Y-%m-%d}")
 
-    rows, faculty_choices = _build_adjustment_rows(module, selected_date, faculty_filter=selected_faculty)
+    rows, faculty_choices = _build_adjustment_rows(
+        module,
+        selected_date,
+        faculty_filter=selected_faculty,
+        allow_started_adjustments=True,
+    )
 
     return render(
         request,
