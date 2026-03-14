@@ -5866,6 +5866,7 @@ def coordinator_load_adjustment(request):
         if action == "create_proxy":
             entry_id = request.POST.get("entry_id")
             proxy_name = (request.POST.get("proxy_faculty") or "").strip()
+            proxy_subject = (request.POST.get("proxy_subject") or "").strip()
             room_select = (request.POST.get("room_select") or "").strip()
             room_custom = (request.POST.get("room_custom") or "").strip()
             merge_room = (request.POST.get("merge_room") or "").strip()
@@ -5913,7 +5914,7 @@ def coordinator_load_adjustment(request):
                     "timetable_entry": entry,
                     "adjustment_type": LectureAdjustment.TYPE_PROXY,
                     "time_slot": entry.time_slot,
-                    "subject": proxy_slot_subject or entry.subject,
+                    "subject": proxy_slot_subject or proxy_subject or entry.subject,
                     "original_faculty": entry.faculty,
                     "proxy_faculty": proxy,
                     "room": room,
