@@ -1,6 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
 
+<style>
+.partial-absent {
+    color: #dc3545;
+    font-weight: 700;
+}
+</style>
+
 <h4 class="mb-3">Daily Absent (Live)</h4>
 
 <form method="get" class="row g-2 align-items-end mb-3">
@@ -28,6 +35,11 @@
            href="/attendance-analytics/daily-live-pdf/?date={{ selected_date|date:'Y-m-d' }}{% if batch_filter %}&batch={{ batch_filter|urlencode }}{% endif %}{% if request.session.mentor %}&module_id={{ module.id }}{% endif %}">
             Download PDF
         </a>
+    </div>
+    <div class="col-md-2">
+        <button type="button" class="btn btn-outline-success w-100" onclick="openWhatsappSearch()">
+            Send to WhatsApp
+        </button>
     </div>
 </form>
 
@@ -66,7 +78,13 @@
                         <td>{{ row.subject }}</td>
                         <td>{{ row.faculty }}</td>
                         <td>
-                            {{ row.absent_text }}
+                            {% if row.absent_roll_items %}
+                                {% for item in row.absent_roll_items %}
+                                    <span class="{% if item.is_partial %}partial-absent{% endif %}">{{ item.roll_no }}</span>{% if not forloop.last %}, {% endif %}
+                                {% endfor %}
+                            {% else %}
+                                NIL
+                            {% endif %}
                         </td>
                         <td>{{ row.absent_count }}</td>
                         <td>{{ row.present_count }}</td>
@@ -82,5 +100,26 @@
 {% empty %}
 <div class="alert alert-info">No lectures found.</div>
 {% endfor %}
+
+<script>
+function openWhatsappSearch() {
+    const searchText = "2025 LJ";
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(searchText).catch(() => {});
+    }
+    if (isMobile) {
+        window.location.href = "whatsapp://";
+        setTimeout(() => {
+            alert('WhatsApp opened. Search text "' + searchText + '" has been copied.');
+        }, 600);
+        return;
+    }
+    window.open("https://web.whatsapp.com/", "_blank", "noopener");
+    setTimeout(() => {
+        alert('WhatsApp Web opened. Search text "' + searchText + '" has been copied.');
+    }, 600);
+}
+</script>
 
 {% endblock %}

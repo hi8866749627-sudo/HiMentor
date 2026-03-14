@@ -3905,18 +3905,79 @@ def manage_modules(request):
 
 # ---------------- SEM REGISTER ----------------
 
+def _semester_register_fallback_from_daily(module, students):
+    calendar = _calendar_for_module(module)
+    if not calendar:
+        return [], {}
+
+    today = timezone.localdate()
+    sessions = list(
+        LectureSession.objects.filter(module=module, date__lte=today).order_by("date", "lecture_no", "batch")
+    )
+    sessions = [session for session in sessions if _attendance_allowed_for_date(module, session.date)]
+    if not sessions:
+        return [], {}
+
+    student_keys = {student.id: _student_batch_keys(student) for student in students}
+    absences = LectureAbsence.objects.filter(session_id__in=[session.id for session in sessions]).values_list("session_id", "student_id")
+    absent_map = {}
+    for session_id, student_id in absences:
+        absent_map.setdefault(session_id, set()).add(student_id)
+
+    per_student_week = {student.id: {} for student in students}
+    weeks_seen = set()
+
+    for session in sessions:
+        phase, week_no = week_for_date(calendar, session.date)
+        if not phase or not week_no:
+            continue
+        normalized_week = _normalize_week_no(phase, week_no)
+        weeks_seen.add(normalized_week)
+        batch_key = _norm_batch_key(session.batch)
+        if not batch_key:
+            continue
+        absent_students = absent_map.get(session.id, set())
+        for student in students:
+            if batch_key not in student_keys.get(student.id, set()):
+                continue
+            stats = per_student_week[student.id].setdefault(normalized_week, {"held": 0, "attended": 0})
+            stats["held"] += 1
+            if student.id not in absent_students:
+                stats["attended"] += 1
+
+    weeks = sorted(weeks_seen)
+    fallback = {}
+    for student in students:
+        fallback[student.id] = {}
+        cumulative_held = 0
+        cumulative_attended = 0
+        for week in weeks:
+            stats = per_student_week.get(student.id, {}).get(week)
+            if not stats or not stats["held"]:
+                continue
+            cumulative_held += stats["held"]
+            cumulative_attended += stats["attended"]
+            fallback[student.id][week] = {
+                "week_percentage": round((stats["attended"] / stats["held"]) * 100, 2) if stats["held"] else None,
+                "overall_percentage": round((cumulative_attended / cumulative_held) * 100, 2) if cumulative_held else None,
+            }
+    return weeks, fallback
+
+
 def semester_register(request):
     if "mentor" in request.session:
         return redirect("/mentor-semester-register/")
 
     module = _active_module(request)
-
-    # all uploaded weeks
-    weeks = sorted(
-        Attendance.objects.filter(student__module=module).values_list("week_no", flat=True).distinct()
-    )
-
-    students = Student.objects.select_related("mentor").filter(module=module).order_by("roll_no")
+    students = list(Student.objects.select_related("mentor").filter(module=module).order_by("roll_no"))
+    attendance_map = {}
+    weeks = set()
+    for rec in Attendance.objects.filter(student__module=module).select_related("student"):
+        attendance_map[(rec.student_id, rec.week_no)] = rec
+        weeks.add(rec.week_no)
+    fallback_weeks, fallback_map = _semester_register_fallback_from_daily(module, students)
+    weeks.update(fallback_weeks)
+    weeks = sorted(weeks)
 
     table = []
 
@@ -3932,12 +3993,15 @@ def semester_register(request):
         overall = None
 
         for w in weeks:
-            rec = Attendance.objects.filter(student=s, week_no=w).first()
+            rec = attendance_map.get((s.id, w))
             if rec:
                 row[f"week_{w}"] = rec.week_percentage
                 overall = rec.overall_percentage
             else:
-                row[f"week_{w}"] = None
+                fallback = fallback_map.get(s.id, {}).get(w)
+                row[f"week_{w}"] = fallback.get("week_percentage") if fallback else None
+                if fallback and fallback.get("overall_percentage") is not None:
+                    overall = fallback["overall_percentage"]
 
         row["overall"] = overall
         table.append(row)
@@ -3955,17 +4019,19 @@ def mentor_semester_register(request):
         return redirect("/")
 
     module = _active_module(request)
-    weeks = sorted(
-        Attendance.objects.filter(student__module=module, student__mentor=mentor)
-        .values_list("week_no", flat=True)
-        .distinct()
-    )
-
-    students = (
+    students = list(
         Student.objects.select_related("mentor")
         .filter(module=module, mentor=mentor)
         .order_by("roll_no")
     )
+    attendance_map = {}
+    weeks = set()
+    for rec in Attendance.objects.filter(student__module=module, student__mentor=mentor).select_related("student"):
+        attendance_map[(rec.student_id, rec.week_no)] = rec
+        weeks.add(rec.week_no)
+    fallback_weeks, fallback_map = _semester_register_fallback_from_daily(module, students)
+    weeks.update(fallback_weeks)
+    weeks = sorted(weeks)
 
     table = []
     for s in students:
@@ -3977,12 +4043,15 @@ def mentor_semester_register(request):
         }
         overall = None
         for w in weeks:
-            rec = Attendance.objects.filter(student=s, week_no=w).first()
+            rec = attendance_map.get((s.id, w))
             if rec:
                 row[f"week_{w}"] = rec.week_percentage
                 overall = rec.overall_percentage
             else:
-                row[f"week_{w}"] = None
+                fallback = fallback_map.get(s.id, {}).get(w)
+                row[f"week_{w}"] = fallback.get("week_percentage") if fallback else None
+                if fallback and fallback.get("overall_percentage") is not None:
+                    overall = fallback["overall_percentage"]
         row["overall"] = overall
         table.append(row)
 
@@ -6358,10 +6427,24 @@ def _daily_absent_cards(module, date_val, batch_filter=""):
 
     batch_cards = []
     for batch in batches:
+        batch_sessions = sessions_by_batch.get(batch, [])
+        total_lectures = len(batch_sessions)
+        absent_count_by_roll = {}
+        for sess in batch_sessions:
+            for absence in absences_by_session.get(sess.id, []):
+                if absence.student and absence.student.roll_no is not None:
+                    absent_count_by_roll[absence.student.roll_no] = absent_count_by_roll.get(absence.student.roll_no, 0) + 1
         lectures = []
-        for sess in sessions_by_batch.get(batch, []):
+        for sess in batch_sessions:
             abs_list = absences_by_session.get(sess.id, [])
             rolls = sorted([a.student.roll_no for a in abs_list if a.student.roll_no is not None])
+            roll_items = [
+                {
+                    "roll_no": roll_no,
+                    "is_partial": absent_count_by_roll.get(roll_no, 0) < total_lectures,
+                }
+                for roll_no in rolls
+            ]
             total_students = totals.get(_norm_batch_key(batch), 0)
             absent_count = len(rolls)
             present_count = max(total_students - absent_count, 0) if total_students else 0
@@ -6372,6 +6455,7 @@ def _daily_absent_cards(module, date_val, batch_filter=""):
                     "subject": _canonical_subject_name(module, sess.subject, alias_map),
                     "faculty": sess.faculty,
                     "absent_rolls": rolls,
+                    "absent_roll_items": roll_items,
                     "absent_text": ", ".join(str(x) for x in rolls) if rolls else "NIL",
                     "absent_count": absent_count,
                     "present_count": present_count,
@@ -6386,6 +6470,91 @@ def _daily_absent_cards(module, date_val, batch_filter=""):
             }
         )
     return batch_cards, batches
+
+
+def _daily_absent_cards_for_pdf(module, date_val, batch_filter=""):
+    day_of_week = date_val.weekday()
+    alias_map = _subject_alias_map(module)
+    timetable_qs = TimetableEntry.objects.filter(module=module, day_of_week=day_of_week, is_active=True)
+    if batch_filter:
+        timetable_qs = timetable_qs.filter(batch=batch_filter)
+    timetable_entries = list(timetable_qs.order_by("batch", "lecture_no", "time_slot"))
+    if not timetable_entries:
+        return [], []
+
+    sessions = list(
+        LectureSession.objects.filter(
+            module=module,
+            date=date_val,
+            batch__in=[entry.batch for entry in timetable_entries],
+        ).order_by("batch", "lecture_no", "time_slot")
+    )
+    session_map = {(session.batch, session.lecture_no): session for session in sessions}
+    absences = LectureAbsence.objects.filter(session__in=sessions).select_related("student", "session")
+    absences_by_session = {}
+    for absence in absences:
+        absences_by_session.setdefault(absence.session_id, []).append(absence)
+
+    totals = {}
+    for student in Student.objects.filter(module=module):
+        for key in {_norm_batch_key(student.batch), _norm_batch_key(student.division)}:
+            if key:
+                totals[key] = totals.get(key, 0) + 1
+
+    entries_by_batch = {}
+    for entry in timetable_entries:
+        entries_by_batch.setdefault(entry.batch, []).append(entry)
+
+    batch_cards = []
+    for batch in sorted(entries_by_batch.keys()):
+        batch_entries = entries_by_batch.get(batch, [])
+        total_lectures = len(batch_entries)
+        absent_count_by_roll = {}
+        for entry in batch_entries:
+            session = session_map.get((batch, entry.lecture_no))
+            if not session:
+                continue
+            for absence in absences_by_session.get(session.id, []):
+                if absence.student and absence.student.roll_no is not None:
+                    absent_count_by_roll[absence.student.roll_no] = absent_count_by_roll.get(absence.student.roll_no, 0) + 1
+
+        lectures = []
+        for entry in batch_entries:
+            session = session_map.get((batch, entry.lecture_no))
+            abs_list = absences_by_session.get(session.id, []) if session else []
+            rolls = sorted([a.student.roll_no for a in abs_list if a.student.roll_no is not None])
+            roll_items = [
+                {
+                    "roll_no": roll_no,
+                    "is_partial": absent_count_by_roll.get(roll_no, 0) < total_lectures,
+                }
+                for roll_no in rolls
+            ]
+            total_students = totals.get(_norm_batch_key(batch), 0)
+            absent_count = len(rolls) if session else None
+            present_count = (max(total_students - len(rolls), 0) if total_students else 0) if session else None
+            lectures.append(
+                {
+                    "lecture_no": entry.lecture_no,
+                    "time_slot": entry.time_slot,
+                    "subject": _canonical_subject_name(module, entry.subject, alias_map),
+                    "faculty": (session.faculty if session and session.faculty else entry.faculty),
+                    "absent_rolls": rolls,
+                    "absent_roll_items": roll_items,
+                    "absent_text": ", ".join(str(x) for x in rolls) if rolls else "",
+                    "absent_count": absent_count,
+                    "present_count": present_count,
+                    "is_filled": bool(session),
+                }
+            )
+        batch_cards.append(
+            {
+                "batch": batch,
+                "total_students": totals.get(_norm_batch_key(batch), 0),
+                "lectures": lectures,
+            }
+        )
+    return batch_cards, sorted(entries_by_batch.keys())
 
 
 def daily_absent_live(request):
@@ -6452,7 +6621,7 @@ def daily_absent_live_pdf(request):
     if is_coordinator and not _attendance_fully_marked_for_date(module, date_val):
         return HttpResponse("Attendance is not fully marked for this date.", status=400)
 
-    batch_cards, _ = _daily_absent_cards(module, date_val, batch_filter)
+    batch_cards, _ = _daily_absent_cards_for_pdf(module, date_val, batch_filter)
     response = HttpResponse(content_type="application/pdf")
     response["Content-Disposition"] = f'attachment; filename="Daily_Absent_{date_val:%Y-%m-%d}.pdf"'
 
@@ -6465,6 +6634,9 @@ def daily_absent_live_pdf(request):
         bottomMargin=18,
     )
     styles = getSampleStyleSheet()
+    absent_style = styles["BodyText"]
+    absent_style.fontSize = 8.5
+    absent_style.leading = 10
     title_text = (
         "L J Institute of Engineering and Technology<br/>"
         f"{module.name} Lecture Daily Absent No.<br/>"
@@ -6498,7 +6670,19 @@ def daily_absent_live_pdf(request):
             ["Lec", "Time", "Subject", "Faculty", "Absent Nos.", "Absent", "Present"]
         ]
         for row in card["lectures"]:
-            absent_text = ", ".join(str(x) for x in row["absent_rolls"]) if row["absent_rolls"] else "NIL"
+            if row["is_filled"] and row["absent_roll_items"]:
+                absent_parts = []
+                for item in row["absent_roll_items"]:
+                    roll_text = str(item["roll_no"])
+                    if item.get("is_partial"):
+                        absent_parts.append(f"<font color='#dc3545'><b>{roll_text}</b></font>")
+                    else:
+                        absent_parts.append(roll_text)
+                absent_text = Paragraph(", ".join(absent_parts), absent_style)
+            elif row["is_filled"]:
+                absent_text = "NIL"
+            else:
+                absent_text = ""
             table_data.append(
                 [
                     row["lecture_no"],
@@ -6506,11 +6690,15 @@ def daily_absent_live_pdf(request):
                     row["subject"],
                     row["faculty"],
                     absent_text,
-                    row["absent_count"],
-                    row["present_count"],
+                    (row["absent_count"] if row["absent_count"] is not None else ""),
+                    (row["present_count"] if row["present_count"] is not None else ""),
                 ]
             )
-        table = Table(table_data, repeatRows=1)
+        table = Table(
+            table_data,
+            repeatRows=1,
+            colWidths=[20, 54, 60, 40, 233, 56, 60],
+        )
         table.setStyle(
             TableStyle(
                 [
@@ -6519,8 +6707,8 @@ def daily_absent_live_pdf(request):
                     ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
                     ("FONTSIZE", (0, 0), (-1, -1), 8.5),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 2),
                 ]
             )
         )
