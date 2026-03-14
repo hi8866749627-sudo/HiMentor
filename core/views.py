@@ -4145,6 +4145,44 @@ def _slot_has_started(slot_date, slot_time):
     return timezone.localtime().time() >= time(start[0], start[1])
 
 
+def _resolve_proxy_subject(module, faculty_name, batch="", lecture_no=None, day_of_week=None):
+    faculty_name = (faculty_name or "").strip()
+    batch = (batch or "").strip()
+    if not faculty_name:
+        return ""
+
+    qs = TimetableEntry.objects.filter(module=module, faculty__iexact=faculty_name, is_active=True).exclude(subject="")
+
+    if batch:
+        match = qs.filter(batch__iexact=batch)
+        if day_of_week is not None and lecture_no is not None:
+            exact_slot = match.filter(day_of_week=day_of_week, lecture_no=lecture_no).first()
+            if exact_slot:
+                return exact_slot.subject or ""
+        batch_any = match.order_by("lecture_no", "day_of_week").first()
+        if batch_any:
+            return batch_any.subject or ""
+
+    if day_of_week is not None and lecture_no is not None:
+        slot_any = qs.filter(day_of_week=day_of_week, lecture_no=lecture_no).first()
+        if slot_any:
+            return slot_any.subject or ""
+
+    subject_values = [s for s in qs.values_list("subject", flat=True) if (s or "").strip()]
+    if not subject_values:
+        return ""
+    unique_subjects = []
+    seen = set()
+    for subject_value in subject_values:
+        subject_key = subject_value.strip().lower()
+        if subject_key not in seen:
+            seen.add(subject_key)
+            unique_subjects.append(subject_value)
+    if len(unique_subjects) == 1:
+        return unique_subjects[0]
+    return unique_subjects[0]
+
+
 def _normalize_week_no(phase, week_no):
     phase = (phase or "").upper()
     if week_no is None:
@@ -4796,22 +4834,44 @@ def _schedule_entries_for_faculty(modules, selected_date, faculty_name):
             total_count = batch_totals.get(_norm_batch_key(entry.batch), 0)
             absent_count = LectureAbsence.objects.filter(session=session).count() if session else None
             present_count = (max(total_count - absent_count, 0) if session else None) if total_count else (0 if session else None)
+            proxy_created = bool(
+                adj
+                and adj.adjustment_type == LectureAdjustment.TYPE_PROXY
+                and adj.proxy_faculty
+                and adj.proxy_faculty.name.lower() != faculty_name.lower()
+            )
             subject_val = entry.subject
             time_slot_val = entry.time_slot
             room_val = merge_room or entry.room
             if adj:
-                subject_val = adj.subject or subject_val
+                if adj.adjustment_type == LectureAdjustment.TYPE_PROXY:
+                    if adj.proxy_faculty and adj.proxy_faculty.name.lower() == faculty_name.lower():
+                        subject_val = _resolve_proxy_subject(
+                            module,
+                            adj.proxy_faculty.name,
+                            batch=entry.batch,
+                            lecture_no=entry.lecture_no,
+                            day_of_week=day_of_week,
+                        ) or adj.subject or subject_val
+                else:
+                    subject_val = adj.subject or subject_val
                 time_slot_val = adj.time_slot or time_slot_val
                 room_val = adj.room or room_val
             row_highlight = ""
             if adj and adj.adjustment_type == LectureAdjustment.TYPE_SWAP:
                 row_highlight = "swap"
+            elif proxy_created:
+                row_highlight = "proxy_created"
             elif adj and adj.adjustment_type == LectureAdjustment.TYPE_PROXY and adj.proxy_faculty and adj.proxy_faculty.name.lower() == faculty_name.lower():
                 row_highlight = "proxy"
             elif (session and total_count and absent_count == total_count) or (
                 not session and (selected_date < today or (selected_date == today and _slot_has_started(selected_date, time_slot_val)))
             ):
                 row_highlight = "mass_bunk"
+            if proxy_created:
+                present_count = None
+                absent_count = None
+                total_count = None
             entries.append(
                 {
                     "module": module,
@@ -4825,6 +4885,7 @@ def _schedule_entries_for_faculty(modules, selected_date, faculty_name):
                     "status": "original",
                     "proxy_faculty": adj.proxy_faculty.name if adj and adj.proxy_faculty else "",
                     "has_proxy": bool(adj),
+                    "proxy_created": proxy_created,
                     "adjustment_type": adj.adjustment_type if adj else "",
                     "swap_with": f"{adj.swap_batch} L{adj.swap_lecture_no}" if adj and adj.adjustment_type == LectureAdjustment.TYPE_SWAP and adj.swap_batch and adj.swap_lecture_no else "",
                     "total_count": total_count,
@@ -4854,7 +4915,13 @@ def _schedule_entries_for_faculty(modules, selected_date, faculty_name):
                         "lecture_no": adj.lecture_no,
                         "time_slot": adj.time_slot,
                         "batch": adj.batch,
-                        "subject": adj.subject,
+                        "subject": _resolve_proxy_subject(
+                            module,
+                            adj.proxy_faculty.name,
+                            batch=adj.batch,
+                            lecture_no=adj.lecture_no,
+                            day_of_week=day_of_week,
+                        ) if adj.proxy_faculty else (adj.subject or ""),
                         "room": adj.room,
                         "status": "proxy",
                         "proxy_for": adj.original_faculty,
@@ -5084,35 +5151,46 @@ def coordinator_daily_weekly_report_pdf(request):
     for card in faculty_cards:
         story.append(Paragraph(card["faculty_name"], styles["Heading4"]))
         table_data = [["Lecture", "Time", "Department", "Batch", "Subject", "Room", "Present", "Absent", "Total"]]
+        row_styles = []
         for entry in card["entries"]:
+            subject_label = entry["subject"] or ""
+            if entry.get("adjustment_type") == "swap":
+                subject_label = f"{subject_label} [Swap]".strip()
+            elif entry.get("status") == "proxy" or entry.get("has_proxy"):
+                subject_label = f"{subject_label} [Proxy]".strip()
             table_data.append([
                 entry["lecture_no"],
                 entry["time_slot"],
                 entry["dept_label"],
                 entry["batch"],
-                entry["subject"],
+                subject_label,
                 entry["room"],
                 entry["present_count"] if entry["present_count"] != "-" else "",
                 entry["absent_count"] if entry["absent_count"] != "-" else "",
                 entry["total_count"] if entry["total_count"] != "-" else "",
             ])
+            row_styles.append(entry.get("row_highlight") or "")
         table = Table(table_data, colWidths=col_widths, repeatRows=1)
-        table.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f3f5")),
-                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#d7dce1")),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("FONTSIZE", (0, 0), (-1, -1), 7),
-                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("ALIGN", (0, 0), (0, -1), "CENTER"),
-                    ("ALIGN", (1, 0), (1, -1), "CENTER"),
-                    ("ALIGN", (6, 0), (-1, -1), "CENTER"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-                ]
-            )
-        )
+        style_cmds = [
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f3f5")),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#d7dce1")),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 7),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("ALIGN", (0, 0), (0, -1), "CENTER"),
+            ("ALIGN", (1, 0), (1, -1), "CENTER"),
+            ("ALIGN", (6, 0), (-1, -1), "CENTER"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ]
+        for idx, row_highlight in enumerate(row_styles, start=1):
+            if row_highlight == "proxy":
+                style_cmds.append(("BACKGROUND", (0, idx), (-1, idx), colors.HexColor("#d1e7dd")))
+            elif row_highlight in {"proxy_created", "mass_bunk"}:
+                style_cmds.append(("BACKGROUND", (0, idx), (-1, idx), colors.HexColor("#f8d7da")))
+            elif row_highlight == "swap":
+                style_cmds.append(("BACKGROUND", (0, idx), (-1, idx), colors.HexColor("#e2d9f3")))
+        table.setStyle(TableStyle(style_cmds))
         story.extend([table, Spacer(1, 10)])
     doc.build(story)
     return response
@@ -5674,7 +5752,16 @@ def _build_attendance_batch_rows(module, selected_date, mentor=None, allow_overr
             entry = item["entry"]
             adj = item.get("adjustment")
             if adj:
-                entry.subject = adj.subject or entry.subject
+                if adj.adjustment_type == LectureAdjustment.TYPE_PROXY and adj.proxy_faculty:
+                    entry.subject = _resolve_proxy_subject(
+                        module,
+                        adj.proxy_faculty.name,
+                        batch=batch,
+                        lecture_no=entry.lecture_no,
+                        day_of_week=day_of_week,
+                    ) or adj.subject or entry.subject
+                else:
+                    entry.subject = adj.subject or entry.subject
                 entry.time_slot = adj.time_slot or entry.time_slot
                 entry.room = adj.room or entry.room
                 if adj.adjustment_type == LectureAdjustment.TYPE_PROXY and adj.proxy_faculty:
@@ -5795,7 +5882,14 @@ def mentor_load_adjustment(request):
                 messages.error(request, "Proxy faculty already has a lecture. Merge room required.")
                 return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
             proxy_slot_subject = (
-                TimetableEntry.objects.filter(
+                _resolve_proxy_subject(
+                    module,
+                    proxy.name,
+                    batch=entry.batch,
+                    lecture_no=entry.lecture_no,
+                    day_of_week=day_of_week,
+                )
+                or TimetableEntry.objects.filter(
                     module__in=active_modules,
                     day_of_week=day_of_week,
                     lecture_no=entry.lecture_no,
@@ -5945,7 +6039,14 @@ def coordinator_load_adjustment(request):
                 messages.error(request, "Proxy faculty already has a lecture. Merge room required.")
                 return redirect(f"/coordinator-load-adjustment/?date={selected_date:%Y-%m-%d}")
             proxy_slot_subject = (
-                TimetableEntry.objects.filter(
+                _resolve_proxy_subject(
+                    module,
+                    proxy.name,
+                    batch=entry.batch,
+                    lecture_no=entry.lecture_no,
+                    day_of_week=day_of_week,
+                )
+                or TimetableEntry.objects.filter(
                     module__in=active_modules,
                     day_of_week=day_of_week,
                     lecture_no=entry.lecture_no,
@@ -6114,13 +6215,21 @@ def coordinator_adjustments(request):
                 proxy_name = (a.proxy_faculty.name if a.proxy_faculty else "").strip().lower()
                 proxy_subject = ""
                 if proxy_name:
-                    key = (a.date.weekday(), a.lecture_no, proxy_name, (a.batch or "").strip().lower())
-                    match = entry_by_batch_fac.get(key)
-                    if not match:
-                        fac_list = entry_by_fac.get((a.date.weekday(), a.lecture_no, proxy_name), [])
-                        match = fac_list[0] if fac_list else None
-                    if match:
-                        proxy_subject = match.subject or ""
+                    proxy_subject = _resolve_proxy_subject(
+                        module,
+                        a.proxy_faculty.name if a.proxy_faculty else "",
+                        batch=a.batch,
+                        lecture_no=a.lecture_no,
+                        day_of_week=a.date.weekday(),
+                    )
+                    if not proxy_subject:
+                        key = (a.date.weekday(), a.lecture_no, proxy_name, (a.batch or "").strip().lower())
+                        match = entry_by_batch_fac.get(key)
+                        if not match:
+                            fac_list = entry_by_fac.get((a.date.weekday(), a.lecture_no, proxy_name), [])
+                            match = fac_list[0] if fac_list else None
+                        if match:
+                            proxy_subject = match.subject or ""
                 if not proxy_subject:
                     proxy_subject = a.subject or ""
                 a.proxy_subject = proxy_subject
@@ -6431,7 +6540,17 @@ def save_lecture_attendance(request):
             "timetable_entry": entry or adjustment.timetable_entry if adjustment else entry,
             "day_of_week": date_val.weekday(),
             "time_slot": (adjustment.time_slot if adjustment else entry.time_slot),
-            "subject": (adjustment.subject if adjustment else entry.subject),
+            "subject": (
+                _resolve_proxy_subject(
+                    module,
+                    adjustment.proxy_faculty.name,
+                    batch=batch,
+                    lecture_no=lecture_no,
+                    day_of_week=date_val.weekday(),
+                )
+                if adjustment and adjustment.adjustment_type == LectureAdjustment.TYPE_PROXY and adjustment.proxy_faculty
+                else (adjustment.subject if adjustment else entry.subject)
+            ) or (adjustment.subject if adjustment else entry.subject),
             "faculty": (
                 (
                     adjustment.proxy_faculty.name

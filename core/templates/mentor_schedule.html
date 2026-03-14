@@ -5,6 +5,9 @@
 .schedule-row-proxy {
     background: #d1e7dd;
 }
+.schedule-row-proxy-created {
+    background: #f8d7da;
+}
 .schedule-row-mass-bunk {
     background: #f8d7da;
 }
@@ -63,7 +66,7 @@
                 </thead>
                 <tbody>
                 {% for e in entries %}
-                    <tr class="{% if e.row_highlight == 'proxy' %}schedule-row-proxy{% elif e.row_highlight == 'mass_bunk' %}schedule-row-mass-bunk{% elif e.row_highlight == 'swap' %}schedule-row-swap{% endif %}">
+                    <tr class="{% if e.row_highlight == 'proxy' %}schedule-row-proxy{% elif e.row_highlight == 'proxy_created' %}schedule-row-proxy-created{% elif e.row_highlight == 'mass_bunk' %}schedule-row-mass-bunk{% elif e.row_highlight == 'swap' %}schedule-row-swap{% endif %}">
                         <td>{{ e.lecture_no }}</td>
                         <td>{{ e.time_slot }}</td>
                         <td>{{ e.dept_label }}</td>
