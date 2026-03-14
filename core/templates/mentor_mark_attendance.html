@@ -118,6 +118,11 @@
 <div class="alert alert-info">Selected date is a holiday or Sunday.</div>
 {% endif %}
 
+{% if attendance_block_reason %}
+<div class="alert alert-warning">{{ attendance_block_reason }}</div>
+{% endif %}
+
+{% if not attendance_block_reason %}
 {% for batch in batch_rows %}
 <div class="card mb-3 compact-batch-card">
     <div class="card-header d-flex justify-content-between align-items-center">
@@ -154,7 +159,7 @@
                 <div class="compact-slot-row">
                     <div class="slot-meta">
                         <div class="slot-title">L{{ slot.entry.lecture_no }} - {{ slot.entry.time_slot }}</div>
-                        <div>{{ slot.entry.subject }}</div>
+                        <div>{{ slot.subject_display|default:slot.entry.subject }}</div>
                         <div class="slot-sub">Select only absent numbers. Rest are present by default. Then save.</div>
                         <div class="slot-sub">
                             {{ slot.entry.faculty }}
@@ -201,6 +206,7 @@
 {% empty %}
 <div class="alert alert-info">No timetable entries found for this date.</div>
 {% endfor %}
+{% endif %}
 
 <script>
 function getCsrfToken(form) {

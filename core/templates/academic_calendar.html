@@ -155,6 +155,34 @@
                 <label class="form-label">Label</label>
                 <input type="text" name="holiday_label" class="form-control" placeholder="e.g. Holi">
             </div>
+            {% if is_superadmin %}
+            <div class="col-md-12">
+                <label class="form-label">Apply To Departments (optional)</label>
+                <div class="d-flex flex-wrap gap-3">
+                    <label class="form-check">
+                        <input class="form-check-input" type="checkbox" name="holiday_depts" value="FY1">
+                        <span class="form-check-label">FY1</span>
+                    </label>
+                    <label class="form-check">
+                        <input class="form-check-input" type="checkbox" name="holiday_depts" value="FY2">
+                        <span class="form-check-label">FY2</span>
+                    </label>
+                    <label class="form-check">
+                        <input class="form-check-input" type="checkbox" name="holiday_depts" value="FY3">
+                        <span class="form-check-label">FY3</span>
+                    </label>
+                    <label class="form-check">
+                        <input class="form-check-input" type="checkbox" name="holiday_depts" value="FY4">
+                        <span class="form-check-label">FY4</span>
+                    </label>
+                    <label class="form-check">
+                        <input class="form-check-input" type="checkbox" name="holiday_depts" value="FY5">
+                        <span class="form-check-label">FY5</span>
+                    </label>
+                </div>
+                <div class="form-text">Leave unchecked to apply to all departments.</div>
+            </div>
+            {% endif %}
             <div class="col-md-2">
                 <button class="btn btn-outline-primary" type="submit">Add</button>
             </div>

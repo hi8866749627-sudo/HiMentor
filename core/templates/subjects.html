@@ -81,6 +81,120 @@
     </form>
 </div>
 
+<div class="card p-3 mb-3">
+    <h5>Subject Alias Mapping</h5>
+    <p class="text-muted mb-2">Map different names (e.g. MATHS-II) to one canonical subject (e.g. M-II).</p>
+    <form method="post" action="/subjects/aliases/add/" class="row g-2 align-items-end mb-3">
+        {% csrf_token %}
+        <div class="col-md-4">
+            <label class="form-label">Alias</label>
+            <input name="alias" class="form-control" placeholder="e.g. MATHS-II" required>
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Canonical</label>
+            <input name="canonical" class="form-control" placeholder="e.g. M-II" list="subjectChoices" required>
+        </div>
+        {% if is_superadmin %}
+        <div class="col-md-3">
+            <div class="form-check mt-4">
+                <input class="form-check-input" type="checkbox" name="apply_all" id="apply_all_alias">
+                <label class="form-check-label" for="apply_all_alias">Apply to all modules</label>
+            </div>
+        </div>
+        {% endif %}
+        <div class="col-md-2">
+            <button class="btn btn-outline-primary">Add Alias</button>
+        </div>
+    </form>
+
+    <datalist id="subjectChoices">
+        {% for name in subject_choices %}
+        <option value="{{ name }}"></option>
+        {% endfor %}
+    </datalist>
+
+    <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Alias</th>
+                    <th>Canonical</th>
+                    <th>Status</th>
+                    <th style="width:260px;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for a in aliases %}
+                <tr>
+                    <td>{{ a.alias }}</td>
+                    <td>{{ a.canonical }}</td>
+                    <td>{% if a.is_active %}Active{% else %}Inactive{% endif %}</td>
+                    <td>
+                        <form method="post" action="/subjects/aliases/{{ a.id }}/edit/" class="d-flex gap-2 flex-wrap align-items-end">
+                            {% csrf_token %}
+                            <input name="alias" class="form-control form-control-sm" value="{{ a.alias }}" required style="max-width:140px;">
+                            <input name="canonical" class="form-control form-control-sm" value="{{ a.canonical }}" required style="max-width:140px;">
+                            <label class="form-check d-flex align-items-center gap-1 mb-0">
+                                <input class="form-check-input" type="checkbox" name="is_active" {% if a.is_active %}checked{% endif %}>
+                                <span class="form-check-label small">Active</span>
+                            </label>
+                            <button class="btn btn-sm btn-primary">Update</button>
+                            <button type="submit" class="btn btn-sm btn-outline-danger" form="alias-delete-{{ a.id }}" formnovalidate>Remove</button>
+                        </form>
+                        <form method="post" action="/subjects/aliases/{{ a.id }}/delete/" id="alias-delete-{{ a.id }}" class="d-none">
+                            {% csrf_token %}
+                            <button type="submit"></button>
+                        </form>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="4" class="text-center text-muted">No aliases added.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if alias_suggestions %}
+<div class="card p-3 mb-3">
+    <h5>Auto-Suggested Aliases</h5>
+    <p class="text-muted mb-2">These subjects appear in timetable/daily sessions but are not mapped yet.</p>
+    <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Alias</th>
+                    <th>Canonical</th>
+                    <th style="width:220px;">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for label in alias_suggestions %}
+                <tr>
+                    <td>{{ label }}</td>
+                    <td>
+                        <form method="post" action="/subjects/aliases/add/" class="d-flex gap-2 align-items-center">
+                            {% csrf_token %}
+                            <input type="hidden" name="alias" value="{{ label }}">
+                            <input name="canonical" class="form-control form-control-sm" list="subjectChoices" placeholder="Pick canonical" required>
+                            {% if is_superadmin %}
+                            <label class="form-check d-flex align-items-center gap-1 mb-0">
+                                <input class="form-check-input" type="checkbox" name="apply_all">
+                                <span class="form-check-label small">All modules</span>
+                            </label>
+                            {% endif %}
+                            <button class="btn btn-sm btn-outline-primary">Map</button>
+                        </form>
+                    </td>
+                    <td></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
 <div class="card p-3">
     <h5>Subject List</h5>
     <div class="table-responsive">
@@ -89,10 +203,11 @@
                 <tr>
                     <th style="width:170px;">Name</th>
                     <th style="width:90px;">Short</th>
+                    <th style="width:180px;">Alias</th>
                     <th>Status</th>
-                    <th>TH/PR</th>
-                    <th>Format</th>
-                    <th style="width:560px;">Actions</th>
+                    <th style="width:70px;">TH/PR</th>
+                    <th style="width:90px;">Format</th>
+                    <th style="width:500px;">Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -100,6 +215,7 @@
                 <tr>
                     <td>{{s.name}}</td>
                     <td>{{s.short_name|default:"-"}}</td>
+                    <td class="text-muted">{{ s.alias_display|default:"-" }}</td>
                     <td>{% if s.is_active %}Active{% else %}Archived{% endif %}</td>
                     <td>
                         {% if s.has_theory %}TH{% else %}-{% endif %} /
@@ -148,7 +264,7 @@
                     </td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="6">No subjects added yet.</td></tr>
+                <tr><td colspan="7">No subjects added yet.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

@@ -63,6 +63,7 @@ from .models import (
     StudentResult,
     Subject,
     SubjectTemplate,
+    SubjectAlias,
     TimetableEntry,
     TimetableUpload,
     LectureSession,
@@ -245,6 +246,8 @@ def _dept_label_from_module(module):
 
 def _attendance_fully_marked_for_date(module, date_val):
     _ensure_active_timetable(module)
+    if not _attendance_allowed_for_date(module, date_val):
+        return True
     day_of_week = date_val.weekday()
     expected = set(
         TimetableEntry.objects.filter(module=module, day_of_week=day_of_week, is_active=True).values_list(
@@ -260,7 +263,7 @@ def _attendance_fully_marked_for_date(module, date_val):
 def _attendance_fully_marked_for_range(module, start_date, end_date):
     cur = start_date
     while cur <= end_date:
-        if not _attendance_fully_marked_for_date(module, cur):
+        if _attendance_allowed_for_date(module, cur) and not _attendance_fully_marked_for_date(module, cur):
             return False
         cur += timedelta(days=1)
     return True
@@ -1439,6 +1442,15 @@ def subjects_page(request):
         return redirect("/mentor-dashboard/")
     module = _active_module(request)
     subjects = list(Subject.objects.filter(module=module).order_by("name"))
+    subject_choices = []
+    subject_key_map = {}
+    for s in subjects:
+        for val in {(s.name or "").strip(), (s.short_name or "").strip()}:
+            if not val:
+                continue
+            subject_choices.append(val)
+            subject_key_map[_norm_subject_key(val)] = val
+    subject_choices = sorted({v for v in subject_choices if v})
     is_superadmin = is_superadmin_user(getattr(request, "user", None))
     if is_superadmin:
         for s in subjects:
@@ -1463,6 +1475,34 @@ def subjects_page(request):
             t_id = template_name_map.get((s.name or "").strip().lower())
             if t_id:
                 selected_template_ids.add(t_id)
+    alias_map = _subject_alias_map(module)
+    known_keys = set(subject_key_map.keys()) | set(alias_map.keys())
+    seen_subjects = {
+        (v or "").strip()
+        for v in TimetableEntry.objects.filter(module=module).values_list("subject", flat=True)
+        if (v or "").strip()
+    }
+    seen_subjects |= {
+        (v or "").strip()
+        for v in LectureSession.objects.filter(module=module).values_list("subject", flat=True)
+        if (v or "").strip()
+    }
+    alias_suggestions = []
+    for label in sorted(seen_subjects):
+        if _norm_subject_key(label) not in known_keys:
+            alias_suggestions.append(label)
+    alias_rows = list(SubjectAlias.objects.filter(module=module, is_active=True).order_by("alias"))
+    alias_by_subject = {}
+    for subject in subjects:
+        keys = {
+            _norm_subject_key(subject.name),
+            _norm_subject_key(subject.short_name),
+        }
+        keys = {k for k in keys if k}
+        matches = [a.alias for a in alias_rows if _norm_subject_key(a.canonical) in keys]
+        alias_display = ", ".join(sorted({m for m in matches if m}))
+        alias_by_subject[subject.id] = alias_display
+        subject.alias_display = alias_display
     return render(
         request,
         "subjects.html",
@@ -1473,8 +1513,89 @@ def subjects_page(request):
             "is_superadmin": is_superadmin,
             "format_full": Subject.FORMAT_FULL,
             "format_t4_only": Subject.FORMAT_T4_ONLY,
+            "aliases": SubjectAlias.objects.filter(module=module).order_by("alias"),
+            "alias_suggestions": alias_suggestions,
+            "subject_choices": subject_choices,
+            "alias_by_subject": alias_by_subject,
         },
     )
+
+
+@login_required
+@require_http_methods(["POST"])
+def add_subject_alias(request):
+    if "mentor" in request.session:
+        return redirect("/mentor-dashboard/")
+    module = _active_module(request)
+    alias = (request.POST.get("alias") or "").strip()
+    canonical = (request.POST.get("canonical") or "").strip()
+    apply_all = bool(request.POST.get("apply_all"))
+    if not alias or not canonical:
+        messages.error(request, "Alias and canonical subject are required.")
+        return redirect("/subjects/")
+    targets = [module]
+    if is_superadmin_user(getattr(request, "user", None)) and apply_all:
+        targets = list(AcademicModule.objects.filter(is_active=True))
+    for target in targets:
+        existing = SubjectAlias.objects.filter(module=target, alias__iexact=alias).first()
+        if existing:
+            existing.alias = alias
+            existing.canonical = canonical
+            existing.is_active = True
+            existing.save(update_fields=["alias", "canonical", "is_active"])
+        else:
+            SubjectAlias.objects.create(module=target, alias=alias, canonical=canonical, is_active=True)
+    messages.success(request, "Subject alias saved.")
+    return redirect("/subjects/")
+
+
+@login_required
+@require_http_methods(["POST"])
+def update_subject_alias(request, alias_id):
+    if "mentor" in request.session:
+        return redirect("/mentor-dashboard/")
+    module = _active_module(request)
+    alias_obj = SubjectAlias.objects.filter(id=alias_id).first()
+    if not alias_obj:
+        messages.error(request, "Alias not found.")
+        return redirect("/subjects/")
+    if not is_superadmin_user(getattr(request, "user", None)) and alias_obj.module_id != module.id:
+        messages.error(request, "Alias not allowed for this module.")
+        return redirect("/subjects/")
+    alias = (request.POST.get("alias") or "").strip()
+    canonical = (request.POST.get("canonical") or "").strip()
+    is_active = bool(request.POST.get("is_active"))
+    if not alias or not canonical:
+        messages.error(request, "Alias and canonical subject are required.")
+        return redirect("/subjects/")
+    conflict = SubjectAlias.objects.filter(module=alias_obj.module, alias__iexact=alias).exclude(id=alias_obj.id).exists()
+    if conflict:
+        messages.error(request, "Another alias already exists with this name.")
+        return redirect("/subjects/")
+    alias_obj.alias = alias
+    alias_obj.canonical = canonical
+    alias_obj.is_active = is_active
+    alias_obj.save(update_fields=["alias", "canonical", "is_active"])
+    messages.success(request, "Subject alias updated.")
+    return redirect("/subjects/")
+
+
+@login_required
+@require_http_methods(["POST"])
+def delete_subject_alias(request, alias_id):
+    if "mentor" in request.session:
+        return redirect("/mentor-dashboard/")
+    module = _active_module(request)
+    alias_obj = SubjectAlias.objects.filter(id=alias_id).first()
+    if not alias_obj:
+        messages.error(request, "Alias not found.")
+        return redirect("/subjects/")
+    if not is_superadmin_user(getattr(request, "user", None)) and alias_obj.module_id != module.id:
+        messages.error(request, "Alias not allowed for this module.")
+        return redirect("/subjects/")
+    alias_obj.delete()
+    messages.info(request, "Subject alias removed.")
+    return redirect("/subjects/")
 
 
 @login_required
@@ -3906,6 +4027,21 @@ def _holiday_set(module):
     )
 
 
+def _attendance_block_reason(module, date_val):
+    calendar = _calendar_for_module(module)
+    if not calendar or not calendar.is_active:
+        return "Academic calendar is inactive."
+    if not phase_for_date(calendar, date_val):
+        return "Date is outside academic calendar ranges."
+    if date_val.weekday() == 6 or date_val in _holiday_set(module):
+        return "Selected date is a holiday or Sunday."
+    return ""
+
+
+def _attendance_allowed_for_date(module, date_val):
+    return _attendance_block_reason(module, date_val) == ""
+
+
 def _parse_date_param(raw, fallback=None):
     if not raw:
         return fallback
@@ -3973,42 +4109,93 @@ def recompute_weekly_attendance_from_daily(module, phase, week_no):
     if not end_date:
         return 0, "Week range invalid."
 
-    sessions = list(
+    start_monday = start - timedelta(days=start.weekday())
+    week_start = start_monday + timedelta(days=(week_no - 1) * 7)
+    week_end = week_start + timedelta(days=5)
+    if week_start < start:
+        week_start = start
+    if week_end > end_date:
+        week_end = end_date
+
+    weekly_sessions = list(
+        LectureSession.objects.filter(
+            module=module,
+            date__gte=week_start,
+            date__lte=week_end,
+        )
+    )
+    weekly_sessions = [s for s in weekly_sessions if _attendance_allowed_for_date(module, s.date)]
+
+    overall_sessions = list(
         LectureSession.objects.filter(
             module=module,
             date__gte=start,
             date__lte=end_date,
         )
     )
-    if not sessions:
+    overall_sessions = [s for s in overall_sessions if _attendance_allowed_for_date(module, s.date)]
+
+    if not weekly_sessions and not overall_sessions:
         return 0, "No lecture sessions found for selected week."
 
-    session_ids = [s.id for s in sessions]
-    absences = LectureAbsence.objects.filter(session_id__in=session_ids).select_related("student", "session")
+    week_session_ids = {s.id for s in weekly_sessions}
+    overall_session_ids = [s.id for s in overall_sessions]
+    if not overall_session_ids:
+        return 0, "No lecture sessions found for selected week."
 
-    held_by_batch = {}
-    for s in sessions:
-        held_by_batch.setdefault(s.batch, 0)
-        held_by_batch[s.batch] += 1
+    absences = (
+        LectureAbsence.objects.filter(session_id__in=overall_session_ids)
+        .select_related("student", "session")
+    )
 
-    absent_by_student = {}
+    held_week_by_batch = {}
+    for s in weekly_sessions:
+        batch_key = _norm_batch_key(s.batch)
+        if not batch_key:
+            continue
+        held_week_by_batch[batch_key] = held_week_by_batch.get(batch_key, 0) + 1
+
+    held_overall_by_batch = {}
+    for s in overall_sessions:
+        batch_key = _norm_batch_key(s.batch)
+        if not batch_key:
+            continue
+        held_overall_by_batch[batch_key] = held_overall_by_batch.get(batch_key, 0) + 1
+
+    absent_week_by_student = {}
+    absent_overall_by_student = {}
     for a in absences:
-        absent_by_student[a.student_id] = absent_by_student.get(a.student_id, 0) + 1
+        absent_overall_by_student[a.student_id] = absent_overall_by_student.get(a.student_id, 0) + 1
+        if a.session_id in week_session_ids:
+            absent_week_by_student[a.student_id] = absent_week_by_student.get(a.student_id, 0) + 1
 
     normalized_week = _normalize_week_no(phase, week_no)
     updated = 0
     for student in Student.objects.filter(module=module):
-        held = held_by_batch.get(student.batch or "", 0)
-        absent = absent_by_student.get(student.id, 0)
-        attended = max(held - absent, 0)
-        pct = round((attended / held) * 100, 2) if held else 0
+        batch_keys = _student_batch_keys(student)
+        held_week = sum(held_week_by_batch.get(key, 0) for key in batch_keys)
+        held_overall = sum(held_overall_by_batch.get(key, 0) for key in batch_keys)
+
+        absent_week = absent_week_by_student.get(student.id, 0)
+        absent_overall = absent_overall_by_student.get(student.id, 0)
+
+        attended_week = max(held_week - absent_week, 0)
+        attended_overall = max(held_overall - absent_overall, 0)
+
+        week_pct = round((attended_week / held_week) * 100, 2) if held_week else 0
+        overall_pct = round((attended_overall / held_overall) * 100, 2) if held_overall else 0
+        call_required = False
+        if held_week and week_pct < 80:
+            call_required = True
+        if held_overall and overall_pct < 80:
+            call_required = True
         Attendance.objects.update_or_create(
             week_no=normalized_week,
             student=student,
             defaults={
-                "week_percentage": pct,
-                "overall_percentage": pct,
-                "call_required": pct < 80,
+                "week_percentage": week_pct,
+                "overall_percentage": overall_pct,
+                "call_required": call_required,
             },
         )
         updated += 1
@@ -4395,11 +4582,22 @@ def academic_calendar(request):
             holiday_date = _parse_date_param(request.POST.get("holiday_date"))
             label = (request.POST.get("holiday_label") or "").strip()
             if holiday_date:
-                AcademicHoliday.objects.update_or_create(
-                    module=module,
-                    date=holiday_date,
-                    defaults={"label": label, "is_active": True},
-                )
+                target_modules = [module]
+                if is_superadmin:
+                    dept_keys = [d.strip().upper() for d in request.POST.getlist("holiday_depts") if d.strip()]
+                    if dept_keys:
+                        target_modules = [
+                            m for m in AcademicModule.objects.filter(is_active=True)
+                            if any(_dept_matches_module(m, key) for key in dept_keys)
+                        ]
+                    else:
+                        target_modules = list(AcademicModule.objects.filter(is_active=True))
+                for target in target_modules:
+                    AcademicHoliday.objects.update_or_create(
+                        module=target,
+                        date=holiday_date,
+                        defaults={"label": label, "is_active": True},
+                    )
                 messages.success(request, "Holiday added.")
             else:
                 messages.error(request, "Select a valid holiday date.")
@@ -4562,6 +4760,8 @@ def mentor_mark_attendance(request):
     selected_date = _parse_date_param(request.GET.get("date"), timezone.localdate())
     is_holiday = selected_date.weekday() == 6
     has_inactive_calendar = False
+    attendance_block_reason = ""
+    allowed_modules = []
     for module in modules:
         _ensure_active_timetable(module)
         calendar = _calendar_for_module(module)
@@ -4569,9 +4769,14 @@ def mentor_mark_attendance(request):
             has_inactive_calendar = True
         if selected_date in _holiday_set(module):
             is_holiday = True
+        if _attendance_allowed_for_date(module, selected_date):
+            allowed_modules.append(module)
+        else:
+            if not attendance_block_reason:
+                attendance_block_reason = _attendance_block_reason(module, selected_date)
 
     batch_rows = []
-    for module in modules:
+    for module in allowed_modules:
         module_rows = _build_attendance_batch_rows(module, selected_date, mentor=mentor, allow_override=False)
         for row in module_rows:
             row["module"] = module
@@ -4590,12 +4795,43 @@ def mentor_mark_attendance(request):
             "is_holiday": is_holiday,
             "has_inactive_calendar": has_inactive_calendar,
             "dept_filter": dept_filter or "ALL",
+            "attendance_block_reason": attendance_block_reason if not batch_rows else "",
         },
     )
 
 
 def _norm_batch_key(value):
     return "".join(ch for ch in str(value or "").upper() if ch.isalnum())
+
+
+def _norm_subject_key(value):
+    return "".join(ch for ch in str(value or "").upper() if ch.isalnum())
+
+
+def _subject_alias_map(module):
+    alias_map = {}
+    global_aliases = SubjectAlias.objects.filter(module__isnull=True, is_active=True)
+    for alias in global_aliases:
+        key = _norm_subject_key(alias.alias)
+        if key:
+            alias_map[key] = (alias.canonical or "").strip()
+    module_aliases = SubjectAlias.objects.filter(module=module, is_active=True)
+    for alias in module_aliases:
+        key = _norm_subject_key(alias.alias)
+        if key:
+            alias_map[key] = (alias.canonical or "").strip()
+    return alias_map
+
+
+def _canonical_subject_name(module, raw_value, alias_map=None):
+    raw = (raw_value or "").strip()
+    if not raw:
+        return ""
+    if alias_map is None:
+        alias_map = _subject_alias_map(module)
+    key = _norm_subject_key(raw)
+    mapped = alias_map.get(key)
+    return mapped or raw
 
 
 def _slot_sort_key(value):
@@ -4916,6 +5152,7 @@ def _build_attendance_batch_rows(module, selected_date, mentor=None, allow_overr
         entries_qs = entries_qs.filter(faculty__iexact=mentor.name)
     entries_qs = entries_qs.order_by("batch", "lecture_no")
 
+    alias_map = _subject_alias_map(module)
     adjustments = _active_adjustments_for_date(module, selected_date)
     adj_by_key = {(a.batch, a.lecture_no): a for a in adjustments}
     merge_room_by_proxy = {
@@ -4983,6 +5220,7 @@ def _build_attendance_batch_rows(module, selected_date, mentor=None, allow_overr
             slots.append(
                 {
                     "entry": entry,
+                    "subject_display": _canonical_subject_name(module, entry.subject, alias_map),
                     "session": session,
                     "absent_rolls": absent_rolls,
                     "form_id": f"form-{_norm_batch_key(batch)}-{entry.lecture_no}",
@@ -5007,9 +5245,12 @@ def coordinator_mark_attendance(request):
     calendar = _calendar_for_module(module)
     holiday_dates = _holiday_set(module)
     is_holiday = selected_date.weekday() == 6 or selected_date in holiday_dates
-    batch_rows = _build_attendance_batch_rows(
-        module, selected_date, mentor=None, allow_override=True, prefill_absent=True
-    )
+    attendance_block_reason = _attendance_block_reason(module, selected_date)
+    batch_rows = []
+    if not attendance_block_reason:
+        batch_rows = _build_attendance_batch_rows(
+            module, selected_date, mentor=None, allow_override=True, prefill_absent=True
+        )
 
     return render(
         request,
@@ -5020,6 +5261,7 @@ def coordinator_mark_attendance(request):
             "calendar": calendar,
             "is_holiday": is_holiday,
             "module": module,
+            "attendance_block_reason": attendance_block_reason,
         },
     )
 
@@ -5548,6 +5790,9 @@ def attendance_fill_status(request):
         start_date, end_date = end_date, start_date
 
     def _rows_for_date(date_val):
+        block_reason = _attendance_block_reason(module, date_val)
+        if block_reason:
+            return {"date": date_val, "rows": [], "blocked_reason": block_reason}
         day_of_week = date_val.weekday()
         expected_entries = TimetableEntry.objects.filter(
             module=module, day_of_week=day_of_week, is_active=True
@@ -5579,13 +5824,13 @@ def attendance_fill_status(request):
             )
 
         rows.sort(key=lambda r: (r["pending"], r["faculty"]))
-        return rows
+        return {"date": date_val, "rows": rows, "blocked_reason": ""}
 
     week_rows = []
     cur = start_date
     while cur <= end_date:
         if cur.weekday() != 6:
-            week_rows.append({"date": cur, "rows": _rows_for_date(cur)})
+            week_rows.append(_rows_for_date(cur))
         cur += timedelta(days=1)
 
     return render(
@@ -5621,6 +5866,8 @@ def save_lecture_attendance(request):
     lecture_no_raw = request.POST.get("lecture_no")
     if not date_val or not batch or not lecture_no_raw:
         return JsonResponse({"ok": False, "msg": "Missing required fields"}, status=400)
+    if not _attendance_allowed_for_date(module, date_val):
+        return JsonResponse({"ok": False, "msg": _attendance_block_reason(module, date_val)}, status=400)
 
     try:
         lecture_no = int(lecture_no_raw)
@@ -5787,7 +6034,8 @@ def attendance_analytics(request):
     )
     if batch_filter:
         sessions_qs = sessions_qs.filter(batch=batch_filter)
-    sessions = list(sessions_qs)
+    sessions = [s for s in sessions_qs if _attendance_allowed_for_date(module, s.date)]
+    alias_map = _subject_alias_map(module)
 
     session_ids = [s.id for s in sessions]
     absences = LectureAbsence.objects.filter(session_id__in=session_ids).select_related("session", "student")
@@ -5811,7 +6059,7 @@ def attendance_analytics(request):
     for s in sessions:
         held_by_batch.setdefault(s.batch, 0)
         held_by_batch[s.batch] += 1
-        subj = (s.subject or "").strip()
+        subj = _canonical_subject_name(module, s.subject, alias_map)
         subject_set.add(subj)
         held_by_batch_subject.setdefault(s.batch, {}).setdefault(subj, 0)
         held_by_batch_subject[s.batch][subj] += 1
@@ -5827,7 +6075,7 @@ def attendance_analytics(request):
     for a in absences:
         sid = a.student_id
         absent_by_student[sid] = absent_by_student.get(sid, 0) + 1
-        subj = (a.session.subject or "").strip()
+        subj = _canonical_subject_name(module, a.session.subject, alias_map)
         absent_by_student_subject.setdefault(sid, {}).setdefault(subj, 0)
         absent_by_student_subject[sid][subj] += 1
         _, week_idx = week_for_date(calendar, a.session.date)
@@ -5922,6 +6170,9 @@ def daily_absent_excel(request):
     date_val = _parse_date_param(request.GET.get("date"), timezone.localdate())
     batch_filter = (request.GET.get("batch") or "").strip()
 
+    if not _attendance_allowed_for_date(module, date_val):
+        return HttpResponse("Attendance is not allowed for this date.", status=400)
+
     if is_coordinator and not _attendance_fully_marked_for_date(module, date_val):
         return HttpResponse("Attendance is not fully marked for this date.", status=400)
 
@@ -5931,6 +6182,7 @@ def daily_absent_excel(request):
     sessions = list(sessions_qs.order_by("batch", "lecture_no"))
     if not sessions:
         return HttpResponse("No attendance sessions found for selected date.", status=404)
+    alias_map = _subject_alias_map(module)
 
     absences = LectureAbsence.objects.filter(session__in=sessions).select_related("student", "session")
     absences_by_session = {}
@@ -5985,7 +6237,7 @@ def daily_absent_excel(request):
                 absent_str = ", ".join(str(x) for x in rolls) if rolls else "NIL"
                 ws.cell(row=row_cursor, column=1, value=s.lecture_no)
                 ws.cell(row=row_cursor, column=2, value=len(rolls))
-                ws.cell(row=row_cursor, column=3, value=s.subject)
+                ws.cell(row=row_cursor, column=3, value=_canonical_subject_name(module, s.subject, alias_map))
                 ws.cell(row=row_cursor, column=4, value=s.faculty)
                 ws.cell(row=row_cursor, column=5, value=absent_str)
             if right and j < len(right_sessions):
@@ -5995,7 +6247,7 @@ def daily_absent_excel(request):
                 absent_str = ", ".join(str(x) for x in rolls) if rolls else "NIL"
                 ws.cell(row=row_cursor, column=7, value=s.lecture_no)
                 ws.cell(row=row_cursor, column=8, value=len(rolls))
-                ws.cell(row=row_cursor, column=9, value=s.subject)
+                ws.cell(row=row_cursor, column=9, value=_canonical_subject_name(module, s.subject, alias_map))
                 ws.cell(row=row_cursor, column=10, value=s.faculty)
                 ws.cell(row=row_cursor, column=11, value=absent_str)
             row_cursor += 1
@@ -6021,6 +6273,7 @@ def _daily_absent_cards(module, date_val, batch_filter=""):
     sessions = list(sessions_qs.order_by("batch", "lecture_no", "time_slot"))
     if not sessions:
         return [], []
+    alias_map = _subject_alias_map(module)
 
     absences = LectureAbsence.objects.filter(session__in=sessions).select_related("student", "session")
     absences_by_session = {}
@@ -6051,7 +6304,7 @@ def _daily_absent_cards(module, date_val, batch_filter=""):
                 {
                     "lecture_no": sess.lecture_no,
                     "time_slot": sess.time_slot,
-                    "subject": sess.subject,
+                    "subject": _canonical_subject_name(module, sess.subject, alias_map),
                     "faculty": sess.faculty,
                     "absent_rolls": rolls,
                     "absent_text": ", ".join(str(x) for x in rolls) if rolls else "NIL",
@@ -6087,6 +6340,9 @@ def daily_absent_live(request):
 
     date_val = _parse_date_param(request.GET.get("date"), timezone.localdate())
     batch_filter = (request.GET.get("batch") or "").strip()
+
+    if not _attendance_allowed_for_date(module, date_val):
+        return HttpResponse("Attendance is not allowed for this date.", status=400)
 
     if is_coordinator and not _attendance_fully_marked_for_date(module, date_val):
         return HttpResponse("Attendance is not fully marked for this date.", status=400)
@@ -6124,6 +6380,9 @@ def daily_absent_live_pdf(request):
 
     date_val = _parse_date_param(request.GET.get("date"), timezone.localdate())
     batch_filter = (request.GET.get("batch") or "").strip()
+
+    if not _attendance_allowed_for_date(module, date_val):
+        return HttpResponse("Attendance is not allowed for this date.", status=400)
 
     if is_coordinator and not _attendance_fully_marked_for_date(module, date_val):
         return HttpResponse("Attendance is not fully marked for this date.", status=400)
@@ -6253,10 +6512,14 @@ def weekly_attendance_live(request):
     sessions = list(
         LectureSession.objects.filter(module=module, date__gte=start, date__lte=end_date or end)
     )
+    sessions = [s for s in sessions if _attendance_allowed_for_date(module, s.date)]
     session_ids = [s.id for s in sessions]
     absences = LectureAbsence.objects.filter(session_id__in=session_ids).select_related("session", "student")
 
-    subject_list = sorted({(s.subject or "").strip() for s in sessions if (s.subject or "").strip()})
+    alias_map = _subject_alias_map(module)
+    subject_list = sorted(
+        {_canonical_subject_name(module, s.subject, alias_map) for s in sessions if (s.subject or "").strip()}
+    )
     week_set = set()
     for s in sessions:
         _, week_idx = week_for_date(calendar, s.date)
@@ -6269,7 +6532,7 @@ def weekly_attendance_live(request):
     for s in sessions:
         held_by_batch.setdefault(s.batch, 0)
         held_by_batch[s.batch] += 1
-        subj = (s.subject or "").strip()
+        subj = _canonical_subject_name(module, s.subject, alias_map)
         held_by_batch_subject.setdefault(s.batch, {}).setdefault(subj, 0)
         held_by_batch_subject[s.batch][subj] += 1
 
@@ -6278,7 +6541,7 @@ def weekly_attendance_live(request):
     for a in absences:
         sid = a.student_id
         absent_by_student[sid] = absent_by_student.get(sid, 0) + 1
-        subj = (a.session.subject or "").strip()
+        subj = _canonical_subject_name(module, a.session.subject, alias_map)
         absent_by_student_subject.setdefault(sid, {}).setdefault(subj, 0)
         absent_by_student_subject[sid][subj] += 1
 
@@ -6354,8 +6617,9 @@ def _student_batch_keys(student):
 
 
 def _ordered_subject_names_for_module(module, sessions):
+    alias_map = _subject_alias_map(module)
     session_subjects = {
-        (session.subject or "").strip()
+        _canonical_subject_name(module, session.subject, alias_map)
         for session in sessions
         if (session.subject or "").strip()
     }
@@ -6363,12 +6627,19 @@ def _ordered_subject_names_for_module(module, sessions):
     seen = set()
     for subject in Subject.objects.filter(module=module, is_active=True).order_by("display_order", "name"):
         name = (subject.name or "").strip()
-        if name and name in session_subjects and name not in seen:
+        canonical = _canonical_subject_name(module, name, alias_map)
+        if canonical and canonical in session_subjects and canonical not in seen:
+            ordered.append(canonical)
+            seen.add(canonical)
+        short = (subject.short_name or "").strip()
+        canonical_short = _canonical_subject_name(module, short, alias_map) if short else ""
+        if canonical_short and canonical_short in session_subjects and canonical_short not in seen:
+            ordered.append(canonical_short)
+            seen.add(canonical_short)
+    for name in sorted(session_subjects):
+        if name and name not in seen:
             ordered.append(name)
             seen.add(name)
-    for name in sorted(session_subjects):
-        if name not in seen:
-            ordered.append(name)
     return ordered
 
 
@@ -6401,6 +6672,8 @@ def _weekly_export_data(module, calendar, phase, week_no, batch_filter=""):
         LectureSession.objects.filter(module=module, date__gte=start, date__lte=range_end)
         .order_by("date", "lecture_no", "batch", "time_slot")
     )
+    sessions = [session for session in sessions if _attendance_allowed_for_date(module, session.date)]
+    alias_map = _subject_alias_map(module)
     if batch_filter_key:
         sessions = [session for session in sessions if _norm_batch_key(session.batch) == batch_filter_key]
     session_ids = [session.id for session in sessions]
@@ -6436,7 +6709,7 @@ def _weekly_export_data(module, calendar, phase, week_no, batch_filter=""):
         _, session_week_no = week_for_date(calendar, session.date)
         if session_week_no:
             week_numbers.add(session_week_no)
-        subject_name = (session.subject or "").strip()
+        subject_name = _canonical_subject_name(module, session.subject, alias_map)
         batch_session_map.setdefault(session.batch, []).append(session)
 
         session_entry = {
@@ -6481,6 +6754,8 @@ def _weekly_export_data(module, calendar, phase, week_no, batch_filter=""):
         "subjects": ordered_subjects,
         "weeks": ordered_weeks,
         "per_student": per_student,
+        "alias_map": alias_map,
+        "module": module,
     }
 
 
@@ -6616,6 +6891,8 @@ def _write_subjectwise_sheets(workbook, export_data):
 
 
 def _write_register_sheets(workbook, export_data):
+    module = export_data.get("module")
+    alias_map = export_data.get("alias_map") or ( _subject_alias_map(module) if module else {} )
     for batch in export_data["ordered_batches"]:
         sessions = [
             session
@@ -6625,7 +6902,7 @@ def _write_register_sheets(workbook, export_data):
         ws = workbook.create_sheet(title=_safe_sheet_title(f"{batch} Register"))
         headers = ["Roll No", "Student Name", "Enrollment No"]
         session_labels = [
-            f"{session.date:%d-%b} L{session.lecture_no} {((session.subject or '').strip() or 'Lecture')}"
+            f"{session.date:%d-%b} L{session.lecture_no} {(_canonical_subject_name(module, session.subject, alias_map) or 'Lecture')}"
             for session in sessions
         ]
         ws.append(headers + session_labels + ["Attended", "Held", "%"])

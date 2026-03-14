@@ -107,6 +107,11 @@
 <div class="alert alert-info">Selected date is a holiday or Sunday.</div>
 {% endif %}
 
+{% if attendance_block_reason %}
+<div class="alert alert-warning">{{ attendance_block_reason }}</div>
+{% endif %}
+
+{% if not attendance_block_reason %}
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
     <div id="globalSaveStatus" class="fw-semibold text-success" data-date="{{ selected_date|date:'d M Y' }}">
         Date Selected: {{ selected_date|date:'d M Y' }} · All changes saved
@@ -147,7 +152,7 @@
                 <div class="compact-slot-row">
                     <div class="slot-meta">
                         <div class="slot-title">L{{ slot.entry.lecture_no }} - {{ slot.entry.time_slot }}</div>
-                        <div>{{ slot.entry.subject }}</div>
+                        <div>{{ slot.subject_display|default:slot.entry.subject }}</div>
                         <div class="slot-sub">
                             {{ slot.entry.faculty }} · {{ slot.entry.room }}
                             {% if slot.adjustment and slot.adjustment.proxy_faculty %}
@@ -186,6 +191,7 @@
 {% empty %}
 <div class="alert alert-info">No timetable entries found for this date.</div>
 {% endfor %}
+{% endif %}
 
 <script>
 function getCsrfToken(form) {

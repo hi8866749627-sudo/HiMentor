@@ -145,6 +145,24 @@ class AcademicHoliday(models.Model):
         return f"{self.module.name} - {self.date:%Y-%m-%d}"
 
 
+class SubjectAlias(models.Model):
+    module = models.ForeignKey(
+        AcademicModule, on_delete=models.CASCADE, null=True, blank=True, related_name="subject_aliases"
+    )
+    alias = models.CharField(max_length=120)
+    canonical = models.CharField(max_length=120)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["alias"]
+        unique_together = ("module", "alias")
+
+    def __str__(self):
+        scope = self.module.name if self.module else "All Modules"
+        return f"{scope}: {self.alias} -> {self.canonical}"
+
+
 class TimetableUpload(models.Model):
     module = models.ForeignKey(AcademicModule, on_delete=models.CASCADE, related_name="timetable_uploads")
     uploaded_by = models.CharField(max_length=120, blank=True)

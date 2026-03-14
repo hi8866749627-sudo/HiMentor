@@ -194,7 +194,9 @@ def week_for_date(calendar, target_date):
     start, _ = phase_range(calendar, phase)
     if not start:
         return phase, None
-    delta = (target_date - start).days
+    start_monday = start - timedelta(days=start.weekday())
+    target_monday = target_date - timedelta(days=target_date.weekday())
+    delta = (target_monday - start_monday).days
     week_no = (delta // 7) + 1
     return phase, week_no
 
@@ -205,4 +207,6 @@ def end_date_for_week(calendar, phase, week_no):
         return None
     if week_no is None:
         return end
-    return start + timedelta(days=(week_no * 7) - 1)
+    start_monday = start - timedelta(days=start.weekday())
+    week_start = start_monday + timedelta(days=(week_no - 1) * 7)
+    return week_start + timedelta(days=5)
