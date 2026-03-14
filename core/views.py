@@ -4972,27 +4972,54 @@ def coordinator_daily_weekly_report(request):
         )
 
     week_rows = []
+    week_batches = []
+    week_batch_totals = []
+    week_grand_total = 0
+    week_start = None
+    week_end = None
+    week_label = ""
     if mode == "weekly":
         week_start = selected_date - timedelta(days=selected_date.weekday())
         week_end = min(week_start + timedelta(days=5), timezone.localdate())
+        calendar = _calendar_for_module(module)
+        phase, week_no = week_for_date(calendar, selected_date)
+        if phase and week_no:
+            week_label = f"{phase} - Week {week_no}"
+        else:
+            week_label = f"Week of {week_start:%d %b %Y}"
         sessions = list(
             LectureSession.objects.filter(module=module, date__gte=week_start, date__lte=week_end).order_by("faculty", "batch", "date", "lecture_no")
         )
         summary = {}
+        batch_names = {
+            (batch or "").strip()
+            for batch in TimetableEntry.objects.filter(module=module, is_active=True).values_list("batch", flat=True)
+            if (batch or "").strip()
+        }
         for session in sessions:
             faculty_key = (session.faculty or "").strip() or "-"
             batch_key = (session.batch or "").strip() or "-"
+            batch_names.add(batch_key)
             faculty_bucket = summary.setdefault(faculty_key, {"batches": {}, "grand_total": 0})
             faculty_bucket["batches"][batch_key] = faculty_bucket["batches"].get(batch_key, 0) + 1
             faculty_bucket["grand_total"] += 1
-        week_rows = [
-            {
-                "faculty_name": faculty_name,
-                "batch_counts": [{"batch": batch, "count": count} for batch, count in sorted(payload["batches"].items())],
-                "grand_total": payload["grand_total"],
-            }
-            for faculty_name, payload in sorted(summary.items())
-        ]
+        week_batches = sorted(batch_names)
+        batch_totals_map = {batch: 0 for batch in week_batches}
+        for faculty_name, payload in sorted(summary.items()):
+            counts = []
+            for batch in week_batches:
+                count = payload["batches"].get(batch, 0)
+                counts.append(count)
+                batch_totals_map[batch] = batch_totals_map.get(batch, 0) + count
+            week_rows.append(
+                {
+                    "faculty_name": faculty_name,
+                    "counts": counts,
+                    "grand_total": payload["grand_total"],
+                }
+            )
+        week_batch_totals = [batch_totals_map.get(batch, 0) for batch in week_batches]
+        week_grand_total = sum(week_batch_totals)
 
     return render(
         request,
@@ -5003,6 +5030,12 @@ def coordinator_daily_weekly_report(request):
             "mode": mode,
             "faculty_cards": faculty_cards,
             "week_rows": week_rows,
+            "week_batches": week_batches,
+            "week_batch_totals": week_batch_totals,
+            "week_grand_total": week_grand_total,
+            "week_start": week_start,
+            "week_end": week_end,
+            "week_label": week_label,
         },
     )
 
@@ -5029,8 +5062,20 @@ def coordinator_daily_weekly_report_pdf(request):
 
     response = HttpResponse(content_type="application/pdf")
     response["Content-Disposition"] = f'attachment; filename="Daily_Weekly_Report_{selected_date:%Y-%m-%d}.pdf"'
-    doc = SimpleDocTemplate(response, pagesize=landscape(A4), leftMargin=12, rightMargin=12, topMargin=14, bottomMargin=12)
+    doc = SimpleDocTemplate(response, pagesize=A4, leftMargin=12, rightMargin=12, topMargin=14, bottomMargin=12)
     styles = getSampleStyleSheet()
+    usable_width = A4[0] - doc.leftMargin - doc.rightMargin
+    col_widths = [
+        usable_width * 0.07,  # Lecture
+        usable_width * 0.13,  # Time
+        usable_width * 0.13,  # Department
+        usable_width * 0.10,  # Batch
+        usable_width * 0.27,  # Subject
+        usable_width * 0.10,  # Room
+        usable_width * 0.07,  # Present
+        usable_width * 0.07,  # Absent
+        usable_width * 0.06,  # Total
+    ]
     story = [
         Paragraph(f"Daily / Weekly Report - {module.name}", styles["Heading3"]),
         Paragraph(selected_date.strftime("%d %b %Y (%A)"), styles["Normal"]),
@@ -5051,14 +5096,20 @@ def coordinator_daily_weekly_report_pdf(request):
                 entry["absent_count"] if entry["absent_count"] != "-" else "",
                 entry["total_count"] if entry["total_count"] != "-" else "",
             ])
-        table = Table(table_data, repeatRows=1)
+        table = Table(table_data, colWidths=col_widths, repeatRows=1)
         table.setStyle(
             TableStyle(
                 [
                     ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f3f5")),
                     ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#d7dce1")),
                     ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                    ("FONTSIZE", (0, 0), (-1, -1), 7),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("ALIGN", (0, 0), (0, -1), "CENTER"),
+                    ("ALIGN", (1, 0), (1, -1), "CENTER"),
+                    ("ALIGN", (6, 0), (-1, -1), "CENTER"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
                 ]
             )
         )

@@ -11,6 +11,13 @@
 .schedule-row-swap {
     background: #e2d9f3;
 }
+.weekly-total-col {
+    background: #fff3cd;
+}
+.weekly-total-row td,
+.weekly-total-row th {
+    background: #e9ecef;
+}
 </style>
 
 <h4 class="mb-3">Daily / Weekly Report</h4>
@@ -37,33 +44,46 @@
 
 {% if mode == "weekly" %}
 <div class="card">
-    <div class="card-header">Weekly Sheet</div>
+    <div class="card-header">
+        Weekly Sheet
+        {% if week_label %}
+            <span class="ms-2">{{ week_label }}</span>
+        {% endif %}
+        {% if week_start and week_end %}
+            <div class="small text-muted mt-1">Date Range: {{ week_start|date:"d M Y" }} to {{ week_end|date:"d M Y" }}</div>
+        {% endif %}
+    </div>
     <div class="card-body p-0">
         <div class="table-responsive">
-            <table class="table table-hover mb-0">
+            <table class="table table-bordered table-hover mb-0 align-middle">
                 <thead>
                     <tr>
                         <th>Faculty</th>
-                        <th>Batch-wise Total</th>
-                        <th class="text-center">Grand Total</th>
+                        {% for batch in week_batches %}
+                            <th class="text-center">{{ batch }}</th>
+                        {% endfor %}
+                        <th class="text-center weekly-total-col">Grand Total</th>
                     </tr>
                 </thead>
                 <tbody>
                 {% for row in week_rows %}
                     <tr>
                         <td>{{ row.faculty_name }}</td>
-                        <td>
-                            {% for item in row.batch_counts %}
-                                <span class="badge bg-light text-dark border me-1">{{ item.batch }}: {{ item.count }}</span>
-                            {% empty %}
-                                -
-                            {% endfor %}
-                        </td>
-                        <td class="text-center fw-bold">{{ row.grand_total }}</td>
+                        {% for count in row.counts %}
+                            <td class="text-center">{{ count }}</td>
+                        {% endfor %}
+                        <td class="text-center fw-bold weekly-total-col">{{ row.grand_total }}</td>
                     </tr>
                 {% empty %}
-                    <tr><td colspan="3" class="text-center text-muted">No weekly data found.</td></tr>
+                    <tr><td colspan="{{ week_batches|length|add:2 }}" class="text-center text-muted">No weekly data found.</td></tr>
                 {% endfor %}
+                    <tr class="weekly-total-row fw-bold">
+                        <td>Grand Total</td>
+                        {% for total in week_batch_totals %}
+                            <td class="text-center">{{ total }}</td>
+                        {% endfor %}
+                        <td class="text-center weekly-total-col">{{ week_grand_total }}</td>
+                    </tr>
                 </tbody>
             </table>
         </div>
