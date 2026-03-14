@@ -107,10 +107,13 @@
 <div class="alert alert-info">Selected date is a holiday or Sunday.</div>
 {% endif %}
 
-<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-    <div id="globalSaveStatus" class="fw-semibold text-success">All changes saved</div>
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+    <div id="globalSaveStatus" class="fw-semibold text-success" data-date="{{ selected_date|date:'d M Y' }}">
+        Date Selected: {{ selected_date|date:'d M Y' }} · All changes saved
+    </div>
     <button type="button" class="btn btn-primary" id="saveAllBtn" disabled>Save All</button>
 </div>
+<div class="text-muted small mb-3">Select only absent numbers. Rest are present by default. Then save.</div>
 
 {% for batch in batch_rows %}
 <div class="card mb-3 compact-batch-card">
@@ -145,7 +148,6 @@
                     <div class="slot-meta">
                         <div class="slot-title">L{{ slot.entry.lecture_no }} - {{ slot.entry.time_slot }}</div>
                         <div>{{ slot.entry.subject }}</div>
-                        <div class="slot-sub">Select only absent numbers. Rest are present by default. Then save.</div>
                         <div class="slot-sub">
                             {{ slot.entry.faculty }} · {{ slot.entry.room }}
                             {% if slot.adjustment and slot.adjustment.proxy_faculty %}
@@ -170,6 +172,7 @@
 
                     <div class="slot-actions">
                         <button type="button" class="btn btn-success btn-sm all-present-btn">All Present</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm clear-btn">Clear</button>
                         <button type="button" class="btn btn-outline-secondary btn-sm copy-prev-btn">Copy Prev</button>
                         <button type="button" class="btn btn-sm save-btn {% if slot.session %}btn-warning text-dark{% else %}btn-primary{% endif %}">{% if slot.session %}SAVED{% else %}Save{% endif %}</button>
                         <span class="small save-status align-self-center {% if slot.session %}text-success{% else %}text-success{% endif %}">All changes saved</span>
@@ -208,7 +211,9 @@ function updateGlobalStatus() {
     const dirty = hasUnsavedChanges();
     if (saveAllBtn) saveAllBtn.disabled = !dirty;
     if (!status) return;
-    status.textContent = dirty ? 'Unsaved changes' : 'All changes saved';
+    const dateText = status.getAttribute('data-date') || '';
+    const stateText = dirty ? 'Unsaved changes' : 'All changes saved';
+    status.textContent = `Date Selected: ${dateText} · ${stateText}`;
     status.classList.toggle('text-warning', dirty);
     status.classList.toggle('text-success', !dirty);
 }
@@ -284,6 +289,7 @@ document.querySelectorAll('.attendance-form').forEach(form => {
     form.dataset.dirty = "0";
     const saveBtn = form.querySelector('.save-btn');
     const allPresentBtn = form.querySelector('.all-present-btn');
+    const clearBtn = form.querySelector('.clear-btn');
     const copyPrevBtn = form.querySelector('.copy-prev-btn');
     const rollButtons = Array.from(form.querySelectorAll('.roll-btn'));
     const slotCard = form.closest('.slot-card');
@@ -292,6 +298,12 @@ document.querySelectorAll('.attendance-form').forEach(form => {
         rollButtons.forEach(btn => setRollState(btn, false, true));
         markDirty(form);
     });
+    if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+            rollButtons.forEach(btn => setRollState(btn, false, false));
+            markDirty(form);
+        });
+    }
 
     if (copyPrevBtn) {
         copyPrevBtn.addEventListener('click', () => {

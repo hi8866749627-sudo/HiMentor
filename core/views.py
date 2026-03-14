@@ -5682,20 +5682,28 @@ def save_lecture_attendance(request):
 
     LectureAbsence.objects.filter(session=session).delete()
     absent_rolls = request.POST.getlist("absent_roll_numbers")
+    roll_numbers = []
     for roll in absent_rolls:
         try:
             roll_no = int(str(roll).strip())
         except Exception:
             continue
-        student = Student.objects.filter(
-            module=module,
-            roll_no=roll_no,
-        ).filter(
-            Q(batch__iexact=batch) | Q(division__iexact=batch)
-        ).first()
-        if not student:
-            continue
-        LectureAbsence.objects.create(session=session, student=student, marked_by=mentor)
+        roll_numbers.append(roll_no)
+
+    if roll_numbers:
+        batch_key = _norm_batch_key(batch)
+        students = list(Student.objects.filter(module=module, roll_no__in=roll_numbers))
+        student_map = {}
+        for s in students:
+            if not batch_key or batch_key in _student_batch_keys(s):
+                student_map[s.roll_no] = s
+        absences = [
+            LectureAbsence(session=session, student=student_map[rn], marked_by=mentor)
+            for rn in roll_numbers
+            if rn in student_map
+        ]
+        if absences:
+            LectureAbsence.objects.bulk_create(absences)
 
     calendar = _calendar_for_module(module)
     phase, week_no = week_for_date(calendar, date_val)
