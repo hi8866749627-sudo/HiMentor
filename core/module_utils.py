@@ -28,14 +28,35 @@ def is_superadmin_user(user):
 
 def allowed_modules_for_user(request):
     if request.session.get("mentor"):
-        mentor_code = (request.session.get("mentor") or "").strip()
-        if not mentor_code:
+        mentor_key = (request.session.get("mentor") or "").strip()
+        if not mentor_key:
             return AcademicModule.objects.none()
+        mentor_obj = None
+        try:
+            from .utils import resolve_mentor_identity
+
+            mentor_obj = resolve_mentor_identity(mentor_key)
+        except Exception:
+            mentor_obj = None
+
+        mentor_names = {mentor_key}
+        if mentor_obj:
+            if (mentor_obj.name or "").strip():
+                mentor_names.add(mentor_obj.name.strip())
+            if (mentor_obj.full_name or "").strip():
+                mentor_names.add(mentor_obj.full_name.strip())
+
+        faculty_q = Q()
+        for name in mentor_names:
+            faculty_q |= Q(timetable_entries__faculty__iexact=name)
+            faculty_q |= Q(lecture_adjustments__original_faculty__iexact=name)
+        if mentor_obj:
+            faculty_q |= Q(students__mentor=mentor_obj)
+            faculty_q |= Q(lecture_adjustments__proxy_faculty=mentor_obj)
+
         return (
-            AcademicModule.objects.filter(
-                Q(students__mentor__name__iexact=mentor_code)
-                | Q(timetable_entries__faculty__iexact=mentor_code)
-            )
+            AcademicModule.objects.filter(is_active=True)
+            .filter(faculty_q)
             .distinct()
             .order_by("-id")
         )
