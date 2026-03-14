@@ -4031,6 +4031,8 @@ def _attendance_block_reason(module, date_val):
     calendar = _calendar_for_module(module)
     if not calendar or not calendar.is_active:
         return "Academic calendar is inactive."
+    if date_val > timezone.localdate():
+        return "Attendance can only be filled up to today."
     if not phase_for_date(calendar, date_val):
         return "Date is outside academic calendar ranges."
     if date_val.weekday() == 6 or date_val in _holiday_set(module):
@@ -4339,8 +4341,10 @@ def upload_timetable(request):
     )
 
 
-@login_required
 def view_timetable(request):
+    mentor = _session_mentor_obj(request)
+    if not mentor and not request.user.is_authenticated:
+        return redirect("/")
     module = _active_module(request)
     _ensure_active_timetable(module)
     choice_lists = _timetable_choice_lists(module)
@@ -4461,10 +4465,10 @@ def view_timetable(request):
     )
 
 
-@login_required
 def download_timetable_excel(request):
-    if request.session.get("mentor"):
-        return redirect("/mentor-dashboard/")
+    mentor = _session_mentor_obj(request)
+    if not mentor and not request.user.is_authenticated:
+        return redirect("/")
 
     module = _active_module(request)
     _ensure_active_timetable(module)
@@ -6028,9 +6032,9 @@ def attendance_analytics(request):
     search = (request.GET.get("search") or "").strip()
     batch_choices = sorted(
         {
-            (v or "").strip()
-            for v in Student.objects.filter(module=module).values_list("batch", flat=True)
-            if (v or "").strip()
+            ((student.division or "").strip() or (student.batch or "").strip())
+            for student in Student.objects.filter(module=module).only("batch", "division")
+            if ((student.division or "").strip() or (student.batch or "").strip())
         }
     )
 
@@ -6057,29 +6061,56 @@ def attendance_analytics(request):
     end_date = end_date_for_week(calendar, phase, week_no)
     if end_date and end_date > end:
         end_date = end
+    today = timezone.localdate()
+    range_end = min(end_date or end, today)
+    if range_end < start:
+        return render(
+            request,
+            "attendance_analytics.html",
+            {
+                "module": module,
+                "calendar": calendar,
+                "phase": phase,
+                "week_param": week_param,
+                "batch_filter": batch_filter,
+                "search": search,
+                "rows": [],
+                "week_list": [],
+                "subject_list": [],
+                "batch_choices": batch_choices,
+                "message": "Attendance analytics are available only up to today.",
+            },
+        )
+
+    batch_filter_key = _norm_batch_key(batch_filter)
 
     sessions_qs = LectureSession.objects.filter(
         module=module,
         date__gte=start,
-        date__lte=end_date or end,
+        date__lte=range_end,
     )
-    if batch_filter:
-        sessions_qs = sessions_qs.filter(batch=batch_filter)
-    sessions = [s for s in sessions_qs if _attendance_allowed_for_date(module, s.date)]
+    sessions = [
+        s
+        for s in sessions_qs
+        if _attendance_allowed_for_date(module, s.date)
+        and (not batch_filter_key or _norm_batch_key(s.batch) == batch_filter_key)
+    ]
     alias_map = _subject_alias_map(module)
 
     session_ids = [s.id for s in sessions]
     absences = LectureAbsence.objects.filter(session_id__in=session_ids).select_related("session", "student")
 
     students_qs = Student.objects.filter(module=module)
-    if batch_filter:
-        students_qs = students_qs.filter(batch=batch_filter)
     if search:
         search_q = Q(name__icontains=search) | Q(enrollment__icontains=search)
         if search.isdigit():
             search_q |= Q(roll_no=int(search))
         students_qs = students_qs.filter(search_q)
-    students = list(students_qs.order_by("roll_no", "name"))
+    students = [
+        student
+        for student in students_qs.order_by("roll_no", "name")
+        if not batch_filter_key or batch_filter_key in _student_batch_keys(student)
+    ]
 
     held_by_batch = {}
     held_by_batch_subject = {}
@@ -6088,17 +6119,18 @@ def attendance_analytics(request):
     week_set = set()
 
     for s in sessions:
-        held_by_batch.setdefault(s.batch, 0)
-        held_by_batch[s.batch] += 1
+        batch_key = _norm_batch_key(s.batch)
+        held_by_batch.setdefault(batch_key, 0)
+        held_by_batch[batch_key] += 1
         subj = _canonical_subject_name(module, s.subject, alias_map)
         subject_set.add(subj)
-        held_by_batch_subject.setdefault(s.batch, {}).setdefault(subj, 0)
-        held_by_batch_subject[s.batch][subj] += 1
+        held_by_batch_subject.setdefault(batch_key, {}).setdefault(subj, 0)
+        held_by_batch_subject[batch_key][subj] += 1
         _, week_idx = week_for_date(calendar, s.date)
         if week_idx:
             week_set.add(week_idx)
-            held_by_batch_week.setdefault(s.batch, {}).setdefault(week_idx, 0)
-            held_by_batch_week[s.batch][week_idx] += 1
+            held_by_batch_week.setdefault(batch_key, {}).setdefault(week_idx, 0)
+            held_by_batch_week[batch_key][week_idx] += 1
 
     absent_by_student = {}
     absent_by_student_subject = {}
@@ -6119,15 +6151,16 @@ def attendance_analytics(request):
 
     rows = []
     for student in students:
-        batch = student.batch or ""
-        held_total = held_by_batch.get(batch, 0)
+        batch_label = (student.division or student.batch or "").strip()
+        batch_keys = _student_batch_keys(student)
+        held_total = sum(held_by_batch.get(key, 0) for key in batch_keys)
         absent_total = absent_by_student.get(student.id, 0)
         attended_total = max(held_total - absent_total, 0)
         percent = round((attended_total / held_total) * 100, 1) if held_total else 0
 
         week_rows = []
         for wk in week_list:
-            held_w = held_by_batch_week.get(batch, {}).get(wk, 0)
+            held_w = sum(held_by_batch_week.get(key, {}).get(wk, 0) for key in batch_keys)
             absent_w = absent_by_student_week.get(student.id, {}).get(wk, 0)
             attended_w = max(held_w - absent_w, 0)
             pct_w = round((attended_w / held_w) * 100, 1) if held_w else 0
@@ -6142,7 +6175,7 @@ def attendance_analytics(request):
 
         subject_rows = []
         for subj in subject_list:
-            held_s = held_by_batch_subject.get(batch, {}).get(subj, 0)
+            held_s = sum(held_by_batch_subject.get(key, {}).get(subj, 0) for key in batch_keys)
             absent_s = absent_by_student_subject.get(student.id, {}).get(subj, 0)
             attended_s = max(held_s - absent_s, 0)
             pct_s = round((attended_s / held_s) * 100, 1) if held_s else 0
@@ -6158,6 +6191,7 @@ def attendance_analytics(request):
         rows.append(
             {
                 "student": student,
+                "batch_label": batch_label,
                 "held": held_total,
                 "attended": attended_total,
                 "percent": percent,
@@ -6536,12 +6570,28 @@ def weekly_attendance_live(request):
     end_date = end_date_for_week(calendar, phase, week_no)
     if end_date and end_date > end:
         end_date = end
+    today = timezone.localdate()
+    range_end = min(end_date or end, today)
+    if range_end < start:
+        return render(
+            request,
+            "weekly_attendance_live.html",
+            {
+                "module": module,
+                "calendar": calendar,
+                "phase": phase,
+                "week_param": week_param,
+                "subject_list": [],
+                "rows": [],
+                "message": "Weekly attendance is available only up to today.",
+            },
+        )
 
-    if is_coordinator and not _attendance_fully_marked_for_range(module, start, end_date or end):
+    if is_coordinator and not _attendance_fully_marked_for_range(module, start, range_end):
         return HttpResponse("Attendance is not fully marked for the selected range.", status=400)
 
     sessions = list(
-        LectureSession.objects.filter(module=module, date__gte=start, date__lte=end_date or end)
+        LectureSession.objects.filter(module=module, date__gte=start, date__lte=range_end)
     )
     sessions = [s for s in sessions if _attendance_allowed_for_date(module, s.date)]
     session_ids = [s.id for s in sessions]
@@ -6682,7 +6732,9 @@ def _weekly_export_data(module, calendar, phase, week_no, batch_filter=""):
     end_date = end_date_for_week(calendar, phase, week_no)
     if end_date and end_date > end:
         end_date = end
-    range_end = end_date or end
+    range_end = min(end_date or end, timezone.localdate())
+    if range_end < start:
+        return None
 
     batch_filter_key = _norm_batch_key(batch_filter)
 
@@ -6986,8 +7038,11 @@ def weekly_attendance_excel(request):
     end_date = end_date_for_week(calendar, phase, week_no)
     if end_date and end_date > end:
         end_date = end
+    range_end = min(end_date or end, timezone.localdate())
+    if range_end < start:
+        return HttpResponse("Weekly attendance is available only up to today.", status=400)
 
-    if is_coordinator and not _attendance_fully_marked_for_range(module, start, end_date or end):
+    if is_coordinator and not _attendance_fully_marked_for_range(module, start, range_end):
         return HttpResponse("Attendance is not fully marked for the selected range.", status=400)
 
     export_format = (request.GET.get("format") or "compiled").strip().lower()

@@ -113,6 +113,10 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'mentor_followup.wsgi.application'
 
+LOGIN_URL = "/"
+LOGIN_REDIRECT_URL = "/"
+LOGOUT_REDIRECT_URL = "/"
+
 
 # ----------------------------
 # Database

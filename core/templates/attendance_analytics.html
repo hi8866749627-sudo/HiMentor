@@ -27,7 +27,7 @@
         </select>
     </div>
     <div class="col-md-3">
-        <label class="form-label">Batch</label>
+        <label class="form-label">Division</label>
         <select name="batch" class="form-select">
             <option value="">All</option>
             {% for b in batch_choices %}
@@ -83,26 +83,26 @@
                         <th></th>
                         <th>Roll</th>
                         <th>Name</th>
-                        <th>Batch</th>
-                        <th class="text-end">Held</th>
-                        <th class="text-end">Attended</th>
-                        <th class="text-end">%</th>
+        <th>Division</th>
+        <th class="text-end">Held</th>
+        <th class="text-end">Attended</th>
+        <th class="text-end">%</th>
                     </tr>
                 </thead>
                 <tbody>
                 {% for row in rows %}
-                    <tr>
+                    <tr class="analytics-row" data-search="{{ row.student.roll_no }} {{ row.student.name|lower }} {{ row.student.enrollment|lower }} {{ row.batch_label|lower }}">
                         <td>
                             <button class="btn btn-sm btn-outline-secondary toggle-btn" data-target="details-{{ forloop.counter }}">+</button>
                         </td>
                         <td>{{ row.student.roll_no }}</td>
                         <td>{{ row.student.name }}</td>
-                        <td>{{ row.student.batch }}</td>
+                        <td>{{ row.batch_label }}</td>
                         <td class="text-end">{{ row.held }}</td>
                         <td class="text-end">{{ row.attended }}</td>
                         <td class="text-end">{{ row.percent }}%</td>
                     </tr>
-                    <tr id="details-{{ forloop.counter }}" class="d-none">
+                    <tr id="details-{{ forloop.counter }}" class="d-none analytics-detail">
                         <td colspan="7">
                             <div class="row g-3">
                                 <div class="col-md-6">
@@ -164,6 +164,26 @@ document.querySelectorAll('.toggle-btn').forEach(btn => {
         btn.textContent = isHidden ? '-' : '+';
     });
 });
+
+const searchInput = document.querySelector('input[name="search"]');
+if (searchInput) {
+    searchInput.addEventListener('input', () => {
+        const query = (searchInput.value || '').trim().toLowerCase();
+        const rows = Array.from(document.querySelectorAll('.analytics-row'));
+        rows.forEach(row => {
+            const show = !query || (row.dataset.search || '').includes(query);
+            row.classList.toggle('d-none', !show);
+            const detail = row.nextElementSibling;
+            if (detail && detail.classList.contains('analytics-detail')) {
+                if (!show) {
+                    detail.classList.add('d-none');
+                    const toggleBtn = row.querySelector('.toggle-btn');
+                    if (toggleBtn) toggleBtn.textContent = '+';
+                }
+            }
+        });
+    });
+}
 </script>
 
 {% endblock %}

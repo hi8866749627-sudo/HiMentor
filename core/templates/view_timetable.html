@@ -2,10 +2,39 @@
 {% load get_item %}
 {% block content %}
 
+<style>
+.timetable-filter-row {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: .5rem;
+    align-items: end;
+    overflow-x: auto;
+    padding-bottom: .25rem;
+}
+.timetable-filter-item {
+    min-width: 130px;
+    flex: 0 0 auto;
+}
+.timetable-filter-item.lecture {
+    min-width: 100px;
+}
+.timetable-filter-item.day {
+    min-width: 120px;
+}
+.timetable-filter-actions {
+    display: flex;
+    gap: .5rem;
+    flex: 0 0 auto;
+    align-items: end;
+    padding-bottom: 1px;
+}
+</style>
+
 <h4 class="mb-3">Timetable</h4>
 
-<form method="get" class="row g-2 align-items-end mb-3">
-    <div class="col-md-2">
+<form method="get" class="mb-3">
+    <div class="timetable-filter-row">
+    <div class="timetable-filter-item day">
         <label class="form-label">Day</label>
         <select name="day" class="form-select">
             <option value="">All</option>
@@ -14,7 +43,7 @@
             {% endfor %}
         </select>
     </div>
-    <div class="col-md-2">
+    <div class="timetable-filter-item lecture">
         <label class="form-label">Lecture</label>
         <select name="lecture_no" class="form-select">
             <option value="">All</option>
@@ -23,7 +52,7 @@
             {% endfor %}
         </select>
     </div>
-    <div class="col-md-3">
+    <div class="timetable-filter-item">
         <label class="form-label">Batch</label>
         <select name="batch" class="form-select">
             <option value="">All</option>
@@ -32,7 +61,7 @@
             {% endfor %}
         </select>
     </div>
-    <div class="col-md-3">
+    <div class="timetable-filter-item">
         <label class="form-label">Subject</label>
         <select name="subject" class="form-select">
             <option value="">All</option>
@@ -41,7 +70,7 @@
             {% endfor %}
         </select>
     </div>
-    <div class="col-md-3">
+    <div class="timetable-filter-item">
         <label class="form-label">Faculty</label>
         <select name="faculty" class="form-select">
             <option value="">All</option>
@@ -50,7 +79,7 @@
             {% endfor %}
         </select>
     </div>
-    <div class="col-md-2">
+    <div class="timetable-filter-item">
         <label class="form-label">Room</label>
         <select name="room" class="form-select">
             <option value="">All</option>
@@ -59,10 +88,11 @@
             {% endfor %}
         </select>
     </div>
-    <div class="col-md-2">
+    <div class="timetable-filter-actions">
         <button class="btn btn-primary" type="submit">Filter</button>
-        <a class="btn btn-outline-secondary ms-2" href="/view-timetable/">Clear</a>
-        <a class="btn btn-outline-secondary ms-2" href="/timetable-excel/">Download</a>
+        <a class="btn btn-outline-secondary" href="/view-timetable/">Clear</a>
+        <a class="btn btn-outline-secondary" href="/timetable-excel/">Download</a>
+    </div>
     </div>
 </form>
 

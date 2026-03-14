@@ -118,6 +118,13 @@
 {% endif %}
 
 {% if not attendance_block_reason %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+    <div id="globalSaveStatus" class="fw-semibold text-success" data-date="{{ selected_date|date:'d M Y' }}">
+        Date Selected: {{ selected_date|date:'d M Y' }} · All changes saved
+    </div>
+    <button type="button" class="btn btn-primary" id="saveAllBtn" disabled>Save All</button>
+</div>
+<div class="text-muted small mb-3">Select only absent numbers. Rest are present by default. Then save.</div>
 {% for batch in batch_rows %}
 <div class="card mb-3 compact-batch-card">
     <div class="card-header d-flex justify-content-between align-items-center">
@@ -155,7 +162,6 @@
                     <div class="slot-meta">
                         <div class="slot-title">L{{ slot.entry.lecture_no }} - {{ slot.entry.time_slot }}</div>
                         <div>{{ slot.subject_display|default:slot.entry.subject }}</div>
-                        <div class="slot-sub">Select only absent numbers. Rest are present by default. Then save.</div>
                         <div class="slot-sub">
                             {{ slot.entry.faculty }}
                             {% if slot.adjustment and slot.adjustment.proxy_faculty %}
@@ -225,6 +231,19 @@ function hasUnsavedChanges() {
         .some(form => form.dataset.dirty === "1");
 }
 
+function updateGlobalStatus() {
+    const saveAllBtn = document.getElementById('saveAllBtn');
+    const status = document.getElementById('globalSaveStatus');
+    const dirty = hasUnsavedChanges();
+    if (saveAllBtn) saveAllBtn.disabled = !dirty;
+    if (!status) return;
+    const dateText = status.getAttribute('data-date') || '';
+    const stateText = dirty ? 'Unsaved changes' : 'All changes saved';
+    status.textContent = `Date Selected: ${dateText} · ${stateText}`;
+    status.classList.toggle('text-warning', dirty);
+    status.classList.toggle('text-success', !dirty);
+}
+
 function setSaveButtonState(saveBtn, state) {
     if (!saveBtn) return;
     saveBtn.classList.remove('btn-primary', 'btn-warning', 'text-dark', 'btn-secondary');
@@ -242,12 +261,35 @@ function setSaveButtonState(saveBtn, state) {
     saveBtn.classList.add('btn-primary');
 }
 
+function setSaveAllButtonState(saveAllBtn, state) {
+    if (!saveAllBtn) return;
+    saveAllBtn.classList.remove('btn-primary', 'btn-warning', 'text-dark', 'btn-secondary');
+    if (state === 'waiting') {
+        saveAllBtn.textContent = "Wait";
+        saveAllBtn.classList.add('btn-secondary');
+        return;
+    }
+    if (state === 'saved') {
+        saveAllBtn.textContent = "Saved";
+        saveAllBtn.classList.add('btn-warning', 'text-dark');
+        return;
+    }
+    saveAllBtn.textContent = "Save All";
+    saveAllBtn.classList.add('btn-primary');
+}
+
 function markDirty(form) {
     form.dataset.dirty = "1";
     const saveBtn = form.querySelector('.save-btn');
     setSaveButtonState(saveBtn, 'default');
+    setSaveAllButtonState(document.getElementById('saveAllBtn'), 'default');
     const status = form.querySelector('.save-status');
-    if (status) status.classList.add('d-none');
+    if (status) {
+        status.textContent = "Unsaved changes";
+        status.classList.remove('d-none', 'text-success');
+        status.classList.add('text-warning');
+    }
+    updateGlobalStatus();
 }
 
 function markSaved(form) {
@@ -257,10 +299,13 @@ function markSaved(form) {
     const status = form.querySelector('.save-status');
     if (status) {
         status.textContent = "All changes saved";
+        status.classList.remove('text-warning');
+        status.classList.add('text-success');
         status.classList.remove('d-none');
     }
     const rollButtons = Array.from(form.querySelectorAll('.roll-btn'));
     rollButtons.forEach(btn => setRollState(btn, btn.dataset.absent === "1", true));
+    updateGlobalStatus();
 }
 
 function buildFormData(form) {
@@ -280,6 +325,28 @@ function saveAttendance(form) {
     }).then(r => r.json());
 }
 
+async function saveAllForms() {
+    const forms = Array.from(document.querySelectorAll('.attendance-form'))
+        .filter(f => f.dataset.dirty === "1");
+    const saveAllBtn = document.getElementById('saveAllBtn');
+    setSaveAllButtonState(saveAllBtn, 'waiting');
+    if (saveAllBtn) saveAllBtn.disabled = true;
+    for (const form of forms) {
+        const resp = await saveAttendance(form);
+        if (!resp.ok) {
+            alert(resp.msg || 'Unable to save attendance.');
+            setSaveAllButtonState(saveAllBtn, 'default');
+            if (saveAllBtn) saveAllBtn.disabled = false;
+            updateGlobalStatus();
+            return false;
+        }
+        markSaved(form);
+    }
+    setSaveAllButtonState(saveAllBtn, 'saved');
+    updateGlobalStatus();
+    return true;
+}
+
 let pendingNavigation = null;
 
 function showUnsavedModal(continueFn) {
@@ -290,16 +357,8 @@ function showUnsavedModal(continueFn) {
 }
 
 async function saveAllAndContinue() {
-    const forms = Array.from(document.querySelectorAll('.attendance-form'))
-        .filter(f => f.dataset.dirty === "1");
-    for (const form of forms) {
-        const resp = await saveAttendance(form);
-        if (!resp.ok) {
-            alert(resp.msg || 'Unable to save attendance.');
-            return;
-        }
-        markSaved(form);
-    }
+    const ok = await saveAllForms();
+    if (!ok) return;
     const modalEl = document.getElementById('unsavedModal');
     bootstrap.Modal.getInstance(modalEl).hide();
     if (pendingNavigation) pendingNavigation();
@@ -313,6 +372,7 @@ function discardAndContinue() {
 }
 
 document.querySelectorAll('.attendance-form').forEach(form => {
+    form.dataset.dirty = "0";
     const saveBtn = form.querySelector('.save-btn');
     const allPresentBtn = form.querySelector('.all-present-btn');
     const clearBtn = form.querySelector('.clear-btn');
@@ -376,6 +436,12 @@ document.querySelectorAll('.attendance-form').forEach(form => {
     }
 });
 
+document.getElementById('saveAllBtn')?.addEventListener('click', () => {
+    saveAllForms().catch(() => {
+        alert('Unable to save all attendance.');
+    });
+});
+
 document.querySelector('form[method="get"]')?.addEventListener('submit', function (e) {
     if (hasUnsavedChanges()) {
         e.preventDefault();
@@ -399,6 +465,8 @@ window.addEventListener('beforeunload', function (e) {
     e.preventDefault();
     e.returnValue = '';
 });
+
+updateGlobalStatus();
 </script>
 
 <div class="modal fade" id="unsavedModal" tabindex="-1">
