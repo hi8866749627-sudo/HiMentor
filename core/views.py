@@ -5538,44 +5538,64 @@ def attendance_fill_status(request):
 
     module = _active_module(request)
     _ensure_active_timetable(module)
-    date_val = _parse_date_param(request.GET.get("date"), timezone.localdate())
-    day_of_week = date_val.weekday()
+    today = timezone.localdate()
+    start_date = _parse_date_param(request.GET.get("start_date"))
+    end_date = _parse_date_param(request.GET.get("end_date"))
+    if not start_date or not end_date:
+        start_date = today - timedelta(days=today.weekday())
+        end_date = start_date + timedelta(days=5)
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
 
-    expected_entries = TimetableEntry.objects.filter(module=module, day_of_week=day_of_week, is_active=True)
-    expected_map = {}
-    for entry in expected_entries:
-        faculty = (entry.faculty or "").strip().upper()
-        expected_map.setdefault(faculty, []).append(entry)
-
-    sessions = LectureSession.objects.filter(module=module, date=date_val)
-    session_map = {}
-    for sess in sessions:
-        faculty = (sess.faculty or "").strip().upper()
-        session_map.setdefault(faculty, []).append(sess)
-
-    rows = []
-    for faculty, entries in expected_map.items():
-        marked = session_map.get(faculty, [])
-        marked_keys = {(m.batch, m.lecture_no) for m in marked}
-        missing = [e for e in entries if (e.batch, e.lecture_no) not in marked_keys]
-        rows.append(
-            {
-                "faculty": faculty,
-                "expected": len(entries),
-                "marked": len(marked),
-                "pending": len(missing),
-                "missing": missing,
-            }
+    def _rows_for_date(date_val):
+        day_of_week = date_val.weekday()
+        expected_entries = TimetableEntry.objects.filter(
+            module=module, day_of_week=day_of_week, is_active=True
         )
+        expected_map = {}
+        for entry in expected_entries:
+            faculty = (entry.faculty or "").strip().upper()
+            expected_map.setdefault(faculty, []).append(entry)
 
-    rows.sort(key=lambda r: (r["pending"], r["faculty"]))
+        sessions = LectureSession.objects.filter(module=module, date=date_val)
+        session_map = {}
+        for sess in sessions:
+            faculty = (sess.faculty or "").strip().upper()
+            session_map.setdefault(faculty, []).append(sess)
+
+        rows = []
+        for faculty, entries in expected_map.items():
+            marked = session_map.get(faculty, [])
+            marked_keys = {(m.batch, m.lecture_no) for m in marked}
+            missing = [e for e in entries if (e.batch, e.lecture_no) not in marked_keys]
+            rows.append(
+                {
+                    "faculty": faculty,
+                    "expected": len(entries),
+                    "marked": len(marked),
+                    "pending": len(missing),
+                    "missing": missing,
+                }
+            )
+
+        rows.sort(key=lambda r: (r["pending"], r["faculty"]))
+        return rows
+
+    week_rows = []
+    cur = start_date
+    while cur <= end_date:
+        if cur.weekday() != 6:
+            week_rows.append({"date": cur, "rows": _rows_for_date(cur)})
+        cur += timedelta(days=1)
+
     return render(
         request,
         "attendance_fill_status.html",
         {
             "module": module,
-            "selected_date": date_val,
-            "rows": rows,
+            "start_date": start_date,
+            "end_date": end_date,
+            "week_rows": week_rows,
         },
     )
 
@@ -6114,21 +6134,42 @@ def daily_absent_live_pdf(request):
 
     doc = SimpleDocTemplate(
         response,
-        pagesize=landscape(A4),
-        leftMargin=12,
-        rightMargin=12,
-        topMargin=14,
-        bottomMargin=12,
+        pagesize=A4,
+        leftMargin=24,
+        rightMargin=24,
+        topMargin=18,
+        bottomMargin=18,
     )
     styles = getSampleStyleSheet()
-    story = [
-        Paragraph(f"Daily Absent Sheet - {module.name}", styles["Heading3"]),
-        Paragraph(date_val.strftime("%d %b %Y (%A)"), styles["Normal"]),
-        Spacer(1, 8),
-    ]
+    title_text = (
+        "L J Institute of Engineering and Technology<br/>"
+        f"{module.name} Lecture Daily Absent No.<br/>"
+        f"{date_val.strftime('%d-%B-%Y (%A)')}"
+    )
+    title_style = styles["Heading4"]
+    title_style.alignment = 1
+    title_style.textColor = colors.black
+    title_style.leading = 14
+    title_table = Table(
+        [[Paragraph(title_text, title_style)]],
+        colWidths=[doc.width],
+    )
+    title_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#9FE3E8")),
+                ("BOX", (0, 0), (-1, -1), 1.5, colors.black),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    story = [title_table, Spacer(1, 10)]
 
     for card in batch_cards:
-        story.append(Paragraph(f"Batch: {card['batch']}", styles["Heading4"]))
+        story.append(Paragraph(f"Batch: {card['batch']}", styles["Heading5"]))
         table_data = [
             ["Lec", "Time", "Subject", "Faculty", "Absent Nos.", "Absent", "Present"]
         ]
@@ -6150,10 +6191,12 @@ def daily_absent_live_pdf(request):
             TableStyle(
                 [
                     ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f3f5")),
-                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#d7dce1")),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd3da")),
                     ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
                 ]
             )
         )

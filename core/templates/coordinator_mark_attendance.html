@@ -174,7 +174,7 @@
                         <button type="button" class="btn btn-success btn-sm all-present-btn">All Present</button>
                         <button type="button" class="btn btn-outline-secondary btn-sm clear-btn">Clear</button>
                         <button type="button" class="btn btn-outline-secondary btn-sm copy-prev-btn">Copy Prev</button>
-                        <button type="button" class="btn btn-sm save-btn {% if slot.session %}btn-warning text-dark{% else %}btn-primary{% endif %}">{% if slot.session %}SAVED{% else %}Save{% endif %}</button>
+                        <button type="button" class="btn btn-sm save-btn {% if slot.session %}btn-warning text-dark{% else %}btn-primary{% endif %}">{% if slot.session %}Saved{% else %}Save{% endif %}</button>
                         <span class="small save-status align-self-center {% if slot.session %}text-success{% else %}text-success{% endif %}">All changes saved</span>
                     </div>
                 </div>
@@ -218,14 +218,45 @@ function updateGlobalStatus() {
     status.classList.toggle('text-success', !dirty);
 }
 
+function setSaveButtonState(saveBtn, state) {
+    if (!saveBtn) return;
+    saveBtn.classList.remove('btn-primary', 'btn-warning', 'text-dark', 'btn-secondary');
+    if (state === 'waiting') {
+        saveBtn.textContent = "Wait";
+        saveBtn.classList.add('btn-secondary');
+        return;
+    }
+    if (state === 'saved') {
+        saveBtn.textContent = "Saved";
+        saveBtn.classList.add('btn-warning', 'text-dark');
+        return;
+    }
+    saveBtn.textContent = "Save";
+    saveBtn.classList.add('btn-primary');
+}
+
+function setSaveAllButtonState(saveAllBtn, state) {
+    if (!saveAllBtn) return;
+    saveAllBtn.classList.remove('btn-primary', 'btn-warning', 'text-dark', 'btn-secondary');
+    if (state === 'waiting') {
+        saveAllBtn.textContent = "Wait";
+        saveAllBtn.classList.add('btn-secondary');
+        return;
+    }
+    if (state === 'saved') {
+        saveAllBtn.textContent = "Saved";
+        saveAllBtn.classList.add('btn-warning', 'text-dark');
+        return;
+    }
+    saveAllBtn.textContent = "Save All";
+    saveAllBtn.classList.add('btn-primary');
+}
+
 function markDirty(form) {
     form.dataset.dirty = "1";
     const saveBtn = form.querySelector('.save-btn');
-    if (saveBtn) {
-        saveBtn.textContent = "Save";
-        saveBtn.classList.remove('btn-warning', 'text-dark');
-        saveBtn.classList.add('btn-primary');
-    }
+    setSaveButtonState(saveBtn, 'default');
+    setSaveAllButtonState(document.getElementById('saveAllBtn'), 'default');
     const status = form.querySelector('.save-status');
     if (status) {
         status.textContent = "Unsaved changes";
@@ -238,11 +269,7 @@ function markDirty(form) {
 function markSaved(form) {
     form.dataset.dirty = "0";
     const saveBtn = form.querySelector('.save-btn');
-    if (saveBtn) {
-        saveBtn.textContent = "SAVED";
-        saveBtn.classList.remove('btn-primary');
-        saveBtn.classList.add('btn-warning', 'text-dark');
-    }
+    setSaveButtonState(saveBtn, 'saved');
     const status = form.querySelector('.save-status');
     if (status) {
         status.textContent = "All changes saved";
@@ -274,15 +301,21 @@ function saveAttendance(form, rollButtons) {
 async function saveAllForms() {
     const forms = Array.from(document.querySelectorAll('.attendance-form'))
         .filter(f => f.dataset.dirty === "1");
+    const saveAllBtn = document.getElementById('saveAllBtn');
+    setSaveAllButtonState(saveAllBtn, 'waiting');
+    if (saveAllBtn) saveAllBtn.disabled = true;
     for (const form of forms) {
         const rollButtons = Array.from(form.querySelectorAll('.roll-btn'));
         const resp = await saveAttendance(form, rollButtons);
         if (!resp.ok) {
             alert(resp.msg || 'Unable to save attendance.');
+            setSaveAllButtonState(saveAllBtn, 'default');
+            if (saveAllBtn) saveAllBtn.disabled = false;
             return;
         }
         markSaved(form);
     }
+    setSaveAllButtonState(saveAllBtn, 'saved');
 }
 
 document.querySelectorAll('.attendance-form').forEach(form => {
@@ -325,14 +358,21 @@ document.querySelectorAll('.attendance-form').forEach(form => {
     });
 
     saveBtn.addEventListener('click', () => {
+        setSaveButtonState(saveBtn, 'waiting');
+        saveBtn.disabled = true;
         saveAttendance(form, rollButtons).then(resp => {
             if (!resp.ok) {
                 alert(resp.msg || 'Unable to save attendance.');
+                setSaveButtonState(saveBtn, 'default');
+                saveBtn.disabled = false;
                 return;
             }
             markSaved(form);
+            saveBtn.disabled = false;
         }).catch(() => {
             alert('Unable to save attendance.');
+            setSaveButtonState(saveBtn, 'default');
+            saveBtn.disabled = false;
         });
     });
 });

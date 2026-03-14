@@ -188,7 +188,7 @@
                             <span class="text-muted small align-self-center">Proxy assigned. Attendance can be marked by {{ slot.adjustment.proxy_faculty.name }}.</span>
                         {% else %}
                             <button type="button" class="btn btn-success btn-sm all-present-btn">All Present</button>
-                            <button type="button" class="btn btn-sm save-btn {% if slot.session %}btn-warning text-dark{% else %}btn-primary{% endif %}">{% if slot.session %}SAVED{% else %}Save{% endif %}</button>
+                            <button type="button" class="btn btn-sm save-btn {% if slot.session %}btn-warning text-dark{% else %}btn-primary{% endif %}">{% if slot.session %}Saved{% else %}Save{% endif %}</button>
                             <span class="text-success small {% if not slot.session %}d-none{% endif %} save-status align-self-center">All changes saved</span>
                         {% endif %}
                     </div>
@@ -220,14 +220,27 @@ function hasUnsavedChanges() {
         .some(form => form.dataset.dirty === "1");
 }
 
+function setSaveButtonState(saveBtn, state) {
+    if (!saveBtn) return;
+    saveBtn.classList.remove('btn-primary', 'btn-warning', 'text-dark', 'btn-secondary');
+    if (state === 'waiting') {
+        saveBtn.textContent = "Wait";
+        saveBtn.classList.add('btn-secondary');
+        return;
+    }
+    if (state === 'saved') {
+        saveBtn.textContent = "Saved";
+        saveBtn.classList.add('btn-warning', 'text-dark');
+        return;
+    }
+    saveBtn.textContent = "Save";
+    saveBtn.classList.add('btn-primary');
+}
+
 function markDirty(form) {
     form.dataset.dirty = "1";
     const saveBtn = form.querySelector('.save-btn');
-    if (saveBtn) {
-        saveBtn.textContent = "Save";
-        saveBtn.classList.remove('btn-warning', 'text-dark');
-        saveBtn.classList.add('btn-primary');
-    }
+    setSaveButtonState(saveBtn, 'default');
     const status = form.querySelector('.save-status');
     if (status) status.classList.add('d-none');
 }
@@ -235,11 +248,7 @@ function markDirty(form) {
 function markSaved(form) {
     form.dataset.dirty = "0";
     const saveBtn = form.querySelector('.save-btn');
-    if (saveBtn) {
-        saveBtn.textContent = "SAVED";
-        saveBtn.classList.remove('btn-primary');
-        saveBtn.classList.add('btn-warning', 'text-dark');
-    }
+    setSaveButtonState(saveBtn, 'saved');
     const status = form.querySelector('.save-status');
     if (status) {
         status.textContent = "All changes saved";
@@ -321,12 +330,21 @@ document.querySelectorAll('.attendance-form').forEach(form => {
 
     if (saveBtn) {
         saveBtn.addEventListener('click', () => {
+            setSaveButtonState(saveBtn, 'waiting');
+            saveBtn.disabled = true;
             saveAttendance(form).then(resp => {
                 if (!resp.ok) {
                     alert(resp.msg || 'Unable to save attendance.');
+                    setSaveButtonState(saveBtn, 'default');
+                    saveBtn.disabled = false;
                     return;
                 }
                 markSaved(form);
+                saveBtn.disabled = false;
+            }).catch(() => {
+                alert('Unable to save attendance.');
+                setSaveButtonState(saveBtn, 'default');
+                saveBtn.disabled = false;
             });
         });
     }
