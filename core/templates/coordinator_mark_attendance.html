@@ -56,6 +56,11 @@
 .roll-grid-compact .btn-success {
     color: #fff;
 }
+.roll-grid-compact .btn-outline-success {
+    background: #fff;
+    border-color: #198754;
+    color: #198754;
+}
 .slot-actions {
     display: flex;
     flex-wrap: wrap;
@@ -155,7 +160,7 @@
                     <div class="roll-grid-compact">
                         {% for s in batch.students %}
                         <button type="button"
-                                class="btn btn-sm roll-btn {% if s.roll_no in slot.absent_rolls %}btn-danger{% else %}btn-success{% endif %}"
+                                class="btn btn-sm roll-btn {% if slot.session %}{% if s.roll_no in slot.absent_rolls %}btn-danger{% else %}btn-success{% endif %}{% else %}btn-outline-success{% endif %}"
                                 data-roll="{{ s.roll_no }}"
                                 data-absent="{% if s.roll_no in slot.absent_rolls %}1{% else %}0{% endif %}">
                             {{ s.roll_no }}
@@ -185,10 +190,11 @@ function getCsrfToken(form) {
     return input ? input.value : '';
 }
 
-function setRollState(btn, absent) {
+function setRollState(btn, absent, present) {
     btn.dataset.absent = absent ? "1" : "0";
     btn.classList.toggle('btn-danger', absent);
-    btn.classList.toggle('btn-success', !absent);
+    btn.classList.toggle('btn-success', !absent && !!present);
+    btn.classList.toggle('btn-outline-success', !absent && !present);
 }
 
 function hasUnsavedChanges() {
@@ -238,6 +244,8 @@ function markSaved(form) {
         status.classList.remove('text-warning');
         status.classList.add('text-success');
     }
+    const rollButtons = Array.from(form.querySelectorAll('.roll-btn'));
+    rollButtons.forEach(btn => setRollState(btn, btn.dataset.absent === "1", true));
     updateGlobalStatus();
 }
 
@@ -281,7 +289,7 @@ document.querySelectorAll('.attendance-form').forEach(form => {
     const slotCard = form.closest('.slot-card');
 
     allPresentBtn.addEventListener('click', () => {
-        rollButtons.forEach(btn => setRollState(btn, false));
+        rollButtons.forEach(btn => setRollState(btn, false, true));
         markDirty(form);
     });
 
@@ -291,14 +299,15 @@ document.querySelectorAll('.attendance-form').forEach(form => {
             if (!prevCard) return;
             const prevButtons = Array.from(prevCard.querySelectorAll('.roll-btn'));
             const prevAbsent = new Set(prevButtons.filter(btn => btn.dataset.absent === "1").map(btn => btn.dataset.roll));
-            rollButtons.forEach(btn => setRollState(btn, prevAbsent.has(btn.dataset.roll)));
+            rollButtons.forEach(btn => setRollState(btn, prevAbsent.has(btn.dataset.roll), !prevAbsent.has(btn.dataset.roll)));
             markDirty(form);
         });
     }
 
     rollButtons.forEach(btn => {
         btn.addEventListener('click', () => {
-            setRollState(btn, btn.dataset.absent !== "1");
+            const nextAbsent = btn.dataset.absent !== "1";
+            setRollState(btn, nextAbsent, false);
             markDirty(form);
         });
     });

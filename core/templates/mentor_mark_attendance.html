@@ -51,6 +51,11 @@
 .roll-grid-compact .btn-success {
     color: #fff;
 }
+.roll-grid-compact .btn-outline-success {
+    background: #fff;
+    border-color: #198754;
+    color: #198754;
+}
 .slot-actions {
     display: flex;
     flex-wrap: wrap;
@@ -169,7 +174,7 @@
                     <div class="roll-grid-compact">
                         {% for s in batch.students %}
                         <button type="button"
-                                class="btn btn-sm roll-btn {% if s.roll_no in slot.absent_rolls %}btn-danger{% else %}btn-success{% endif %}"
+                                class="btn btn-sm roll-btn {% if slot.session %}{% if s.roll_no in slot.absent_rolls %}btn-danger{% else %}btn-success{% endif %}{% else %}btn-outline-success{% endif %}"
                                 data-roll="{{ s.roll_no }}"
                                 data-absent="{% if s.roll_no in slot.absent_rolls %}1{% else %}0{% endif %}"
                                 {% if slot.adjustment and slot.adjustment.proxy_faculty and slot.adjustment.proxy_faculty.name != mentor.name %}disabled{% endif %}>
@@ -203,6 +208,13 @@ function getCsrfToken(form) {
     return input ? input.value : '';
 }
 
+function setRollState(btn, absent, present) {
+    btn.dataset.absent = absent ? "1" : "0";
+    btn.classList.toggle('btn-danger', absent);
+    btn.classList.toggle('btn-success', !absent && !!present);
+    btn.classList.toggle('btn-outline-success', !absent && !present);
+}
+
 function hasUnsavedChanges() {
     return Array.from(document.querySelectorAll('.attendance-form'))
         .some(form => form.dataset.dirty === "1");
@@ -233,6 +245,8 @@ function markSaved(form) {
         status.textContent = "All changes saved";
         status.classList.remove('d-none');
     }
+    const rollButtons = Array.from(form.querySelectorAll('.roll-btn'));
+    rollButtons.forEach(btn => setRollState(btn, btn.dataset.absent === "1", true));
 }
 
 function buildFormData(form) {
@@ -292,28 +306,15 @@ document.querySelectorAll('.attendance-form').forEach(form => {
 
     if (allPresentBtn) {
         allPresentBtn.addEventListener('click', () => {
-            rollButtons.forEach(btn => {
-                btn.dataset.absent = "0";
-                btn.classList.remove('btn-danger');
-                btn.classList.add('btn-success');
-            });
+            rollButtons.forEach(btn => setRollState(btn, false, true));
             markDirty(form);
-            saveBtn.click();
         });
     }
 
     rollButtons.forEach(btn => {
         btn.addEventListener('click', () => {
-            const isAbsent = btn.dataset.absent === "1";
-            if (isAbsent) {
-                btn.dataset.absent = "0";
-                btn.classList.remove('btn-danger');
-                btn.classList.add('btn-success');
-            } else {
-                btn.dataset.absent = "1";
-                btn.classList.remove('btn-success');
-                btn.classList.add('btn-danger');
-            }
+            const nextAbsent = btn.dataset.absent !== "1";
+            setRollState(btn, nextAbsent, false);
             markDirty(form);
         });
     });
