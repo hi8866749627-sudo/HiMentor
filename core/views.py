@@ -5316,6 +5316,107 @@ def _create_swap_adjustments(module, selected_date, entry_a, entry_b, created_by
             "swap_time_slot": entry_b.time_slot,
         },
     )
+    LectureAdjustment.objects.update_or_create(
+        module=module,
+        date=selected_date,
+        batch=entry_b.batch,
+        lecture_no=entry_b.lecture_no,
+        defaults={
+            **defaults_common,
+            "timetable_entry": entry_b,
+            "time_slot": entry_a.time_slot,
+            "subject": entry_b.subject,
+            "original_faculty": entry_b.faculty,
+            "room": entry_b.room,
+            "swap_batch": entry_a.batch,
+            "swap_lecture_no": entry_a.lecture_no,
+            "swap_time_slot": entry_a.time_slot,
+        },
+    )
+    _sync_existing_session(
+        module,
+        selected_date,
+        entry_a.batch,
+        entry_a.lecture_no,
+        timetable_entry=entry_a,
+        day_of_week=selected_date.weekday(),
+        time_slot=entry_b.time_slot,
+        subject=entry_a.subject,
+        faculty=entry_a.faculty,
+        room=entry_a.room,
+    )
+    _sync_existing_session(
+        module,
+        selected_date,
+        entry_b.batch,
+        entry_b.lecture_no,
+        timetable_entry=entry_b,
+        day_of_week=selected_date.weekday(),
+        time_slot=entry_a.time_slot,
+        subject=entry_b.subject,
+        faculty=entry_b.faculty,
+        room=entry_b.room,
+    )
+    _trigger_weekly_recompute_for_date(module, selected_date)
+
+
+def _sync_existing_session(
+    module,
+    selected_date,
+    batch,
+    lecture_no,
+    *,
+    timetable_entry=None,
+    day_of_week=None,
+    time_slot=None,
+    subject=None,
+    faculty=None,
+    room=None,
+):
+    session = LectureSession.objects.filter(
+        module=module,
+        date=selected_date,
+        lecture_no=lecture_no,
+        batch=batch,
+    ).first()
+    if not session:
+        return None
+
+    update_fields = []
+    updates = {
+        "timetable_entry": timetable_entry,
+        "day_of_week": day_of_week,
+        "time_slot": time_slot,
+        "subject": subject,
+        "faculty": faculty,
+        "room": room,
+    }
+    for field_name, field_value in updates.items():
+        if field_value is None:
+            continue
+        if getattr(session, field_name) != field_value:
+            setattr(session, field_name, field_value)
+            update_fields.append(field_name)
+    if update_fields:
+        session.save(update_fields=update_fields + ["updated_at"])
+    return session
+
+
+def _trigger_weekly_recompute_for_date(module, selected_date):
+    calendar = _calendar_for_module(module)
+    phase, week_no = week_for_date(calendar, selected_date)
+    if not phase or not week_no:
+        return
+    normalized_week = _normalize_week_no(phase, week_no)
+    if _attendance_lock_for_module_week(module, normalized_week):
+        return
+    if _has_manual_week(module, normalized_week):
+        return
+    threading.Thread(
+        target=_recompute_weekly_attendance_async,
+        kwargs={"module_id": module.id, "phase": phase, "week_no": week_no},
+        daemon=True,
+    ).start()
 
 
 def _build_adjustment_rows(module, selected_date, faculty_filter="", exclude_proxy_name=""):
@@ -5442,23 +5543,6 @@ def _build_adjustment_rows(module, selected_date, faculty_filter="", exclude_pro
             }
         )
     return rows, faculty_choices
-    LectureAdjustment.objects.update_or_create(
-        module=module,
-        date=selected_date,
-        batch=entry_b.batch,
-        lecture_no=entry_b.lecture_no,
-        defaults={
-            **defaults_common,
-            "timetable_entry": entry_b,
-            "time_slot": entry_a.time_slot,
-            "subject": entry_b.subject,
-            "original_faculty": entry_b.faculty,
-            "room": entry_b.room,
-            "swap_batch": entry_a.batch,
-            "swap_lecture_no": entry_a.lecture_no,
-            "swap_time_slot": entry_a.time_slot,
-        },
-    )
 
 
 def _build_attendance_batch_rows(module, selected_date, mentor=None, allow_override=False, prefill_absent=True):
@@ -5765,10 +5849,6 @@ def coordinator_load_adjustment(request):
                 messages.error(request, "Lecture not found.")
                 return redirect(f"/coordinator-load-adjustment/?date={selected_date:%Y-%m-%d}")
 
-            if _slot_has_started(selected_date, entry.time_slot):
-                messages.error(request, "Lecture already started. Adjustment not allowed.")
-                return redirect(f"/coordinator-load-adjustment/?date={selected_date:%Y-%m-%d}")
-
             proxy = Mentor.objects.filter(name__iexact=proxy_name).first()
             if not proxy:
                 messages.error(request, "Select a valid proxy faculty.")
@@ -5798,7 +5878,7 @@ def coordinator_load_adjustment(request):
                 .first()
             )
             created_by = Mentor.objects.filter(name__iexact=request.user.username).first()
-            LectureAdjustment.objects.update_or_create(
+            adjustment, _ = LectureAdjustment.objects.update_or_create(
                 module=module,
                 date=selected_date,
                 batch=entry.batch,
@@ -5823,6 +5903,19 @@ def coordinator_load_adjustment(request):
                     "cancelled_at": None,
                 },
             )
+            _sync_existing_session(
+                module,
+                selected_date,
+                entry.batch,
+                entry.lecture_no,
+                timetable_entry=entry,
+                day_of_week=selected_date.weekday(),
+                time_slot=entry.time_slot,
+                subject=adjustment.subject,
+                faculty=proxy.name,
+                room=room,
+            )
+            _trigger_weekly_recompute_for_date(module, selected_date)
             messages.success(request, "Proxy assigned.")
         elif action == "create_swap":
             entry_id = request.POST.get("entry_id")
@@ -5842,9 +5935,6 @@ def coordinator_load_adjustment(request):
             ).exclude(id=entry_id).first()
             if not entry or not partner:
                 messages.error(request, "Select valid lectures to swap.")
-                return redirect(f"/coordinator-load-adjustment/?date={selected_date:%Y-%m-%d}")
-            if _slot_has_started(selected_date, entry.time_slot) or _slot_has_started(selected_date, partner.time_slot):
-                messages.error(request, "Lecture already started. Swap not allowed.")
                 return redirect(f"/coordinator-load-adjustment/?date={selected_date:%Y-%m-%d}")
             active_keys = {
                 (a.batch, a.lecture_no)
