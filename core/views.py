@@ -6611,11 +6611,12 @@ def weekly_attendance_live(request):
     held_by_batch_subject = {}
     held_by_batch = {}
     for s in sessions:
-        held_by_batch.setdefault(s.batch, 0)
-        held_by_batch[s.batch] += 1
+        batch_key = _norm_batch_key(s.batch)
+        held_by_batch.setdefault(batch_key, 0)
+        held_by_batch[batch_key] += 1
         subj = _canonical_subject_name(module, s.subject, alias_map)
-        held_by_batch_subject.setdefault(s.batch, {}).setdefault(subj, 0)
-        held_by_batch_subject[s.batch][subj] += 1
+        held_by_batch_subject.setdefault(batch_key, {}).setdefault(subj, 0)
+        held_by_batch_subject[batch_key][subj] += 1
 
     absent_by_student_subject = {}
     absent_by_student = {}
@@ -6630,15 +6631,15 @@ def weekly_attendance_live(request):
 
     rows = []
     for student in students:
-        batch = student.batch or ""
-        held_total = held_by_batch.get(batch, 0)
+        batch_keys = _student_batch_keys(student)
+        held_total = sum(held_by_batch.get(key, 0) for key in batch_keys)
         absent_total = absent_by_student.get(student.id, 0)
         attended_total = max(held_total - absent_total, 0)
         overall_pct = round((attended_total / held_total) * 100, 2) if held_total else 0
 
         subject_rows = []
         for subj in subject_list:
-            held = held_by_batch_subject.get(batch, {}).get(subj, 0)
+            held = sum(held_by_batch_subject.get(key, {}).get(subj, 0) for key in batch_keys)
             absent = absent_by_student_subject.get(student.id, {}).get(subj, 0)
             attended = max(held - absent, 0)
             pct = round((attended / held) * 100, 2) if held else 0
@@ -6665,6 +6666,8 @@ def weekly_attendance_live(request):
             "week_list": week_list,
             "subject_list": subject_list,
             "rows": rows,
+            "range_start": start,
+            "range_end": range_end,
         },
     )
 

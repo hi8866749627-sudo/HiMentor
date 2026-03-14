@@ -1,6 +1,42 @@
 {% extends "base.html" %}
 {% block content %}
 
+<style>
+.weekly-live-card .table {
+    table-layout: auto;
+    white-space: nowrap;
+}
+.weekly-live-card th,
+.weekly-live-card td {
+    padding: .55rem .7rem;
+    vertical-align: middle;
+}
+.weekly-live-card thead th {
+    background: #f8fafc;
+}
+.weekly-live-card .subject-group-even {
+    background: #f8fbff;
+}
+.weekly-live-card .subject-group-odd {
+    background: #eef6ff;
+}
+.weekly-live-card .attendance-group {
+    background: #fff7ed;
+}
+.weekly-live-range {
+    color: #0b5ed7;
+    font-weight: 700;
+}
+.weekly-live-card .col-roll { min-width: 56px; }
+.weekly-live-card .col-enroll { min-width: 150px; }
+.weekly-live-card .col-branch { min-width: 72px; }
+.weekly-live-card .col-div { min-width: 60px; }
+.weekly-live-card .col-student { min-width: 280px; }
+.weekly-live-card .col-mentor { min-width: 90px; }
+.weekly-live-card .metric-col { min-width: 54px; }
+.weekly-live-card .percent-col { min-width: 72px; }
+</style>
+
 <h4 class="mb-3">Weekly Attendance (Live)</h4>
 
 {% if message %}
@@ -37,35 +73,38 @@
 <div class="card mb-3">
     <div class="card-body">
         <div class="fw-bold">{{ module.name }}</div>
+        {% if range_start and range_end %}
+        <div class="weekly-live-range small mt-1">Data counted from {{ range_start|date:"d M Y" }} to {{ range_end|date:"d M Y" }}</div>
+        {% endif %}
     </div>
 </div>
 
-<div class="card">
+<div class="card weekly-live-card">
     <div class="card-body p-0">
         <div class="table-responsive">
             <table class="table table-sm table-hover mb-0">
                 <thead>
                     <tr>
-                        <th rowspan="2">Roll</th>
-                        <th rowspan="2">Enrollment</th>
-                        <th rowspan="2">Branch</th>
-                        <th rowspan="2">Div</th>
-                        <th rowspan="2">Student Name</th>
-                        <th rowspan="2">Mentor</th>
+                        <th rowspan="2" class="col-roll">Roll</th>
+                        <th rowspan="2" class="col-enroll">Enrollment</th>
+                        <th rowspan="2" class="col-branch">Branch</th>
+                        <th rowspan="2" class="col-div">Div</th>
+                        <th rowspan="2" class="col-student">Student Name</th>
+                        <th rowspan="2" class="col-mentor">Mentor</th>
                         {% for subj in subject_list %}
-                        <th colspan="3" class="text-center">{{ subj }}</th>
+                        <th colspan="3" class="text-center {% cycle 'subject-group-even' 'subject-group-odd' %}">{{ subj }}</th>
                         {% endfor %}
-                        <th colspan="3" class="text-center">Attendance</th>
+                        <th colspan="3" class="text-center attendance-group">Attendance</th>
                     </tr>
                     <tr>
                         {% for subj in subject_list %}
-                        <th class="text-end">A</th>
-                        <th class="text-end">B</th>
-                        <th class="text-end">%</th>
+                        <th class="text-center metric-col {% cycle 'subject-group-even' 'subject-group-odd' %}">Present</th>
+                        <th class="text-center metric-col {% cycle 'subject-group-even' 'subject-group-odd' %}">Total</th>
+                        <th class="text-center percent-col {% cycle 'subject-group-even' 'subject-group-odd' %}">%</th>
                         {% endfor %}
-                        <th class="text-end">A</th>
-                        <th class="text-end">B</th>
-                        <th class="text-end">%</th>
+                        <th class="text-center metric-col attendance-group">Present</th>
+                        <th class="text-center metric-col attendance-group">Total</th>
+                        <th class="text-center percent-col attendance-group">%</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -78,13 +117,13 @@
                         <td>{{ row.student.name }}</td>
                         <td>{{ row.student.mentor.name }}</td>
                         {% for cell in row.subjects %}
-                        <td class="text-end">{{ cell.attended }}</td>
-                        <td class="text-end">{{ cell.held }}</td>
-                        <td class="text-end">{{ cell.percent }}</td>
+                        <td class="text-center {% cycle 'subject-group-even' 'subject-group-odd' %}">{{ cell.attended }}</td>
+                        <td class="text-center {% cycle 'subject-group-even' 'subject-group-odd' %}">{{ cell.held }}</td>
+                        <td class="text-center {% cycle 'subject-group-even' 'subject-group-odd' %}">{{ cell.percent }}</td>
                         {% endfor %}
-                        <td class="text-end">{{ row.attended_total }}</td>
-                        <td class="text-end">{{ row.held_total }}</td>
-                        <td class="text-end">{{ row.overall_pct }}</td>
+                        <td class="text-center attendance-group">{{ row.attended_total }}</td>
+                        <td class="text-center attendance-group">{{ row.held_total }}</td>
+                        <td class="text-center attendance-group">{{ row.overall_pct }}</td>
                     </tr>
                 {% empty %}
                     <tr><td colspan="12" class="text-center text-muted">No students found.</td></tr>
