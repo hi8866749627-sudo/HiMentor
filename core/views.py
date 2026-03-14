@@ -4209,6 +4209,24 @@ def recompute_weekly_attendance_from_daily(module, phase, week_no):
     return updated, None
 
 
+def _recompute_weekly_attendance_async(module_id, phase, week_no):
+    close_old_connections()
+    try:
+        module = AcademicModule.objects.filter(id=module_id, is_active=True).first()
+        if not module:
+            return
+        normalized_week = _normalize_week_no(phase, week_no)
+        if _attendance_lock_for_module_week(module, normalized_week):
+            return
+        if _has_manual_week(module, normalized_week):
+            return
+        recompute_weekly_attendance_from_daily(module, phase, week_no)
+    except Exception:
+        pass
+    finally:
+        close_old_connections()
+
+
 @login_required
 def upload_timetable(request):
     if request.session.get("mentor"):
@@ -5229,6 +5247,15 @@ def _build_attendance_batch_rows(module, selected_date, mentor=None, allow_overr
                 }
             )
         slots.sort(key=lambda s: (_slot_sort_key(s["entry"].time_slot), s["entry"].lecture_no))
+        previous_slot = None
+        for slot in slots:
+            can_copy_prev = False
+            if previous_slot:
+                prev_lecture = previous_slot["entry"].lecture_no
+                curr_lecture = slot["entry"].lecture_no
+                can_copy_prev = bool(prev_lecture and curr_lecture and curr_lecture == prev_lecture + 1)
+            slot["can_copy_prev"] = can_copy_prev
+            previous_slot = slot
         batch_rows.append({"batch": batch, "students": students, "slots": slots})
     batch_rows.sort(key=lambda row: row["batch"])
     return batch_rows
@@ -5977,7 +6004,11 @@ def save_lecture_attendance(request):
     if phase and week_no:
         normalized_week = _normalize_week_no(phase, week_no)
         if not _attendance_lock_for_module_week(module, normalized_week) and not _has_manual_week(module, normalized_week):
-            recompute_weekly_attendance_from_daily(module, phase, week_no)
+            threading.Thread(
+                target=_recompute_weekly_attendance_async,
+                kwargs={"module_id": module.id, "phase": phase, "week_no": week_no},
+                daemon=True,
+            ).start()
 
     return JsonResponse({"ok": True})
 

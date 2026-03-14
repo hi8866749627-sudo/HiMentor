@@ -36,16 +36,16 @@
 .roll-grid-compact {
     display: grid;
     grid-template-columns: repeat(16, minmax(0, 1fr));
-    gap: .28rem;
+    gap: .32rem;
     min-width: 0;
     max-width: 100%;
 }
 .roll-grid-compact .roll-btn {
     width: 100%;
     min-width: 0;
-    padding: .28rem .2rem;
+    padding: .42rem .2rem;
     line-height: 1.15;
-    font-size: .84rem;
+    font-size: .9rem;
     border-radius: .35rem;
 }
 .roll-grid-compact .btn-success {
@@ -74,7 +74,7 @@
         grid-template-columns: 1fr;
     }
     .roll-grid-compact {
-        grid-template-columns: repeat(10, minmax(0, 1fr));
+        grid-template-columns: repeat(8, minmax(0, 1fr));
     }
     .slot-actions {
         justify-content: flex-start;
@@ -89,26 +89,21 @@
         <label class="form-label">Date</label>
         <input type="date" name="date" class="form-control" value="{{ selected_date|date:'Y-m-d' }}">
     </div>
-    <input type="hidden" name="dept" value="{{ dept_filter|default:'ALL' }}">
+    <div class="col-md-3">
+        <label class="form-label">Department</label>
+        <select name="dept" class="form-select">
+            <option value="ALL" {% if dept_filter|default:'ALL' == 'ALL' %}selected{% endif %}>All</option>
+            <option value="FY1" {% if dept_filter == 'FY1' %}selected{% endif %}>FY1</option>
+            <option value="FY2" {% if dept_filter == 'FY2' %}selected{% endif %}>FY2</option>
+            <option value="FY3" {% if dept_filter == 'FY3' %}selected{% endif %}>FY3</option>
+            <option value="FY4" {% if dept_filter == 'FY4' %}selected{% endif %}>FY4</option>
+            <option value="FY5" {% if dept_filter == 'FY5' %}selected{% endif %}>FY5</option>
+        </select>
+    </div>
     <div class="col-md-2">
         <button class="btn btn-primary" type="submit">Show</button>
     </div>
 </form>
-
-<div class="btn-group mb-3" role="group" aria-label="Department filter">
-    <a class="btn btn-sm {% if dept_filter|default:'ALL' == 'ALL' %}btn-primary{% else %}btn-outline-primary{% endif %}"
-       href="?date={{ selected_date|date:'Y-m-d' }}&dept=ALL">All</a>
-    <a class="btn btn-sm {% if dept_filter == 'FY1' %}btn-primary{% else %}btn-outline-primary{% endif %}"
-       href="?date={{ selected_date|date:'Y-m-d' }}&dept=FY1">FY1</a>
-    <a class="btn btn-sm {% if dept_filter == 'FY2' %}btn-primary{% else %}btn-outline-primary{% endif %}"
-       href="?date={{ selected_date|date:'Y-m-d' }}&dept=FY2">FY2</a>
-    <a class="btn btn-sm {% if dept_filter == 'FY3' %}btn-primary{% else %}btn-outline-primary{% endif %}"
-       href="?date={{ selected_date|date:'Y-m-d' }}&dept=FY3">FY3</a>
-    <a class="btn btn-sm {% if dept_filter == 'FY4' %}btn-primary{% else %}btn-outline-primary{% endif %}"
-       href="?date={{ selected_date|date:'Y-m-d' }}&dept=FY4">FY4</a>
-    <a class="btn btn-sm {% if dept_filter == 'FY5' %}btn-primary{% else %}btn-outline-primary{% endif %}"
-       href="?date={{ selected_date|date:'Y-m-d' }}&dept=FY5">FY5</a>
-</div>
 
 {% if has_inactive_calendar %}
 <div class="alert alert-warning">Academic calendar is inactive for some departments. Attendance marking may be paused.</div>
@@ -179,7 +174,7 @@
                     <div class="roll-grid-compact">
                         {% for s in batch.students %}
                         <button type="button"
-                                class="btn btn-sm roll-btn {% if slot.session %}{% if s.roll_no in slot.absent_rolls %}btn-danger{% else %}btn-success{% endif %}{% else %}btn-outline-success{% endif %}"
+                                class="btn btn-sm roll-btn {% if s.roll_no in slot.absent_rolls %}btn-danger{% else %}btn-success{% endif %}"
                                 data-roll="{{ s.roll_no }}"
                                 data-absent="{% if s.roll_no in slot.absent_rolls %}1{% else %}0{% endif %}"
                                 {% if slot.adjustment and slot.adjustment.proxy_faculty and slot.adjustment.proxy_faculty.name != mentor.name %}disabled{% endif %}>
@@ -193,6 +188,10 @@
                             <span class="text-muted small align-self-center">Proxy assigned. Attendance can be marked by {{ slot.adjustment.proxy_faculty.name }}.</span>
                         {% else %}
                             <button type="button" class="btn btn-success btn-sm all-present-btn">All Present</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm clear-btn">Clear</button>
+                            {% if slot.can_copy_prev %}
+                            <button type="button" class="btn btn-outline-secondary btn-sm copy-prev-btn">Copy Prev</button>
+                            {% endif %}
                             <button type="button" class="btn btn-sm save-btn {% if slot.session %}btn-warning text-dark{% else %}btn-primary{% endif %}">{% if slot.session %}Saved{% else %}Save{% endif %}</button>
                             <span class="text-success small {% if not slot.session %}d-none{% endif %} save-status align-self-center">All changes saved</span>
                         {% endif %}
@@ -316,12 +315,33 @@ function discardAndContinue() {
 document.querySelectorAll('.attendance-form').forEach(form => {
     const saveBtn = form.querySelector('.save-btn');
     const allPresentBtn = form.querySelector('.all-present-btn');
+    const clearBtn = form.querySelector('.clear-btn');
+    const copyPrevBtn = form.querySelector('.copy-prev-btn');
     const status = form.querySelector('.save-status');
-    const rollButtons = form.querySelectorAll('.roll-btn');
+    const rollButtons = Array.from(form.querySelectorAll('.roll-btn'));
+    const slotCard = form.closest('.slot-card');
 
     if (allPresentBtn) {
         allPresentBtn.addEventListener('click', () => {
             rollButtons.forEach(btn => setRollState(btn, false, true));
+            markDirty(form);
+        });
+    }
+
+    if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+            rollButtons.forEach(btn => setRollState(btn, false, false));
+            markDirty(form);
+        });
+    }
+
+    if (copyPrevBtn) {
+        copyPrevBtn.addEventListener('click', () => {
+            const prevCard = slotCard ? slotCard.previousElementSibling : null;
+            if (!prevCard) return;
+            const prevButtons = Array.from(prevCard.querySelectorAll('.roll-btn'));
+            const prevAbsent = new Set(prevButtons.filter(btn => btn.dataset.absent === "1").map(btn => btn.dataset.roll));
+            rollButtons.forEach(btn => setRollState(btn, prevAbsent.has(btn.dataset.roll), !prevAbsent.has(btn.dataset.roll)));
             markDirty(form);
         });
     }
