@@ -6210,22 +6210,66 @@ def _build_adjustment_rows(
             .exclude(room="")
             .values_list("room", flat=True)
         )
-        used_rooms |= set(
-            LectureAdjustment.objects.filter(
-                module=module, date=selected_date, lecture_no=entry.lecture_no, status=LectureAdjustment.STATUS_ACTIVE
-            ).exclude(room="").values_list("room", flat=True)
-        )
-        if adj and adj.adjustment_type == LectureAdjustment.TYPE_ROOM and entry.room:
-            used_rooms.discard(entry.room)
+        slot_adjustments = [
+            item
+            for item in active_adjustments
+            if item.lecture_no == entry.lecture_no and item.status == LectureAdjustment.STATUS_ACTIVE
+        ]
+        for item in slot_adjustments:
+            old_room = ""
+            if item.timetable_entry and item.timetable_entry.room:
+                old_room = item.timetable_entry.room
+            elif item.batch:
+                old_room = (
+                    TimetableEntry.objects.filter(
+                        module=module,
+                        day_of_week=day_of_week,
+                        lecture_no=entry.lecture_no,
+                        batch=item.batch,
+                        is_active=True,
+                    )
+                    .exclude(room="")
+                    .values_list("room", flat=True)
+                    .first()
+                    or ""
+                )
+            if old_room:
+                used_rooms.discard(old_room)
+            if item.room:
+                used_rooms.add(item.room)
         available_rooms = [r for r in sorted(r for r in rooms_base if r and r not in used_rooms)]
+        if adj and adj.room and adj.room not in available_rooms:
+            available_rooms.insert(0, adj.room)
         if entry.room and entry.room not in available_rooms:
             available_rooms.insert(0, entry.room)
+
+        edit_faculties = list(batch_faculties)
+        selected_proxy_name = ""
+        selected_proxy_subject = ""
+        if adj and adj.adjustment_type == LectureAdjustment.TYPE_PROXY and adj.proxy_faculty:
+            selected_proxy_name = adj.proxy_faculty.name
+            selected_proxy_subject = adj.subject or ""
+            if selected_proxy_name and all(
+                f["name"].lower() != selected_proxy_name.lower() for f in edit_faculties
+            ):
+                edit_faculties.insert(
+                    0,
+                    {
+                        "name": selected_proxy_name,
+                        "subject": selected_proxy_subject,
+                        "has_conflict": False,
+                        "conflict_dept": "",
+                    },
+                )
 
         rows.append(
             {
                 "entry": entry,
                 "adjustment": adj,
                 "faculties": batch_faculties,
+                "edit_faculties": edit_faculties,
+                "selected_proxy_name": selected_proxy_name,
+                "selected_proxy_subject": selected_proxy_subject,
                 "available_rooms": available_rooms,
                 "slot_started": slot_started,
                 "create_locked": bool(slot_started and not allow_started_adjustments),
@@ -6475,6 +6519,73 @@ def mentor_load_adjustment(request):
                 },
             )
             messages.success(request, "Adjustment saved.")
+            return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+        if action == "update_proxy":
+            adj_id = request.POST.get("adjustment_id")
+            proxy_name = (request.POST.get("proxy_faculty") or "").strip()
+            proxy_subject = (request.POST.get("proxy_subject") or "").strip()
+            room_select = (request.POST.get("room_select") or "").strip()
+            room_custom = (request.POST.get("room_custom") or "").strip()
+            merge_room = (request.POST.get("merge_room") or "").strip()
+            remarks = (request.POST.get("remarks") or "").strip()
+            adj = LectureAdjustment.objects.filter(
+                id=adj_id,
+                module=module,
+                adjustment_type=LectureAdjustment.TYPE_PROXY,
+                status=LectureAdjustment.STATUS_ACTIVE,
+            ).select_related("timetable_entry").first()
+            if not adj:
+                messages.error(request, "Proxy adjustment not found.")
+                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+            if adj.original_faculty and adj.original_faculty.strip().lower() != mentor.name.strip().lower():
+                messages.error(request, "You cannot edit this proxy.")
+                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+            if _slot_has_started(adj.date, adj.time_slot):
+                messages.error(request, "Lecture already started. Edit not allowed.")
+                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+            proxy = Mentor.objects.filter(name__iexact=proxy_name).first()
+            if not proxy:
+                messages.error(request, "Select a valid proxy faculty.")
+                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+            entry = adj.timetable_entry or TimetableEntry.objects.filter(
+                module=module,
+                day_of_week=adj.date.weekday(),
+                lecture_no=adj.lecture_no,
+                batch=adj.batch,
+                is_active=True,
+            ).first()
+            room = merge_room or room_custom or room_select or adj.room or (entry.room if entry else "")
+            proxy_slot_subject = (
+                _resolve_proxy_subject(
+                    module,
+                    proxy.name,
+                    batch=adj.batch,
+                    lecture_no=adj.lecture_no,
+                    day_of_week=adj.date.weekday(),
+                )
+                or proxy_subject
+                or (entry.subject if entry else "")
+            )
+            adj.proxy_faculty = proxy
+            adj.subject = proxy_slot_subject
+            adj.room = room
+            adj.merge_room = merge_room
+            adj.remarks = remarks
+            adj.save(update_fields=["proxy_faculty", "subject", "room", "merge_room", "remarks"])
+            _sync_existing_session(
+                module,
+                adj.date,
+                adj.batch,
+                adj.lecture_no,
+                timetable_entry=entry,
+                day_of_week=adj.date.weekday(),
+                time_slot=adj.time_slot,
+                subject=adj.subject,
+                faculty=proxy.name,
+                room=room,
+            )
+            _trigger_weekly_recompute_for_date(module, adj.date)
+            messages.success(request, "Proxy updated.")
             return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
 
         if action == "create_swap":
@@ -6747,6 +6858,69 @@ def coordinator_load_adjustment(request):
                 )
                 _trigger_weekly_recompute_for_date(module, selected_date)
                 messages.success(request, "Proxy assigned (this week only).")
+        elif action == "update_proxy":
+            adj_id = request.POST.get("adjustment_id")
+            proxy_name = (request.POST.get("proxy_faculty") or "").strip()
+            proxy_subject = (request.POST.get("proxy_subject") or "").strip()
+            room_select = (request.POST.get("room_select") or "").strip()
+            room_custom = (request.POST.get("room_custom") or "").strip()
+            merge_room = (request.POST.get("merge_room") or "").strip()
+            remarks = (request.POST.get("remarks") or "").strip()
+            adj = LectureAdjustment.objects.filter(
+                id=adj_id,
+                module=module,
+                adjustment_type=LectureAdjustment.TYPE_PROXY,
+                status=LectureAdjustment.STATUS_ACTIVE,
+            ).select_related("timetable_entry").first()
+            if not adj:
+                messages.error(request, "Proxy adjustment not found.")
+                return redirect(f"/coordinator-load-adjustment/?date={selected_date:%Y-%m-%d}")
+            if _slot_has_started(adj.date, adj.time_slot):
+                messages.error(request, "Lecture already started. Edit not allowed.")
+                return redirect(f"/coordinator-load-adjustment/?date={selected_date:%Y-%m-%d}")
+            proxy = Mentor.objects.filter(name__iexact=proxy_name).first()
+            if not proxy:
+                messages.error(request, "Select a valid proxy faculty.")
+                return redirect(f"/coordinator-load-adjustment/?date={selected_date:%Y-%m-%d}")
+            entry = adj.timetable_entry or TimetableEntry.objects.filter(
+                module=module,
+                day_of_week=adj.date.weekday(),
+                lecture_no=adj.lecture_no,
+                batch=adj.batch,
+                is_active=True,
+            ).first()
+            room = merge_room or room_custom or room_select or adj.room or (entry.room if entry else "")
+            proxy_slot_subject = (
+                _resolve_proxy_subject(
+                    module,
+                    proxy.name,
+                    batch=adj.batch,
+                    lecture_no=adj.lecture_no,
+                    day_of_week=adj.date.weekday(),
+                )
+                or proxy_subject
+                or (entry.subject if entry else "")
+            )
+            adj.proxy_faculty = proxy
+            adj.subject = proxy_slot_subject
+            adj.room = room
+            adj.merge_room = merge_room
+            adj.remarks = remarks
+            adj.save(update_fields=["proxy_faculty", "subject", "room", "merge_room", "remarks"])
+            _sync_existing_session(
+                module,
+                adj.date,
+                adj.batch,
+                adj.lecture_no,
+                timetable_entry=entry,
+                day_of_week=adj.date.weekday(),
+                time_slot=adj.time_slot,
+                subject=adj.subject,
+                faculty=proxy.name,
+                room=room,
+            )
+            _trigger_weekly_recompute_for_date(module, adj.date)
+            messages.success(request, "Proxy updated.")
         elif action == "create_swap":
             entry_id = request.POST.get("entry_id")
             partner_id = request.POST.get("swap_entry_id")

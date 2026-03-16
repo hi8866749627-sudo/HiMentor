@@ -24,6 +24,13 @@
     <div class="col-md-2">
         <button class="btn btn-primary" type="submit">Show</button>
     </div>
+    {% if messages %}
+    <div class="col-md-6">
+        {% for message in messages %}
+            <span class="text-success small ms-2">{{ message }}</span>
+        {% endfor %}
+    </div>
+    {% endif %}
 </form>
 
 <div class="alert alert-info py-2">
@@ -44,9 +51,9 @@
             {% endif %}
         {% else %}
             <div class="d-flex flex-wrap gap-2">
-                <button class="btn btn-sm btn-outline-primary adjustment-toggle" type="button" data-target="proxy">Proxy Lecture</button>
-                <button class="btn btn-sm btn-outline-primary adjustment-toggle" type="button" data-target="swap">Swap Lecture</button>
-                <button class="btn btn-sm btn-outline-primary adjustment-toggle" type="button" data-target="room">Room Change Only</button>
+                <button class="btn btn-sm btn-outline-primary adjustment-toggle" type="button" data-target="proxy" onclick="toggleAdjustmentPanel(this)">Proxy Lecture</button>
+                <button class="btn btn-sm btn-outline-primary adjustment-toggle" type="button" data-target="swap" onclick="toggleAdjustmentPanel(this)">Swap Lecture</button>
+                <button class="btn btn-sm btn-outline-primary adjustment-toggle" type="button" data-target="room" onclick="toggleAdjustmentPanel(this)">Room Change Only</button>
             </div>
         {% endif %}
     </div>
@@ -73,6 +80,7 @@
                     Proxy assigned to <strong>{{ row.adjustment.proxy_faculty.name }}</strong> in room <strong>{{ row.adjustment.room }}</strong>.
                     {% if row.adjustment.remarks %}<div class="small mt-1">Remarks: {{ row.adjustment.remarks }}</div>{% endif %}
                 </div>
+                <button class="btn btn-sm btn-outline-primary mb-2 adjustment-toggle" type="button" data-target="edit-proxy" onclick="toggleAdjustmentPanel(this)">Edit Proxy</button>
             {% endif %}
             <form method="post">
                 {% csrf_token %}
@@ -236,6 +244,54 @@
                 <div class="text-muted small mt-2">Lecture already started. Changes are locked.</div>
             {% endif %}
         {% endif %}
+        {% if row.adjustment and row.adjustment.adjustment_type == "proxy" %}
+            <div class="adjustment-panel adjustment-panel-edit-proxy border rounded p-3 mb-3 d-none">
+                <div class="fw-semibold mb-2">Edit Proxy</div>
+                <form method="post" class="row g-2 align-items-end" data-allow-conflict="{{ is_coordinator|yesno:'1,0' }}">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="update_proxy">
+                    <input type="hidden" name="adjustment_id" value="{{ row.adjustment.id }}">
+                    {% if is_coordinator and selected_faculty %}
+                        <input type="hidden" name="faculty" value="{{ selected_faculty }}">
+                    {% endif %}
+                    <div class="col-md-5">
+                        <label class="form-label">Proxy Faculty</label>
+                        <select name="proxy_faculty" class="form-select">
+                            <option value="">Select</option>
+                            {% for f in row.edit_faculties %}
+                                <option value="{{ f.name }}" data-subject="{{ f.subject }}" data-conflict="{{ f.has_conflict|yesno:'1,0' }}" {% if row.selected_proxy_name and row.selected_proxy_name|lower == f.name|lower %}selected{% endif %}>
+                                    {{ f.name }}{% if f.subject %} - {{ f.subject }}{% endif %}{% if f.has_conflict %} (Busy{% if f.conflict_dept %} - {{ f.conflict_dept }}{% endif %}){% endif %}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <input type="hidden" name="proxy_subject" value="{{ row.selected_proxy_subject }}">
+                        <input type="hidden" name="merge_room" value="">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Available Room</label>
+                        <select name="room_select" class="form-select"
+                                data-base-rooms='{{ row.available_rooms_json|escapejs }}'
+                                data-conflict-rooms='{{ row.conflict_rooms_json|escapejs }}'>
+                            <option value="">Select</option>
+                            {% for r in row.available_rooms %}
+                                <option value="{{ r }}" {% if row.adjustment.room == r %}selected{% endif %}>{{ r }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Custom Room</label>
+                        <input type="text" name="room_custom" class="form-control" placeholder="Optional">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Remarks</label>
+                        <input type="text" name="remarks" class="form-control" placeholder="Optional" value="{{ row.adjustment.remarks }}">
+                    </div>
+                    <div class="col-md-3">
+                        <button class="btn btn-primary w-100" type="submit" {% if row.cancel_locked %}disabled{% endif %}>Save Proxy</button>
+                    </div>
+                </form>
+            </div>
+        {% endif %}
     </div>
 </div>
 {% empty %}
@@ -243,7 +299,6 @@
 {% endfor %}
 
 <script>
-window.addEventListener('DOMContentLoaded', () => {
 document.querySelectorAll('form[data-allow-conflict]').forEach(form => {
     const facultySelect = form.querySelector('select[name="proxy_faculty"]');
     const subjectInput = form.querySelector('input[name="proxy_subject"]');
@@ -332,15 +387,14 @@ document.querySelectorAll('form').forEach(form => {
     updateLabels();
 });
 
-document.addEventListener('click', (event) => {
-    const button = event.target.closest('.adjustment-toggle');
-    if (!button) return;
+function toggleAdjustmentPanel(button) {
     const card = button.closest('.card');
     if (!card) return;
     const panels = {
         proxy: card.querySelector('.adjustment-panel-proxy'),
         swap: card.querySelector('.adjustment-panel-swap'),
         room: card.querySelector('.adjustment-panel-room'),
+        "edit-proxy": card.querySelector('.adjustment-panel-edit-proxy'),
     };
     const toggles = card.querySelectorAll('.adjustment-toggle');
     const target = button.getAttribute('data-target');
@@ -356,8 +410,7 @@ document.addEventListener('click', (event) => {
         button.classList.remove('btn-outline-primary');
         button.classList.add('btn-primary', 'text-white');
     }
-});
-});
+}
 </script>
 
 {% endblock %}
