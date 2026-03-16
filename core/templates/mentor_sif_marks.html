@@ -7,7 +7,7 @@
 <div class="alert alert-warning">Marks not yet Locked.</div>
 {% else %}
 
-<div class="mb-3 d-flex gap-2 flex-wrap">
+<div class="mb-3 d-flex gap-2 flex-wrap" id="mentor-sif-actions">
     <form method="get" id="mentorStudentSelectForm" class="d-flex gap-2 flex-wrap">
         <select name="enrollment" id="mentorStudentSelect" class="form-control">
             {% for s in students %}
@@ -25,7 +25,7 @@
 </div>
 
 {% if selected_student %}
-<div class="card p-3">
+<div class="card p-3" id="mentor-sif-table">
     <h5>{{ selected_student.name }} ({{ selected_student.enrollment }})</h5>
     <div class="table-responsive">
         <table class="table table-bordered text-center align-middle">
@@ -70,6 +70,37 @@ document.addEventListener("DOMContentLoaded", function(){
         sel.addEventListener("change", function(){
             form.submit();
         });
+    }
+});
+</script>
+
+<script>
+document.addEventListener("DOMContentLoaded", function(){
+    const steps = [
+        {
+            element: "#mentor-sif-actions",
+            popover: {
+                title: "Pick Student",
+                description: "Select a student to view marks and download PDFs."
+            }
+        },
+        {
+            element: "#mentor-sif-table",
+            popover: {
+                title: "SIF Marks Table",
+                description: "Review marks and attendance for each subject."
+            }
+        }
+    ];
+
+    window.__mentorTourStart = function(auto){
+        if(window.MentorTour){
+            window.MentorTour.start("mentor_tour_results_done", steps, auto);
+        }
+    };
+
+    if(window.MentorTour && window.MentorTour.mainDone() && window.MentorTour.shouldAuto("mentor_tour_results_done")){
+        window.MentorTour.start("mentor_tour_results_done", steps, true);
     }
 });
 </script>

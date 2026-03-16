@@ -4,7 +4,7 @@
 {% block content %}
 
 <!-- HEADER -->
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="d-flex justify-content-between align-items-center mb-3" id="mentor-dashboard-header">
     <h3 class="mb-0">Welcome {{mentor.name}}</h3>
 
     <div class="d-flex align-items-center gap-2">
@@ -17,7 +17,7 @@
 
 
 <!-- WEEK BUTTONS -->
-<div class="mb-3 d-flex flex-wrap gap-2">
+<div class="mb-3 d-flex flex-wrap gap-2" id="mentor-week-filter">
 
 {% for w in weeks %}
     {% if w == selected_week %}
@@ -40,7 +40,7 @@
 <!-- ================= DESKTOP TABLE ================= -->
 <div class="desktop-view">
 
-<div class="table-responsive">
+<div class="table-responsive" id="mentor-calls-table">
 <table class="table table-bordered table-hover align-middle">
 
 <thead class="table-dark text-center">
@@ -378,5 +378,64 @@ window.onload = function(){
 }
 </script>
 {% endif %}
+
+<script>
+document.addEventListener("DOMContentLoaded", function(){
+    const mainSteps = [
+        {
+            element: "#mentor-dashboard-header",
+            popover: {
+                title: "Welcome",
+                description: "This is your mentor dashboard. We will cover the key daily actions."
+            }
+        },
+        {
+            element: "#mentor-menu-schedule",
+            popover: {
+                title: "Check Schedule",
+                description: "See your lectures across departments for the day."
+            }
+        },
+        {
+            element: "#mentor-menu-attendance",
+            popover: {
+                title: "Mark Attendance",
+                description: "Open this to mark absents for your lectures."
+            }
+        },
+        {
+            element: "#mentor-menu-calls",
+            popover: {
+                title: "Weekly Calls",
+                description: "Call students below 80% attendance and update status."
+            }
+        },
+        {
+            element: "#mentor-menu-sif",
+            popover: {
+                title: "SIF & Results",
+                description: "Fill marks and view SIF reports from here."
+            }
+        },
+        {
+            element: "#mentor-calls-table",
+            popover: {
+                title: "Pending Calls List",
+                description: "Use the call buttons and update the result for each student."
+            }
+        }
+    ];
+
+    window.__mentorTourStart = function(auto){
+        if(window.MentorTour){
+            window.MentorTour.start("mentor_tour_main_done", mainSteps, auto);
+        }
+    };
+
+    if(window.MentorTour && window.MentorTour.shouldAuto("mentor_tour_main_done")){
+        window.MentorTour.start("mentor_tour_main_done", mainSteps, true);
+    }
+});
+</script>
 
 {% endblock %}

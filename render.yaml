@@ -7,7 +7,7 @@ services:
       pip install -r requirements.txt
       python manage.py collectstatic --noinput
       python manage.py migrate --noinput
-    startCommand: gunicorn mentor_followup.wsgi:application --log-file -
+    startCommand: gunicorn mentor_followup.wsgi:application --log-file - --bind 0.0.0.0:$PORT
     healthCheckPath: /healthz/
     envVars:
       - key: PYTHON_VERSION

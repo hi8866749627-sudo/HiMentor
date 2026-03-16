@@ -18,7 +18,7 @@
 
 <h4 class="mb-3">My Schedule</h4>
 
-<form method="get" class="row g-2 align-items-end mb-3">
+<form method="get" class="row g-2 align-items-end mb-3" id="mentor-schedule-filters">
     <div class="col-md-3">
         <label class="form-label">Date</label>
         <input type="date" name="date" class="form-control" value="{{ selected_date|date:'Y-m-d' }}">
@@ -46,7 +46,7 @@
 <div class="alert alert-info">You have proxy lectures assigned for this date.</div>
 {% endif %}
 
-<div class="card">
+<div class="card" id="mentor-schedule-table">
     <div class="card-header">Schedule for {{ selected_date|date:"d M Y" }}</div>
     <div class="card-body p-0">
         <div class="table-responsive">
@@ -97,5 +97,36 @@
         </div>
     </div>
 </div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function(){
+    const steps = [
+        {
+            element: "#mentor-schedule-filters",
+            popover: {
+                title: "Pick Date & Department",
+                description: "Filter your schedule for a specific date or department."
+            }
+        },
+        {
+            element: "#mentor-schedule-table",
+            popover: {
+                title: "Your Schedule",
+                description: "Shows lectures with time, subject, room, and department."
+            }
+        }
+    ];
+
+    window.__mentorTourStart = function(auto){
+        if(window.MentorTour){
+            window.MentorTour.start("mentor_tour_schedule_done", steps, auto);
+        }
+    };
+
+    if(window.MentorTour && window.MentorTour.mainDone() && window.MentorTour.shouldAuto("mentor_tour_schedule_done")){
+        window.MentorTour.start("mentor_tour_schedule_done", steps, true);
+    }
+});
+</script>
 
 {% endblock %}

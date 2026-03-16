@@ -3,7 +3,7 @@
 
 <h3>Mentor Followup Sheet</h3>
 
-<form method="get" action="/mentor-view-sif/" class="row g-2 align-items-end mb-3">
+<form method="get" action="/mentor-view-sif/" class="row g-2 align-items-end mb-3" id="mentor-view-sif-filters">
     <div class="col-md-6">
         <label class="form-label">Student</label>
         <select name="enrollment" class="form-select" onchange="this.form.submit()">
@@ -28,10 +28,10 @@
 </form>
 
 {% if selected_student %}
-<h4 class="text-center mb-3">Pre-filled SIF - {{ selected_student.name }} ({{ selected_student.enrollment }})</h4>
+<h4 class="text-center mb-3" id="mentor-view-sif-title">Pre-filled SIF - {{ selected_student.name }} ({{ selected_student.enrollment }})</h4>
 
 <h4 class="text-center mt-4">Telephonic Interaction with Institute for Less Attendance</h4>
-<div class="table-responsive mb-4">
+<div class="table-responsive mb-4" id="mentor-view-sif-attendance">
     <table class="table table-bordered table-sm">
         <thead class="table-dark text-center">
             <tr>
@@ -69,7 +69,7 @@
 </div>
 
 <h4 class="text-center mt-4">Telephonic Interaction with Institute for Poor Result</h4>
-<div class="table-responsive mb-4">
+<div class="table-responsive mb-4" id="mentor-view-sif-results">
     <table class="table table-bordered table-sm">
         <thead class="table-dark text-center">
             <tr>
@@ -105,7 +105,7 @@
 </div>
 
 <h4 class="text-center mt-4">Telephonic Interaction with Institute for Direct Calls</h4>
-<div class="table-responsive mb-2">
+<div class="table-responsive mb-2" id="mentor-view-sif-other">
     <table class="table table-bordered table-sm">
         <thead class="table-dark text-center">
             <tr>
@@ -140,5 +140,50 @@
 {% else %}
 <div class="alert alert-info">No students found under your mentorship in this module.</div>
 {% endif %}
+
+<script>
+document.addEventListener("DOMContentLoaded", function(){
+    const steps = [
+        {
+            element: "#mentor-view-sif-filters",
+            popover: {
+                title: "Pick Student",
+                description: "Select a student to view the pre-filled SIF."
+            }
+        },
+        {
+            element: "#mentor-view-sif-attendance",
+            popover: {
+                title: "Less Attendance Calls",
+                description: "Weekly attendance call records appear here."
+            }
+        },
+        {
+            element: "#mentor-view-sif-results",
+            popover: {
+                title: "Poor Result Calls",
+                description: "Result call records appear in this section."
+            }
+        },
+        {
+            element: "#mentor-view-sif-other",
+            popover: {
+                title: "Direct Calls",
+                description: "Any other calls are shown here."
+            }
+        }
+    ];
+
+    window.__mentorTourStart = function(auto){
+        if(window.MentorTour){
+            window.MentorTour.start("mentor_tour_results_done", steps, auto);
+        }
+    };
+
+    if(window.MentorTour && window.MentorTour.mainDone() && window.MentorTour.shouldAuto("mentor_tour_results_done")){
+        window.MentorTour.start("mentor_tour_results_done", steps, true);
+    }
+});
+</script>
 
 {% endblock %}
