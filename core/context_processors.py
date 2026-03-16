@@ -108,12 +108,18 @@ def module_context(request):
         m.is_current = (m.id == current_id)
 
     mentor_display_name = ""
+    mentor_is_admin = False
+    admin_mode = False
     if request.session.get("mentor"):
         mentor_obj = resolve_mentor_identity(request.session.get("mentor"))
         if mentor_obj:
             mentor_display_name = mentor_obj.full_name or mentor_obj.name
+            mentor_is_admin = bool(mentor_obj.is_admin)
         else:
             mentor_display_name = request.session.get("mentor")
+        admin_mode = bool(request.session.get("admin_mode")) if mentor_is_admin else False
+        if admin_mode:
+            home_url = "/reports/"
     login_role_name = ""
     if request.user.is_authenticated and not request.session.get("mentor"):
         login_role_name = "Superadmin" if is_superadmin_user(request.user) else "Coordinator"
@@ -123,6 +129,8 @@ def module_context(request):
         "can_manage_modules": bool(request.user.is_authenticated and not request.session.get("mentor") and is_superadmin_user(request.user)),
         "home_url": home_url,
         "mentor_display_name": mentor_display_name,
+        "mentor_is_admin": mentor_is_admin,
+        "admin_mode": admin_mode,
         "login_role_name": login_role_name,
     }
     if request.user.is_authenticated and not request.session.get("mentor"):

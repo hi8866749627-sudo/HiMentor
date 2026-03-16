@@ -49,6 +49,7 @@ class AcademicModule(models.Model):
 class Mentor(models.Model):
     name = models.CharField(max_length=50, unique=True)
     full_name = models.CharField(max_length=100, blank=True, db_index=True)
+    is_admin = models.BooleanField(default=False)
 
     def __str__(self):
         return self.name
@@ -468,6 +469,19 @@ class CoordinatorModuleAccess(models.Model):
 
     def __str__(self):
         return f"{self.coordinator.username} -> {self.module.name}"
+
+
+class MentorModuleAccess(models.Model):
+    mentor = models.ForeignKey(Mentor, on_delete=models.CASCADE, related_name="module_accesses")
+    module = models.ForeignKey(AcademicModule, on_delete=models.CASCADE, related_name="mentor_admin_accesses")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("mentor", "module")
+        ordering = ["mentor__name", "module__name"]
+
+    def __str__(self):
+        return f"{self.mentor.name} -> {self.module.name}"
 
 
 class PracticalMarkUpload(models.Model):

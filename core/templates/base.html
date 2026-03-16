@@ -521,6 +521,15 @@
             {% if request.session.mentor %}
             <button type="button" class="btn btn-light btn-sm" id="mentorTourBtn">Start Tour</button>
             {% endif %}
+            {% if request.session.mentor and mentor_is_admin %}
+            <form method="post" action="/switch-admin-mode/" class="d-flex align-items-center">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button class="btn btn-light btn-sm" type="submit">
+                    {% if admin_mode %}Switch to Faculty{% else %}Switch to Admin{% endif %}
+                </button>
+            </form>
+            {% endif %}
 
             <button class="btn btn-light btn-sm mobile-menu" onclick="toggleMenu()">Menu</button>
             <div class="theme-toggle" title="Light / Dark mode">
@@ -542,7 +551,7 @@
             <div class="col-md-2 lj-sidebar p-3" id="sidebar">
                 <h6 class="text-muted">MENU</h6>
 
-                {% if request.session.mentor %}
+                {% if request.session.mentor and not admin_mode %}
                 <a href="/home/" class="menu-group d-block text-decoration-none">Home</a>
 
                 <div class="menu-group">Daily Attendance</div>

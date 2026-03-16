@@ -1,5 +1,5 @@
 from django.db.models import Q
-from .models import AcademicModule, Mentor
+from .models import AcademicModule, Mentor, MentorModuleAccess
 
 
 SUPERADMIN_USERNAMES = {"superadmin1", "superadmin2"}
@@ -38,6 +38,17 @@ def allowed_modules_for_user(request):
             mentor_obj = resolve_mentor_identity(mentor_key)
         except Exception:
             mentor_obj = None
+
+        admin_mode = bool(request.session.get("admin_mode"))
+        if mentor_obj and mentor_obj.is_admin and admin_mode:
+            return (
+                AcademicModule.objects.filter(
+                    is_active=True,
+                    mentor_admin_accesses__mentor=mentor_obj,
+                )
+                .distinct()
+                .order_by("-id")
+            )
 
         mentor_names = {mentor_key}
         if mentor_obj:

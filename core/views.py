@@ -24,6 +24,7 @@ from django.views.decorators.http import require_http_methods
 from django.db import close_old_connections
 from django.db.models import Count
 from django.contrib.auth.decorators import login_required
+from functools import wraps
 from django.contrib import messages
 from django.views.decorators.http import require_http_methods
 from django.http import JsonResponse
@@ -52,6 +53,7 @@ from .models import (
     CallRecord,
     CoordinatorModuleAccess,
     Mentor,
+    MentorModuleAccess,
     MentorPassword,
     OtherCallRecord,
     PracticalMarkUpload,
@@ -100,6 +102,26 @@ def _session_mentor_obj(request):
     if mentor and mentor_key != mentor.name:
         request.session["mentor"] = mentor.name
     return mentor
+
+
+def _is_admin_mentor(request):
+    mentor = _session_mentor_obj(request)
+    return bool(mentor and mentor.is_admin and request.session.get("admin_mode"))
+
+
+def _block_mentor_only(request):
+    return bool(request.session.get("mentor") and not _is_admin_mentor(request))
+
+
+def admin_or_mentor_admin_required(view_func):
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        if request.user.is_authenticated:
+            return view_func(request, *args, **kwargs)
+        if _is_admin_mentor(request):
+            return view_func(request, *args, **kwargs)
+        return redirect("/")
+    return wrapper
 
 
 def _active_module(request):
@@ -472,6 +494,7 @@ def login_page(request):
             custom_ok = bool(cred and cred.check_password(entered_password_raw))
             if custom_ok or entered_password in {expected_short, expected_entered, "mentor@lj123"}:
                 request.session["mentor"] = mentor.name
+                request.session["admin_mode"] = False
                 _active_module(request)
                 return redirect("/mentor-dashboard/")
 
@@ -480,9 +503,9 @@ def login_page(request):
     return render(request, "login.html", {"error": error})
 
 
-@login_required
+@admin_or_mentor_admin_required
 def manage_mentors(request):
-    if request.session.get("mentor"):
+    if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
 
     module = _active_module(request)
@@ -521,6 +544,19 @@ def manage_mentors(request):
         elif action == "reset_default":
             MentorPassword.objects.filter(mentor=mentor).delete()
             messages.success(request, f"Password reset to default rule for mentor {mentor.name}.")
+        elif action == "update_access":
+            is_admin = bool(request.POST.get("is_admin"))
+            module_ids = [m for m in request.POST.getlist("admin_module_ids") if str(m).isdigit()]
+            modules = list(AcademicModule.objects.filter(id__in=module_ids, is_active=True))
+            mentor.is_admin = is_admin
+            mentor.save(update_fields=["is_admin"])
+            MentorModuleAccess.objects.filter(mentor=mentor).delete()
+            if modules:
+                MentorModuleAccess.objects.bulk_create(
+                    [MentorModuleAccess(mentor=mentor, module=m) for m in modules],
+                    ignore_conflicts=True,
+                )
+            messages.success(request, f"Access updated for mentor {mentor.name}.")
         else:
             messages.error(request, "Invalid action.")
         return redirect("/manage-mentors/")
@@ -532,6 +568,10 @@ def manage_mentors(request):
         .order_by("name")
     )
     cred_map = {c.mentor_id: c for c in MentorPassword.objects.filter(mentor__in=mentors)}
+    access_map = {}
+    for acc in MentorModuleAccess.objects.filter(mentor__in=mentors).select_related("module"):
+        access_map.setdefault(acc.mentor_id, set()).add(acc.module_id)
+    modules = list(AcademicModule.objects.filter(is_active=True).order_by("-id"))
     rows = []
     for m in mentors:
         rows.append(
@@ -539,6 +579,7 @@ def manage_mentors(request):
                 "mentor": m,
                 "student_count": getattr(m, "student_count", 0),
                 "has_custom_password": m.id in cred_map,
+                "admin_modules": access_map.get(m.id, set()),
             }
         )
 
@@ -548,6 +589,7 @@ def manage_mentors(request):
         {
             "rows": rows,
             "module": module,
+            "modules": modules,
         },
     )
 
@@ -723,7 +765,7 @@ def superadmin_home(request):
 
 
 # ---------------- STUDENT MASTER ----------------
-@login_required
+@admin_or_mentor_admin_required
 def upload_students(request):
     module = _active_module(request)
 
@@ -962,10 +1004,10 @@ def _run_result_upload_job(job_id, module_id, username, test_name, subject_id, u
         close_old_connections()
 
 
-@login_required
+@admin_or_mentor_admin_required
 @require_http_methods(["GET"])
 def upload_results_progress(request, job_id):
-    if "mentor" in request.session:
+    if _block_mentor_only(request):
         return JsonResponse({"ok": False, "msg": "Unauthorized"}, status=403)
     module = _active_module(request)
     job = ResultUploadJob.objects.filter(job_id=job_id, module=module).first()
@@ -1043,10 +1085,10 @@ def _subject_sort_key(subject_name):
     return 99
 
 
-@login_required
+@admin_or_mentor_admin_required
 @require_http_methods(["POST"])
 def upload_results_cancel(request, job_id):
-    if "mentor" in request.session:
+    if _block_mentor_only(request):
         return JsonResponse({"ok": False, "msg": "Unauthorized"}, status=403)
     module = _active_module(request)
     updated = ResultUploadJob.objects.filter(
@@ -1059,10 +1101,10 @@ def upload_results_cancel(request, job_id):
     return JsonResponse({"ok": True, "msg": "Cancel requested."})
 
 
-@login_required
+@admin_or_mentor_admin_required
 @require_http_methods(["GET", "POST"])
 def upload_results(request):
-    if "mentor" in request.session:
+    if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
     module = _active_module(request)
 
@@ -1137,9 +1179,9 @@ def upload_results(request):
         return JsonResponse({"ok": False, "msg": str(e)})
 
 
-@login_required
+@admin_or_mentor_admin_required
 def view_results(request):
-    if "mentor" in request.session:
+    if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
     module = _active_module(request)
 
@@ -1328,10 +1370,10 @@ def view_results(request):
     )
 
 
-@login_required
+@admin_or_mentor_admin_required
 @require_http_methods(["GET", "POST"])
 def view_practical_marks(request):
-    if "mentor" in request.session:
+    if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
     module = _active_module(request)
     msg = ""
@@ -1375,10 +1417,10 @@ def view_practical_marks(request):
     )
 
 
-@login_required
+@admin_or_mentor_admin_required
 @require_http_methods(["GET", "POST"])
 def sif_marks_template(request):
-    if "mentor" in request.session:
+    if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
     module = _active_module(request)
     _ensure_subject_display_order(module)
@@ -1437,9 +1479,9 @@ def sif_marks_template(request):
     )
 
 
-@login_required
+@admin_or_mentor_admin_required
 def subjects_page(request):
-    if "mentor" in request.session:
+    if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
     module = _active_module(request)
     subjects = list(Subject.objects.filter(module=module).order_by("name"))
@@ -1522,10 +1564,10 @@ def subjects_page(request):
     )
 
 
-@login_required
+@admin_or_mentor_admin_required
 @require_http_methods(["POST"])
 def add_subject_alias(request):
-    if "mentor" in request.session:
+    if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
     module = _active_module(request)
     alias = (request.POST.get("alias") or "").strip()
@@ -1550,10 +1592,10 @@ def add_subject_alias(request):
     return redirect("/subjects/")
 
 
-@login_required
+@admin_or_mentor_admin_required
 @require_http_methods(["POST"])
 def update_subject_alias(request, alias_id):
-    if "mentor" in request.session:
+    if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
     module = _active_module(request)
     alias_obj = SubjectAlias.objects.filter(id=alias_id).first()
@@ -1581,10 +1623,10 @@ def update_subject_alias(request, alias_id):
     return redirect("/subjects/")
 
 
-@login_required
+@admin_or_mentor_admin_required
 @require_http_methods(["POST"])
 def delete_subject_alias(request, alias_id):
-    if "mentor" in request.session:
+    if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
     module = _active_module(request)
     alias_obj = SubjectAlias.objects.filter(id=alias_id).first()
@@ -1599,10 +1641,10 @@ def delete_subject_alias(request, alias_id):
     return redirect("/subjects/")
 
 
-@login_required
+@admin_or_mentor_admin_required
 @require_http_methods(["POST"])
 def add_subject(request):
-    if "mentor" in request.session:
+    if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
     module = _active_module(request)
     name = (request.POST.get("name") or "").strip()
@@ -1660,10 +1702,10 @@ def add_subject(request):
     return redirect("/subjects/")
 
 
-@login_required
+@admin_or_mentor_admin_required
 @require_http_methods(["POST"])
 def edit_subject(request, subject_id):
-    if "mentor" in request.session:
+    if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
     module = _active_module(request)
     name = (request.POST.get("name") or "").strip()
@@ -1708,10 +1750,10 @@ def edit_subject(request, subject_id):
     return redirect("/subjects/")
 
 
-@login_required
+@admin_or_mentor_admin_required
 @require_http_methods(["POST"])
 def apply_subject_templates(request):
-    if "mentor" in request.session:
+    if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
     module = _active_module(request)
     selected_ids = {
@@ -1762,10 +1804,10 @@ def apply_subject_templates(request):
     return redirect("/subjects/")
 
 
-@login_required
+@admin_or_mentor_admin_required
 @require_http_methods(["POST"])
 def delete_subject(request, subject_id):
-    if "mentor" in request.session:
+    if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
     module = _active_module(request)
     subject = Subject.objects.filter(id=subject_id, module=module).first()
@@ -1781,6 +1823,7 @@ def next_dir(current_sort, current_dir, column):
     return "asc"
 
 
+@admin_or_mentor_admin_required
 def view_attendance(request):
 
     # mentors should not access coordinator view
@@ -1878,7 +1921,10 @@ def view_attendance(request):
 
 
 # ---------------- DELETE WEEK ----------------
+@admin_or_mentor_admin_required
 def delete_week(request):
+    if _block_mentor_only(request):
+        return redirect("/mentor-dashboard/")
     module = _active_module(request)
 
     weeks = Attendance.objects.filter(student__module=module).values_list("week_no", flat=True)\
@@ -1914,9 +1960,9 @@ def delete_week(request):
     })
 
 
-@login_required
+@admin_or_mentor_admin_required
 def delete_results(request):
-    if "mentor" in request.session:
+    if _block_mentor_only(request):
         return redirect("/")
     module = _active_module(request)
 
@@ -2616,7 +2662,7 @@ def mentor_prefilled_sif_zip(request):
 # ---------------- COORDINATOR DASHBOARD ----------------
 def coordinator_dashboard(request):
 
-    if "mentor" in request.session:
+    if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
     module = _active_module(request)
 
@@ -3148,9 +3194,9 @@ def live_followup_sheet_pdf(request):
     return response
 
 
-@login_required
+@admin_or_mentor_admin_required
 def live_followup_sheet_db_backup_json(request):
-    if request.session.get("mentor"):
+    if _block_mentor_only(request):
         return HttpResponse("Forbidden", status=403)
     if not is_superadmin_user(request.user):
         return HttpResponse("Forbidden", status=403)
@@ -3170,9 +3216,9 @@ def live_followup_sheet_db_backup_json(request):
     return response
 
 
-@login_required
+@admin_or_mentor_admin_required
 def coordinator_result_report(request):
-    if "mentor" in request.session:
+    if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
     module = _active_module(request)
 
@@ -3263,7 +3309,7 @@ def update_mobile(request):
 # ---------------- CONTROL PANEL ----------------
 def control_panel(request):
 
-    if "mentor" in request.session:
+    if _block_mentor_only(request):
         return redirect("/")
 
     module = _active_module(request)
@@ -3812,9 +3858,19 @@ def switch_module(request):
     return redirect(next_url)
 
 
+@require_http_methods(["POST"])
+def switch_admin_mode(request):
+    mentor = _session_mentor_obj(request)
+    if not mentor or not mentor.is_admin:
+        return redirect("/")
+    request.session["admin_mode"] = not bool(request.session.get("admin_mode"))
+    next_url = request.POST.get("next") or request.META.get("HTTP_REFERER") or "/mentor-dashboard/"
+    return redirect(next_url)
+
+
 @login_required
 def manage_modules(request):
-    if "mentor" in request.session:
+    if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
     if not is_superadmin_user(request.user):
         return HttpResponse("Forbidden", status=403)
@@ -4348,9 +4404,9 @@ def _recompute_weekly_attendance_async(module_id, phase, week_no):
         close_old_connections()
 
 
-@login_required
+@admin_or_mentor_admin_required
 def upload_timetable(request):
-    if request.session.get("mentor"):
+    if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
 
     module = _active_module(request)
@@ -4659,9 +4715,9 @@ def download_timetable_excel(request):
     return response
 
 
-@login_required
+@admin_or_mentor_admin_required
 def academic_calendar(request):
-    if request.session.get("mentor"):
+    if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
 
     is_superadmin = is_superadmin_user(request.user)
@@ -5024,7 +5080,7 @@ def mentor_schedule(request):
     )
 
 
-@login_required
+@admin_or_mentor_admin_required
 def coordinator_daily_weekly_report(request):
     if request.session.get("mentor"):
         return redirect("/mentor-dashboard/")
@@ -5124,7 +5180,7 @@ def coordinator_daily_weekly_report(request):
     )
 
 
-@login_required
+@admin_or_mentor_admin_required
 def coordinator_daily_weekly_report_pdf(request):
     if request.session.get("mentor"):
         return HttpResponse("Forbidden", status=403)
@@ -5820,9 +5876,9 @@ def _build_attendance_batch_rows(module, selected_date, mentor=None, allow_overr
     return batch_rows
 
 
-@login_required
+@admin_or_mentor_admin_required
 def coordinator_mark_attendance(request):
-    if request.session.get("mentor"):
+    if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
 
     module = _active_module(request)
@@ -6012,9 +6068,9 @@ def mentor_load_adjustment(request):
     )
 
 
-@login_required
+@admin_or_mentor_admin_required
 def coordinator_load_adjustment(request):
-    if request.session.get("mentor"):
+    if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
 
     module = _active_module(request)
@@ -6175,9 +6231,9 @@ def coordinator_load_adjustment(request):
     )
 
 
-@login_required
+@admin_or_mentor_admin_required
 def coordinator_adjustments(request):
-    if request.session.get("mentor"):
+    if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
 
     module = _active_module(request)
@@ -6268,9 +6324,9 @@ def coordinator_adjustments(request):
     )
 
 
-@login_required
+@admin_or_mentor_admin_required
 def manage_rooms(request):
-    if request.session.get("mentor"):
+    if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
 
     module = _active_module(request)
@@ -6398,9 +6454,9 @@ def mentor_daily_absentees(request):
     )
 
 
-@login_required
+@admin_or_mentor_admin_required
 def attendance_fill_status(request):
-    if request.session.get("mentor"):
+    if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
 
     module = _active_module(request)
