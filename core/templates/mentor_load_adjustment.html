@@ -243,6 +243,7 @@
 {% endfor %}
 
 <script>
+window.addEventListener('DOMContentLoaded', () => {
 document.querySelectorAll('form[data-allow-conflict]').forEach(form => {
     const facultySelect = form.querySelector('select[name="proxy_faculty"]');
     const subjectInput = form.querySelector('input[name="proxy_subject"]');
@@ -331,33 +332,31 @@ document.querySelectorAll('form').forEach(form => {
     updateLabels();
 });
 
-document.querySelectorAll('.card').forEach(card => {
-    const toggles = card.querySelectorAll('.adjustment-toggle');
+document.addEventListener('click', (event) => {
+    const button = event.target.closest('.adjustment-toggle');
+    if (!button) return;
+    const card = button.closest('.card');
+    if (!card) return;
     const panels = {
         proxy: card.querySelector('.adjustment-panel-proxy'),
         swap: card.querySelector('.adjustment-panel-swap'),
         room: card.querySelector('.adjustment-panel-room'),
     };
-    function hideAll() {
-        Object.values(panels).forEach(panel => {
-            if (panel) panel.classList.add('d-none');
-        });
-        toggles.forEach(btn => btn.classList.remove('btn-primary', 'text-white'));
-        toggles.forEach(btn => btn.classList.add('btn-outline-primary'));
-    }
-    toggles.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const target = btn.getAttribute('data-target');
-            if (!target || !panels[target]) return;
-            const isOpen = !panels[target].classList.contains('d-none');
-            hideAll();
-            if (!isOpen) {
-                panels[target].classList.remove('d-none');
-                btn.classList.remove('btn-outline-primary');
-                btn.classList.add('btn-primary', 'text-white');
-            }
-        });
+    const toggles = card.querySelectorAll('.adjustment-toggle');
+    const target = button.getAttribute('data-target');
+    if (!target || !panels[target]) return;
+    const isOpen = !panels[target].classList.contains('d-none');
+    Object.values(panels).forEach(panel => {
+        if (panel) panel.classList.add('d-none');
     });
+    toggles.forEach(btn => btn.classList.remove('btn-primary', 'text-white'));
+    toggles.forEach(btn => btn.classList.add('btn-outline-primary'));
+    if (!isOpen) {
+        panels[target].classList.remove('d-none');
+        button.classList.remove('btn-outline-primary');
+        button.classList.add('btn-primary', 'text-white');
+    }
+});
 });
 </script>
 
