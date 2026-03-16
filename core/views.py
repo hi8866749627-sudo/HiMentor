@@ -8306,7 +8306,10 @@ def weekly_attendance_live(request):
         absent_by_student_subject.setdefault(sid, {}).setdefault(subj, 0)
         absent_by_student_subject[sid][subj] += 1
 
-    students = list(Student.objects.filter(module=module).order_by("roll_no", "name"))
+    student_qs = Student.objects.filter(module=module)
+    if mentor:
+        student_qs = student_qs.filter(mentor=mentor)
+    students = list(student_qs.order_by("roll_no", "name"))
 
     rows = []
     for student in students:
@@ -8618,7 +8621,47 @@ def _write_batchwise_sheets(workbook, export_data):
                 pct_cell = ws.cell(row=ws.max_row, column=7)
                 pct_cell.number_format = "0.0%"
                 _highlight_low_percent(pct_cell, ratio)
-        _autosize_sheet(ws)
+    _autosize_sheet(ws)
+
+
+def _write_mentorwise_sheet(workbook, export_data):
+    ws = workbook.create_sheet(title="Mentorwise")
+    headers = ["Mentor", "Roll No", "Student Name", "Enrollment No", "Batch", "Division", "Attended", "Held", "%"]
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+
+    students = sorted(
+        export_data["students"],
+        key=lambda s: (
+            (s.mentor.name if s.mentor else ""),
+            s.batch or "",
+            s.roll_no or 0,
+            s.name or "",
+        ),
+    )
+    for student in students:
+        stats = export_data["per_student"][student.id]
+        held_total = stats["held_total"]
+        attended_total = stats["attended_total"]
+        ratio = (attended_total / held_total) if held_total else None
+        row = [
+            student.mentor.name if student.mentor else "",
+            student.roll_no,
+            student.name,
+            student.enrollment,
+            student.batch or "",
+            student.division or "",
+            attended_total,
+            held_total,
+            ratio if ratio is not None else "",
+        ]
+        ws.append(row)
+        if ratio is not None:
+            pct_cell = ws.cell(row=ws.max_row, column=len(row))
+            pct_cell.number_format = "0.0%"
+            _highlight_low_percent(pct_cell, ratio)
+    _autosize_sheet(ws)
 
 
 def _write_subjectwise_sheets(workbook, export_data):
@@ -8728,6 +8771,7 @@ def weekly_attendance_excel(request):
         return HttpResponse("Attendance is not fully marked for the selected range.", status=400)
 
     export_format = (request.GET.get("format") or "compiled").strip().lower()
+    batch_filter = (request.GET.get("batch") or "").strip()
     export_data = _weekly_export_data(module, calendar, phase, week_no, batch_filter=batch_filter)
     if export_data is None:
         return HttpResponse("Academic calendar not configured.", status=400)
@@ -8743,6 +8787,10 @@ def weekly_attendance_excel(request):
         _write_subjectwise_sheets(wb, export_data)
         if wb.sheetnames and wb.sheetnames[0] == "Compiled":
             del wb["Compiled"]
+    elif export_format == "mentorwise":
+        _write_mentorwise_sheet(wb, export_data)
+        if wb.sheetnames and wb.sheetnames[0] == "Compiled":
+            del wb["Compiled"]
     elif export_format == "register":
         _write_register_sheets(wb, export_data)
         if wb.sheetnames and wb.sheetnames[0] == "Compiled":
@@ -8750,6 +8798,7 @@ def weekly_attendance_excel(request):
     else:
         _write_batchwise_sheets(wb, export_data)
         _write_subjectwise_sheets(wb, export_data)
+        _write_mentorwise_sheet(wb, export_data)
         _write_register_sheets(wb, export_data)
 
     buffer = io.BytesIO()

@@ -68,6 +68,16 @@
     <div class="col-md-2">
         <button class="btn btn-primary" type="submit">Show</button>
     </div>
+    <div class="col-md-12 d-flex flex-wrap gap-2 mt-2">
+        <a class="btn btn-primary" href="/attendance-analytics/?phase={{ phase }}&week={{ week_param }}">✨ Student Analytics</a>
+        {% if not request.session.mentor %}
+        <a class="btn btn-outline-secondary" href="/attendance-analytics/weekly-excel/?phase={{ phase }}&week={{ week_param }}&batch=&format=compiled">Compiled</a>
+        <a class="btn btn-outline-secondary" href="/attendance-analytics/weekly-excel/?phase={{ phase }}&week={{ week_param }}&batch=&format=register">Weekwise</a>
+        <a class="btn btn-outline-secondary" href="/attendance-analytics/weekly-excel/?phase={{ phase }}&week={{ week_param }}&batch=&format=batchwise">Batchwise</a>
+        <a class="btn btn-outline-secondary" href="/attendance-analytics/weekly-excel/?phase={{ phase }}&week={{ week_param }}&batch=&format=subjectwise">Subjectwise</a>
+        <a class="btn btn-outline-secondary" href="/attendance-analytics/weekly-excel/?phase={{ phase }}&week={{ week_param }}&batch=&format=mentorwise">Mentorwise</a>
+        {% endif %}
+    </div>
 </form>
 
 <div class="card mb-3">
