@@ -1,5 +1,5 @@
 from django.db.models import Q
-from .models import AcademicModule
+from .models import AcademicModule, Mentor
 
 
 SUPERADMIN_USERNAMES = {"superadmin1", "superadmin2"}
@@ -45,6 +45,28 @@ def allowed_modules_for_user(request):
                 mentor_names.add(mentor_obj.name.strip())
             if (mentor_obj.full_name or "").strip():
                 mentor_names.add(mentor_obj.full_name.strip())
+        else:
+            # Try to map login name to any mentor record even if no mentees
+            direct = Mentor.objects.filter(name__iexact=mentor_key).first()
+            full = Mentor.objects.filter(full_name__iexact=mentor_key).first()
+            for m in [direct, full]:
+                if not m:
+                    continue
+                if (m.name or "").strip():
+                    mentor_names.add(m.name.strip())
+                if (m.full_name or "").strip():
+                    mentor_names.add(m.full_name.strip())
+            # Compact match (ignores symbols/spaces)
+            compact_key = "".join(ch for ch in mentor_key.upper() if ch.isalnum())
+            if compact_key:
+                for m in Mentor.objects.all():
+                    name_compact = "".join(ch for ch in (m.name or "").upper() if ch.isalnum())
+                    full_compact = "".join(ch for ch in (m.full_name or "").upper() if ch.isalnum())
+                    if compact_key and (compact_key == name_compact or compact_key == full_compact):
+                        if (m.name or "").strip():
+                            mentor_names.add(m.name.strip())
+                        if (m.full_name or "").strip():
+                            mentor_names.add(m.full_name.strip())
 
         faculty_q = Q()
         for name in mentor_names:
