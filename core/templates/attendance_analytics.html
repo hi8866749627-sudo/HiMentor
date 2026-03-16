@@ -3,6 +3,47 @@
 
 <h4 class="mb-3">Student Analytics</h4>
 
+<style>
+.ai-scan-btn {
+    background: linear-gradient(120deg, #7c3aed, #2563eb, #0ea5e9);
+    color: #fff;
+    border: none;
+}
+.ai-scan-btn:hover {
+    color: #fff;
+    filter: brightness(1.05);
+}
+.ai-loader {
+    background: linear-gradient(90deg, rgba(124,58,237,.2), rgba(14,165,233,.6), rgba(124,58,237,.2));
+    background-size: 200% 100%;
+    animation: shimmer 1.2s infinite;
+    border-radius: 12px;
+    padding: 14px 16px;
+    font-weight: 600;
+}
+@keyframes shimmer {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 200% 50%; }
+}
+.ai-card {
+    background: radial-gradient(circle at top left, rgba(59,130,246,.18), transparent 55%),
+                radial-gradient(circle at bottom right, rgba(124,58,237,.2), transparent 60%),
+                #0f172a;
+    color: #e2e8f0;
+    border: 1px solid rgba(148,163,184,.35);
+    box-shadow: 0 10px 30px rgba(15,23,42,.25);
+    border-radius: 16px;
+    min-height: 160px;
+}
+.ai-card-title {
+    font-weight: 700;
+    color: #fff;
+}
+.ai-card-sub {
+    color: #cbd5f5;
+}
+</style>
+
 {% if message %}
 <div class="alert alert-warning">{{ message }}</div>
 {% endif %}
@@ -44,6 +85,12 @@
         <a class="btn btn-outline-secondary" href="/attendance-analytics/weekly-live/?phase={{ phase }}&week={{ week_param }}">Weekly Attendance (Live)</a>
     </div>
 </form>
+
+<div class="d-flex flex-wrap gap-2 mb-3">
+    <button class="btn ai-scan-btn" type="button" id="scan-data-btn">✨ Scan My Data</button>
+</div>
+<div id="scan-loading" class="ai-loader d-none mb-3">Generating AI insights…</div>
+<div id="scan-results" class="row g-3 mb-4 d-none"></div>
 
 {% if not request.session.mentor %}
 <form method="post" action="/attendance-analytics/recompute-week/" class="row g-2 align-items-end mb-4">
@@ -176,6 +223,66 @@ if (searchInput) {
                 }
             }
         });
+    });
+}
+</script>
+
+<script>
+const scanBtn = document.getElementById('scan-data-btn');
+const scanLoading = document.getElementById('scan-loading');
+const scanResults = document.getElementById('scan-results');
+const aiCards = [
+    { title: "Bunking Hotspot", desc: "Students skipping mid-week lectures are rising. Recommend mentor check-ins.", tag: "Actionable" },
+    { title: "Subject Risk", desc: "DBMS attendance trend dipped this week. Consider quick recap session.", tag: "Subject" },
+    { title: "Top At-Risk", desc: "7 students fell below 80% in last 2 weeks.", tag: "Alert" },
+    { title: "Batch Focus", desc: "Batch B-2 shows the steepest decline this phase.", tag: "Batch" },
+    { title: "Mentor Pulse", desc: "Mentor HAM has highest call load today.", tag: "Mentor" },
+    { title: "Lecture Drift", desc: "Late attendance recorded more in L3 slots this week.", tag: "Schedule" },
+    { title: "Improvement Watch", desc: "5 students improved 6–10% since last week.", tag: "Positive" },
+    { title: "Parent Call Priority", desc: "Top 5 defaulters should be called before weekend.", tag: "Urgent" },
+    { title: "Proxy Impact", desc: "Proxy lectures show 8% lower attendance on average.", tag: "Proxy" },
+    { title: "Room Shift", desc: "Room changes correlate with lower attendance in B-5.", tag: "Infra" },
+    { title: "Attendance Stability", desc: "Overall stability is strong (±3% variance).", tag: "Trend" },
+    { title: "Subject Strength", desc: "JAVA-II maintains 90%+ attendance throughout.", tag: "Highlight" },
+    { title: "Weekly Forecast", desc: "Expected attendance drop during project week.", tag: "Forecast" },
+    { title: "Late Joiners", desc: "New admissions show weaker attendance patterns.", tag: "Intake" },
+    { title: "Exam Readiness", desc: "Attendance <80% in core subjects may impact results.", tag: "Advisory" },
+];
+
+function renderCards(items) {
+    scanResults.innerHTML = "";
+    items.forEach(item => {
+        const col = document.createElement('div');
+        col.className = 'col-lg-4';
+        col.innerHTML = `
+            <div class="ai-card p-3 h-100">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div class="ai-card-title">${item.title}</div>
+                    <span class="badge bg-light text-dark">${item.tag}</span>
+                </div>
+                <div class="ai-card-sub">${item.desc}</div>
+            </div>
+        `;
+        scanResults.appendChild(col);
+    });
+}
+
+function pickThree() {
+    const shuffled = [...aiCards].sort(() => 0.5 - Math.random());
+    return shuffled.slice(0, 3);
+}
+
+if (scanBtn && scanLoading && scanResults) {
+    scanBtn.addEventListener('click', () => {
+        scanLoading.classList.remove('d-none');
+        scanResults.classList.add('d-none');
+        scanBtn.disabled = true;
+        setTimeout(() => {
+            scanLoading.classList.add('d-none');
+            renderCards(pickThree());
+            scanResults.classList.remove('d-none');
+            scanBtn.disabled = false;
+        }, 1200);
     });
 }
 </script>

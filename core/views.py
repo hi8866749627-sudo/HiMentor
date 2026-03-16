@@ -8337,6 +8337,46 @@ def weekly_attendance_live(request):
             }
         )
 
+    insights = {
+        "low_subjects": [],
+        "at_risk_students": [],
+        "avg_overall": None,
+        "total_students": len(rows),
+        "at_risk_count": 0,
+    }
+    if rows and subject_list:
+        subj_totals = {subj: {"held": 0, "attended": 0} for subj in subject_list}
+        for row in rows:
+            for idx, subj in enumerate(subject_list):
+                stats = row["subjects"][idx] if idx < len(row["subjects"]) else {"held": 0, "attended": 0}
+                subj_totals[subj]["held"] += stats.get("held", 0)
+                subj_totals[subj]["attended"] += stats.get("attended", 0)
+        low_subjects = []
+        for subj, stats in subj_totals.items():
+            held = stats["held"]
+            attended = stats["attended"]
+            pct = round((attended / held) * 100, 2) if held else 0
+            low_subjects.append({"subject": subj, "percent": pct, "held": held})
+        low_subjects.sort(key=lambda x: x["percent"])
+        insights["low_subjects"] = low_subjects[:3]
+
+        risk_rows = [r for r in rows if r["held_total"] > 0 and r["overall_pct"] < 80]
+        risk_rows.sort(key=lambda r: r["overall_pct"])
+        insights["at_risk_students"] = [
+            {
+                "name": r["student"].name,
+                "roll": r["student"].roll_no,
+                "batch": r["student"].batch or r["student"].division or "",
+                "percent": r["overall_pct"],
+            }
+            for r in risk_rows[:5]
+        ]
+        insights["at_risk_count"] = len(risk_rows)
+
+        pct_values = [r["overall_pct"] for r in rows if r["held_total"] > 0]
+        if pct_values:
+            insights["avg_overall"] = round(sum(pct_values) / len(pct_values), 2)
+
     return render(
         request,
         "weekly_attendance_live.html",
@@ -8350,6 +8390,7 @@ def weekly_attendance_live(request):
             "rows": rows,
             "range_start": start,
             "range_end": range_end,
+            "insights": insights,
         },
     )
 
