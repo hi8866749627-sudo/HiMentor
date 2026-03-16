@@ -83,11 +83,14 @@
                 {% endif %}
             </form>
         {% else %}
-            <div class="row g-3">
-                <div class="col-lg-7">
-                    <div class="border rounded p-3 h-100">
-                        <div class="fw-semibold mb-2">Proxy Lecture</div>
-                        <form method="post" class="row g-2 align-items-end" data-allow-conflict="{{ is_coordinator|yesno:'1,0' }}">
+            <div class="d-flex flex-wrap gap-2 mb-3">
+                <button class="btn btn-sm btn-outline-primary adjustment-toggle" type="button" data-target="proxy">Proxy Lecture</button>
+                <button class="btn btn-sm btn-outline-primary adjustment-toggle" type="button" data-target="swap">Swap Lecture</button>
+                <button class="btn btn-sm btn-outline-primary adjustment-toggle" type="button" data-target="room">Room Change Only</button>
+            </div>
+            <div class="adjustment-panel adjustment-panel-proxy border rounded p-3 mb-3 d-none">
+                <div class="fw-semibold mb-2">Proxy Lecture</div>
+                <form method="post" class="row g-2 align-items-end" data-allow-conflict="{{ is_coordinator|yesno:'1,0' }}">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="create_proxy">
                             <input type="hidden" name="entry_id" value="{{ row.entry.id }}">
@@ -138,14 +141,12 @@
                             <div class="col-md-3">
                                 <button class="btn btn-primary w-100" type="submit" {% if row.create_locked %}disabled{% endif %}>Save Proxy</button>
                             </div>
-                        </form>
-                    </div>
-                </div>
+                </form>
+            </div>
 
-                <div class="col-lg-5">
-                    <div class="border rounded p-3 h-100">
-                        <div class="fw-semibold mb-2">Swap Lecture</div>
-                        <form method="post" class="row g-2 align-items-end">
+            <div class="adjustment-panel adjustment-panel-swap border rounded p-3 mb-3 d-none">
+                <div class="fw-semibold mb-2">Swap Lecture</div>
+                <form method="post" class="row g-2 align-items-end">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="create_swap">
                             <input type="hidden" name="entry_id" value="{{ row.entry.id }}">
@@ -188,11 +189,9 @@
                             <div class="col-12">
                                 <button class="btn btn-outline-primary w-100" type="submit" {% if row.create_locked or not row.swap_choices %}disabled{% endif %}>Save Swap</button>
                             </div>
-                        </form>
-                    </div>
-                </div>
+                </form>
             </div>
-            <div class="mt-3 border rounded p-3">
+            <div class="adjustment-panel adjustment-panel-room border rounded p-3 d-none">
                 <div class="fw-semibold mb-2">Room Change Only</div>
                 <form method="post" class="row g-2 align-items-end">
                     {% csrf_token %}
@@ -329,6 +328,35 @@ document.querySelectorAll('form').forEach(form => {
 
     swapSelect.addEventListener('change', updateLabels);
     updateLabels();
+});
+
+document.querySelectorAll('.card').forEach(card => {
+    const toggles = card.querySelectorAll('.adjustment-toggle');
+    const panels = {
+        proxy: card.querySelector('.adjustment-panel-proxy'),
+        swap: card.querySelector('.adjustment-panel-swap'),
+        room: card.querySelector('.adjustment-panel-room'),
+    };
+    function hideAll() {
+        Object.values(panels).forEach(panel => {
+            if (panel) panel.classList.add('d-none');
+        });
+        toggles.forEach(btn => btn.classList.remove('btn-primary', 'text-white'));
+        toggles.forEach(btn => btn.classList.add('btn-outline-primary'));
+    }
+    toggles.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const target = btn.getAttribute('data-target');
+            if (!target || !panels[target]) return;
+            const isOpen = !panels[target].classList.contains('d-none');
+            hideAll();
+            if (!isOpen) {
+                panels[target].classList.remove('d-none');
+                btn.classList.remove('btn-outline-primary');
+                btn.classList.add('btn-primary', 'text-white');
+            }
+        });
+    });
 });
 </script>
 
