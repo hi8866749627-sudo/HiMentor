@@ -115,10 +115,19 @@
                                 <label class="form-label">Custom Room</label>
                                 <input type="text" name="room_custom" class="form-control" placeholder="Optional">
                             </div>
-                            <div class="col-md-9">
+                            <div class="col-md-6">
                                 <label class="form-label">Remarks</label>
                                 <input type="text" name="remarks" class="form-control" placeholder="Optional">
                             </div>
+                            {% if is_coordinator %}
+                            <div class="col-md-3">
+                                <label class="form-label">Apply</label>
+                                <select name="scope" class="form-select">
+                                    <option value="week">This week only</option>
+                                    <option value="forever">Forever</option>
+                                </select>
+                            </div>
+                            {% endif %}
                             <div class="col-md-3">
                                 <button class="btn btn-primary w-100" type="submit" {% if row.create_locked %}disabled{% endif %}>Save Proxy</button>
                             </div>
@@ -138,20 +147,37 @@
                             {% endif %}
                             <div class="col-12">
                                 <label class="form-label">Swap With</label>
-                                <select name="swap_entry_id" class="form-select" {% if not row.swap_choices %}disabled{% endif %}>
+                                <select name="swap_entry_id" class="form-select swap-entry-select" {% if not row.swap_choices %}disabled{% endif %}>
                                     <option value="">Select lecture</option>
                                     {% for opt in row.swap_choices %}
-                                        <option value="{{ opt.id }}">{{ opt.label }}</option>
+                                        <option value="{{ opt.id }}" data-faculty="{{ opt.faculty }}" data-room="{{ opt.room }}">{{ opt.label }}</option>
                                     {% endfor %}
                                 </select>
                                 {% if not row.swap_choices %}
                                     <div class="form-text">No same-day swap options available.</div>
                                 {% endif %}
                             </div>
-                            <div class="col-12">
+                            <div class="col-md-4">
+                                <label class="form-label room-swap-label" data-default="Room for Swap Lecture">Room for Swap Lecture</label>
+                                <input type="text" name="swap_room" class="form-control" placeholder="Optional">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label room-current-label" data-default="Room for This Lecture" data-current-faculty="{{ row.entry.faculty }}">Room for This Lecture</label>
+                                <input type="text" name="current_room" class="form-control" placeholder="Optional" value="{{ row.entry.room }}">
+                            </div>
+                            <div class="col-md-4">
                                 <label class="form-label">Remarks</label>
                                 <input type="text" name="remarks" class="form-control" placeholder="Optional">
                             </div>
+                            {% if is_coordinator %}
+                            <div class="col-3">
+                                <label class="form-label">Apply</label>
+                                <select name="scope" class="form-select">
+                                    <option value="week">This week only</option>
+                                    <option value="forever">Forever</option>
+                                </select>
+                            </div>
+                            {% endif %}
                             <div class="col-12">
                                 <button class="btn btn-outline-primary w-100" type="submit" {% if row.create_locked or not row.swap_choices %}disabled{% endif %}>Save Swap</button>
                             </div>
@@ -230,6 +256,32 @@ document.querySelectorAll('form[data-allow-conflict]').forEach(form => {
     });
 
     renderRooms('');
+});
+
+document.querySelectorAll('form').forEach(form => {
+    const swapSelect = form.querySelector('.swap-entry-select');
+    const swapLabel = form.querySelector('.room-swap-label');
+    const currentLabel = form.querySelector('.room-current-label');
+    if (!swapSelect || !swapLabel || !currentLabel) return;
+
+    const defaultSwap = swapLabel.getAttribute('data-default') || 'Room for Swap Lecture';
+    const defaultCurrent = currentLabel.getAttribute('data-default') || 'Room for This Lecture';
+    const currentFaculty = currentLabel.getAttribute('data-current-faculty') || '';
+
+    function updateLabels() {
+        const selected = swapSelect.options[swapSelect.selectedIndex];
+        const swapFaculty = selected ? (selected.getAttribute('data-faculty') || '') : '';
+        const swapRoom = selected ? (selected.getAttribute('data-room') || '') : '';
+        swapLabel.textContent = swapFaculty ? `Room for ${swapFaculty} Lecture` : defaultSwap;
+        currentLabel.textContent = currentFaculty ? `Room for ${currentFaculty} Lecture` : defaultCurrent;
+        const swapInput = form.querySelector('input[name="swap_room"]');
+        if (swapInput) {
+            swapInput.value = swapRoom || swapInput.value;
+        }
+    }
+
+    swapSelect.addEventListener('change', updateLabels);
+    updateLabels();
 });
 </script>
 

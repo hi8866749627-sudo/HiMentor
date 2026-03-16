@@ -27,7 +27,20 @@ class Migration(migrations.Migration):
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('mentor', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='module_accesses', to='core.mentor')),
-                ('module', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='mentor_admin_accesses', to='core.academicmodule')),
+                ('module', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='mentor_module_accesses', to='core.academicmodule')),
+            ],
+            options={
+                'ordering': ['mentor__name', 'module__name'],
+                'unique_together': {('mentor', 'module')},
+            },
+        ),
+        migrations.CreateModel(
+            name='MentorAdminAccess',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('mentor', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='admin_accesses', to='core.mentor')),
+                ('module', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='mentor_admins', to='core.academicmodule')),
             ],
             options={
                 'ordering': ['mentor__name', 'module__name'],

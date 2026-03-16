@@ -28,12 +28,17 @@
     align-items: end;
     padding-bottom: 1px;
 }
+.timetable-cell-highlight {
+    outline: 2px solid #0d6efd;
+    outline-offset: -2px;
+    background: #eef4ff;
+}
 </style>
 
 <h4 class="mb-3">Timetable</h4>
 
 {% if messages %}
-<div class="mb-3">
+<div class="mb-3" id="timetable-messages">
     {% for message in messages %}
         <div class="alert alert-{{ message.tags|default:'info' }} mb-2">{{ message }}</div>
     {% endfor %}
@@ -107,80 +112,165 @@
 <div class="card mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">
         <div>
-            <span>Edit Timetable</span>
+            <span>Permanent Changes</span>
             <span class="badge bg-light text-dark ms-2">Last updated: {{ now|date:"d M Y H:i" }}</span>
         </div>
-        <button type="button" class="btn btn-sm btn-outline-primary" id="toggle-edit-timetable">Edit Timetable</button>
+        <div class="d-flex gap-2">
+            <a class="btn btn-sm btn-outline-secondary" href="/view-timetable/?recent=1#recent-changes">Recent changes</a>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="toggle-edit-timetable">Update Timetable</button>
+        </div>
     </div>
+    {% if recent_mode %}
+    <div class="card-body" id="recent-changes">
+        <div class="fw-semibold mb-2">Recent changes</div>
+        {% if recent_changes %}
+            {% for group in recent_changes %}
+                <div class="border rounded p-2 mb-2">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div>
+                            <span class="badge {% if group.change_type == 'swap' %}bg-info text-dark{% else %}bg-warning text-dark{% endif %}">{{ group.change_type|title }}</span>
+                            <span class="small text-muted ms-2">{{ group.created_at|date:"d M Y H:i" }} · {{ group.created_by }}</span>
+                        </div>
+                        <form method="post" class="m-0">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="undo_change">
+                            <input type="hidden" name="change_group" value="{{ group.group_id }}">
+                            <button class="btn btn-sm btn-outline-danger" type="submit">Undo</button>
+                        </form>
+                    </div>
+                    <ul class="small mb-0">
+                        {% for item in group.items %}
+                            <li>
+                                {{ item.get_day_of_week_display }} · L{{ item.lecture_no }} · {{ item.batch }}:
+                                {{ item.prev_subject }} ({{ item.prev_faculty }} · {{ item.prev_room }})
+                                → {{ item.new_subject }} ({{ item.new_faculty }} · {{ item.new_room }})
+                            </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            {% endfor %}
+        {% else %}
+            <div class="text-muted">No recent changes found.</div>
+        {% endif %}
+    </div>
+    {% endif %}
     <div class="card-body" id="edit-timetable-body" style="display:none;">
-        <form method="post" class="row g-2 align-items-end">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="edit">
-            <div class="col-md-2">
-                <label class="form-label">Day</label>
-                <select name="day" class="form-select" required>
-                    <option value="">Select</option>
-                    {% for code,label in day_choices %}
-                        <option value="{{ code }}">{{ label }}</option>
-                    {% endfor %}
-                </select>
+        <form method="get" class="row g-2 align-items-end mb-3">
+            <div class="col-md-3">
+                <label class="form-label">Edit Date</label>
+                <input type="date" name="editor_date" class="form-control" value="{{ editor_date|date:'Y-m-d' }}">
             </div>
-            <div class="col-md-2">
-                <label class="form-label">Lecture</label>
-                <select name="lecture_no" class="form-select" required>
-                    <option value="">Select</option>
-                    {% for lec in lecture_choices %}
-                        <option value="{{ lec }}">L{{ lec }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md-2">
-                <label class="form-label">Batch</label>
-                <select name="batch" class="form-select" required>
-                    <option value="">Select</option>
-                    {% for b in batches %}
-                        <option value="{{ b }}">{{ b }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md-2">
-                <label class="form-label">Subject</label>
-                <select name="subject" class="form-select" required>
-                    <option value="">Select</option>
-                    {% for s in subjects %}
-                        <option value="{{ s }}">{{ s }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md-2">
+            <div class="col-md-3">
                 <label class="form-label">Faculty</label>
-                <select name="faculty" class="form-select">
-                    <option value="">Select</option>
+                <select name="editor_faculty" class="form-select">
+                    <option value="">All</option>
                     {% for f in faculties %}
-                        <option value="{{ f }}">{{ f }}</option>
+                        <option value="{{ f }}" {% if editor_faculty == f %}selected{% endif %}>{{ f }}</option>
                     {% endfor %}
                 </select>
             </div>
             <div class="col-md-2">
-                <label class="form-label">Room</label>
-                <select name="room" class="form-select">
-                    <option value="">Select</option>
-                    {% for r in rooms %}
-                        <option value="{{ r }}">{{ r }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md-2">
-                <button class="btn btn-primary w-100" type="submit">Update Timetable</button>
+                <button class="btn btn-outline-primary" type="submit">Load</button>
             </div>
         </form>
-        <div class="form-text mt-2">Updates apply from today onward. Past dates remain unchanged.</div>
+        <div class="form-text mb-2">Changes here update the timetable permanently and do not create proxy/swap badges.</div>
+        {% for row in rows %}
+        <div class="card mb-3">
+            <div class="card-header">
+                L{{ row.entry.lecture_no }} · {{ row.entry.time_slot }} · {{ row.entry.batch }} · {{ row.entry.subject }} · {{ row.entry.faculty }} · {{ row.entry.room }}
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-lg-7">
+                        <div class="border rounded p-3 h-100">
+                            <div class="fw-semibold mb-2">Permanent Proxy</div>
+                            <form method="post" class="row g-2 align-items-end">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="perm_proxy">
+                                <input type="hidden" name="entry_id" value="{{ row.entry.id }}">
+                                <div class="col-md-5">
+                                    <label class="form-label">Proxy Faculty</label>
+                                    <select name="proxy_faculty" class="form-select">
+                                        <option value="">Select</option>
+                                        {% for f in row.faculties %}
+                                            <option value="{{ f.name }}" data-subject="{{ f.subject }}">{{ f.name }}{% if f.subject %} - {{ f.subject }}{% endif %}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <input type="hidden" name="proxy_subject" value="">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label">Room</label>
+                                    <select name="room_select" class="form-select">
+                                        <option value="">Select</option>
+                                        {% for r in row.available_rooms %}
+                                            <option value="{{ r }}">{{ r }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">Custom Room</label>
+                                    <input type="text" name="room_custom" class="form-control" placeholder="Optional">
+                                </div>
+                                <div class="col-md-9">
+                                    <label class="form-label">Remarks</label>
+                                    <input type="text" name="remarks" class="form-control" placeholder="Optional">
+                                </div>
+                                <div class="col-md-3">
+                                    <button class="btn btn-primary w-100" type="submit">Save</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    <div class="col-lg-5">
+                        <div class="border rounded p-3 h-100">
+                            <div class="fw-semibold mb-2">Permanent Swap</div>
+                            <form method="post" class="row g-2 align-items-end">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="perm_swap">
+                                <input type="hidden" name="entry_id" value="{{ row.entry.id }}">
+                                <div class="col-12">
+                                    <label class="form-label">Swap With</label>
+                                    <select name="swap_entry_id" class="form-select swap-entry-select" {% if not row.swap_choices %}disabled{% endif %}>
+                                        <option value="">Select lecture</option>
+                                        {% for opt in row.swap_choices %}
+                                            <option value="{{ opt.id }}" data-faculty="{{ opt.faculty }}" data-room="{{ opt.room }}">{{ opt.label }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    {% if not row.swap_choices %}
+                                        <div class="form-text">No same-day swap options available.</div>
+                                    {% endif %}
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label room-swap-label" data-default="Room for Swap Lecture">Room for Swap Lecture</label>
+                                    <input type="text" name="swap_room" class="form-control" placeholder="Optional">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label room-current-label" data-default="Room for This Lecture" data-current-faculty="{{ row.entry.faculty }}">Room for This Lecture</label>
+                                    <input type="text" name="current_room" class="form-control" placeholder="Optional" value="{{ row.entry.room }}">
+                                </div>
+                                <div class="col-12">
+                                    <button class="btn btn-outline-primary w-100" type="submit" {% if not row.swap_choices %}disabled{% endif %}>Save</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% empty %}
+        <div class="alert alert-info">No lectures found for this date.</div>
+        {% endfor %}
     </div>
 </div>
 
 {% for day in day_tables %}
 <div class="card mb-4">
-    <div class="card-header">{{ day.day }}</div>
+<div class="card-header">
+    {{ day.day }} ·
+    {% if day.date_label %}
+        <span class="text-muted ms-2">{{ day.date_label|date:"d M Y" }}</span>
+    {% endif %}
+</div>
     <div class="card-body p-0">
         <div class="table-responsive">
             <table class="table table-bordered mb-0">
@@ -200,14 +290,24 @@
                         <td>{{ day.time_map|get_item:lec }}</td>
                         {% for b in day.batches %}
                             {% with entry=day.cell_map|get_item:lec|get_item:b %}
-                            <td>
+                            {% with key=day.day_key|stringformat:"s"|add:":"|add:lec|stringformat:"s"|add:":"|add:b %}
+                            <td class="{% if highlight_key and highlight_key == key %}timetable-cell-highlight{% endif %}">
                                 {% if entry %}
                                     <div class="fw-semibold">{{ entry.subject }}</div>
                                     <div class="small text-muted">{{ entry.faculty }} · {{ entry.room }}</div>
+                                    {% if entry.badge == "proxy" %}
+                                        <span class="badge bg-warning text-dark mt-1">Proxy</span>
+                                    {% elif entry.badge == "swap" %}
+                                        <span class="badge bg-info text-dark mt-1">Swap</span>
+                                    {% endif %}
+                                    {% if entry.badge == "swap" and entry.time_slot_display and entry.time_slot_display != day.time_map|get_item:lec %}
+                                        <div class="small text-muted mt-1">Slot: {{ entry.time_slot_display }}</div>
+                                    {% endif %}
                                 {% else %}
                                     <span class="text-muted">-</span>
                                 {% endif %}
                             </td>
+                            {% endwith %}
                             {% endwith %}
                         {% endfor %}
                     </tr>
@@ -229,13 +329,55 @@ document.addEventListener("DOMContentLoaded", function(){
         btn.addEventListener("click", function(){
             const isOpen = body.style.display !== "none";
             body.style.display = isOpen ? "none" : "block";
-            btn.textContent = isOpen ? "Edit Timetable" : "Hide Editor";
+            btn.textContent = isOpen ? "Update Timetable" : "Hide Editor";
         });
     }
     const params = new URLSearchParams(window.location.search);
-    if (params.get("updated") === "1") {
-        setTimeout(() => window.location.reload(), 300);
+    if (params.get("editor_date") || params.get("editor_faculty")) {
+        if (body) {
+            body.style.display = "block";
+        }
+        if (btn) {
+            btn.textContent = "Hide Editor";
+        }
     }
+    if (params.get("updated") === "1") {
+        params.delete("updated");
+        const nextUrl = `${window.location.pathname}${params.toString() ? "?" + params.toString() : ""}`;
+        window.history.replaceState({}, "", nextUrl);
+    }
+    const msgBox = document.getElementById("timetable-messages");
+    if (msgBox) {
+        setTimeout(() => {
+            msgBox.style.display = "none";
+        }, 3000);
+    }
+
+    document.querySelectorAll('form').forEach(form => {
+        const swapSelect = form.querySelector('.swap-entry-select');
+        const swapLabel = form.querySelector('.room-swap-label');
+        const currentLabel = form.querySelector('.room-current-label');
+        if (!swapSelect || !swapLabel || !currentLabel) return;
+
+        const defaultSwap = swapLabel.getAttribute('data-default') || 'Room for Swap Lecture';
+        const defaultCurrent = currentLabel.getAttribute('data-default') || 'Room for This Lecture';
+        const currentFaculty = currentLabel.getAttribute('data-current-faculty') || '';
+
+        function updateLabels() {
+            const selected = swapSelect.options[swapSelect.selectedIndex];
+            const swapFaculty = selected ? (selected.getAttribute('data-faculty') || '') : '';
+            const swapRoom = selected ? (selected.getAttribute('data-room') || '') : '';
+            swapLabel.textContent = swapFaculty ? `Room for ${swapFaculty} Lecture` : defaultSwap;
+            currentLabel.textContent = currentFaculty ? `Room for ${currentFaculty} Lecture` : defaultCurrent;
+            const swapInput = form.querySelector('input[name="swap_room"]');
+            if (swapInput) {
+                swapInput.value = swapRoom || swapInput.value;
+            }
+        }
+
+        swapSelect.addEventListener('change', updateLabels);
+        updateLabels();
+    });
 });
 </script>
 

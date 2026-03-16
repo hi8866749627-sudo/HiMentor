@@ -5,6 +5,7 @@ from django.conf import settings
 from django.db import connection
 
 from .module_utils import allowed_modules_for_user, get_current_module, is_superadmin_user
+from .models import MentorAdminAccess
 from .utils import resolve_mentor_identity
 
 _SYSTEM_INFO_CACHE = {"ts": 0.0, "value": None}
@@ -114,7 +115,9 @@ def module_context(request):
         mentor_obj = resolve_mentor_identity(request.session.get("mentor"))
         if mentor_obj:
             mentor_display_name = mentor_obj.full_name or mentor_obj.name
-            mentor_is_admin = bool(mentor_obj.is_admin)
+            mentor_is_admin = bool(
+                mentor_obj.is_admin and MentorAdminAccess.objects.filter(mentor=mentor_obj).exists()
+            )
         else:
             mentor_display_name = request.session.get("mentor")
         admin_mode = bool(request.session.get("admin_mode")) if mentor_is_admin else False

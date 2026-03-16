@@ -12,6 +12,8 @@
                 <th>Mentor Code</th>
                 <th>Mentor Name</th>
                 <th>Students</th>
+                <th>Admin Access</th>
+                <th>Module Access</th>
                 <th>Password Mode</th>
                 <th>Admin Access</th>
                 <th>Actions</th>
@@ -23,6 +25,32 @@
                 <td>{{ r.mentor.name }}</td>
                 <td>{{ r.mentor.full_name|default:"-" }}</td>
                 <td>{{ r.student_count }}</td>
+                <td>
+                    <form method="post" class="d-flex gap-2 flex-wrap align-items-center">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="update_access">
+                        <input type="hidden" name="mentor_id" value="{{ r.mentor.id }}">
+                        <div class="form-check me-2">
+                            <input class="form-check-input" type="checkbox" name="is_admin" id="admin-{{ r.mentor.id }}"
+                                   {% if r.admin_for_module %}checked{% endif %}>
+                            <label class="form-check-label" for="admin-{{ r.mentor.id }}">Admin for this module</label>
+                        </div>
+                        <button class="btn btn-sm btn-outline-primary">Save</button>
+                    </form>
+                </td>
+                <td>
+                    <form method="post" class="d-flex gap-2 flex-wrap align-items-center">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="update_access">
+                        <input type="hidden" name="mentor_id" value="{{ r.mentor.id }}">
+                        <select name="module_access_ids" class="form-select form-select-sm" multiple size="2" style="min-width:220px;">
+                            {% for m in modules %}
+                                <option value="{{ m.id }}" {% if m.id in r.admin_modules %}selected{% endif %}>{{ m.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <button class="btn btn-sm btn-outline-primary">Save</button>
+                    </form>
+                </td>
                 <td>
                     {% if r.has_custom_password %}
                         <span class="badge bg-warning text-dark">Custom</span>

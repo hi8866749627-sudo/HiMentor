@@ -216,6 +216,39 @@ class TimetableEntry(models.Model):
         return f"{self.batch} - {self.subject} ({self.get_day_of_week_display()})"
 
 
+class TimetableChangeLog(models.Model):
+    TYPE_PROXY = "proxy"
+    TYPE_SWAP = "swap"
+    TYPE_CHOICES = [
+        (TYPE_PROXY, "Proxy"),
+        (TYPE_SWAP, "Swap"),
+    ]
+
+    module = models.ForeignKey(AcademicModule, on_delete=models.CASCADE, related_name="timetable_changes")
+    timetable_entry = models.ForeignKey(TimetableEntry, on_delete=models.SET_NULL, null=True, blank=True)
+    change_group = models.CharField(max_length=40, blank=True)
+    change_type = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    day_of_week = models.IntegerField(choices=TimetableEntry.DAY_CHOICES)
+    lecture_no = models.IntegerField()
+    batch = models.CharField(max_length=30)
+    prev_subject = models.CharField(max_length=120, blank=True)
+    prev_faculty = models.CharField(max_length=50, blank=True)
+    prev_room = models.CharField(max_length=50, blank=True)
+    prev_time_slot = models.CharField(max_length=60, blank=True)
+    new_subject = models.CharField(max_length=120, blank=True)
+    new_faculty = models.CharField(max_length=50, blank=True)
+    new_room = models.CharField(max_length=50, blank=True)
+    new_time_slot = models.CharField(max_length=60, blank=True)
+    created_by = models.CharField(max_length=120, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_undone = models.BooleanField(default=False)
+    undone_at = models.DateTimeField(null=True, blank=True)
+    undone_by = models.CharField(max_length=120, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+
 class LectureSession(models.Model):
     module = models.ForeignKey(AcademicModule, on_delete=models.CASCADE, related_name="lecture_sessions")
     timetable_entry = models.ForeignKey(TimetableEntry, on_delete=models.SET_NULL, null=True, blank=True)
@@ -473,7 +506,7 @@ class CoordinatorModuleAccess(models.Model):
 
 class MentorModuleAccess(models.Model):
     mentor = models.ForeignKey(Mentor, on_delete=models.CASCADE, related_name="module_accesses")
-    module = models.ForeignKey(AcademicModule, on_delete=models.CASCADE, related_name="mentor_admin_accesses")
+    module = models.ForeignKey(AcademicModule, on_delete=models.CASCADE, related_name="mentor_module_accesses")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -483,7 +516,17 @@ class MentorModuleAccess(models.Model):
     def __str__(self):
         return f"{self.mentor.name} -> {self.module.name}"
 
+class MentorAdminAccess(models.Model):
+    mentor = models.ForeignKey(Mentor, on_delete=models.CASCADE, related_name="admin_accesses")
+    module = models.ForeignKey(AcademicModule, on_delete=models.CASCADE, related_name="mentor_admins")
+    created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        unique_together = ("mentor", "module")
+        ordering = ["mentor__name", "module__name"]
+
+    def __str__(self):
+        return f"{self.mentor.name} (admin) -> {self.module.name}"
 class PracticalMarkUpload(models.Model):
     module = models.ForeignKey(AcademicModule, on_delete=models.CASCADE, related_name="practical_mark_uploads")
     uploaded_by = models.CharField(max_length=100, blank=True)

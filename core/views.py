@@ -54,6 +54,7 @@ from .models import (
     CoordinatorModuleAccess,
     Mentor,
     MentorModuleAccess,
+    MentorAdminAccess,
     MentorPassword,
     OtherCallRecord,
     PracticalMarkUpload,
@@ -69,6 +70,7 @@ from .models import (
     SubjectAlias,
     TimetableEntry,
     TimetableUpload,
+    TimetableChangeLog,
     LectureSession,
     LectureAbsence,
     Room,
@@ -236,13 +238,78 @@ def _ensure_active_timetable(module):
         .order_by("-effective_from", "-uploaded_at")
         .first()
     )
-    if not candidate or candidate.is_active:
+    if not candidate:
+        return
+    if candidate.is_active:
+        _normalize_fixed_slots(module)
         return
     TimetableUpload.objects.filter(module=module).update(is_active=False)
     candidate.is_active = True
     candidate.save(update_fields=["is_active"])
     TimetableEntry.objects.filter(module=module).update(is_active=False)
     TimetableEntry.objects.filter(module=module, upload=candidate).update(is_active=True)
+    _normalize_fixed_slots(module)
+
+
+def _fixed_lecture_slot_map():
+    return {
+        1: "08:45-09:45",
+        2: "09:45-10:45",
+        3: "11:30-12:30",
+        4: "12:30-13:30",
+    }
+
+
+def _fixed_time_for_lecture(lecture_no, fallback=""):
+    return _fixed_lecture_slot_map().get(lecture_no, fallback or "")
+
+
+def _normalize_fixed_slots(module):
+    slot_map = _fixed_lecture_slot_map()
+    if not slot_map:
+        return
+    time_to_lecture = {v: k for k, v in slot_map.items()}
+    entries = list(TimetableEntry.objects.filter(module=module, is_active=True))
+    grouped = {}
+    for entry in entries:
+        grouped.setdefault((entry.day_of_week, entry.batch), []).append(entry)
+    swapped = set()
+    for (day_key, batch), items in grouped.items():
+        by_lecture = {item.lecture_no: item for item in items}
+        for item in items:
+            expected = time_to_lecture.get(item.time_slot)
+            if not expected or expected == item.lecture_no:
+                continue
+            pair_key = tuple(sorted([item.lecture_no, expected]))
+            if pair_key in swapped:
+                continue
+            other = by_lecture.get(expected)
+            if not other:
+                continue
+            item.subject, other.subject = other.subject, item.subject
+            item.faculty, other.faculty = other.faculty, item.faculty
+            item.room, other.room = other.room, item.room
+            item.time_slot = slot_map.get(item.lecture_no, item.time_slot)
+            other.time_slot = slot_map.get(other.lecture_no, other.time_slot)
+            item.save(update_fields=["subject", "faculty", "room", "time_slot"])
+            other.save(update_fields=["subject", "faculty", "room", "time_slot"])
+            swapped.add(pair_key)
+    for lecture_no, slot in slot_map.items():
+        TimetableEntry.objects.filter(
+            module=module,
+            lecture_no=lecture_no,
+            is_active=True,
+        ).exclude(time_slot=slot).update(time_slot=slot)
+        LectureAdjustment.objects.filter(
+            module=module,
+            lecture_no=lecture_no,
+            status=LectureAdjustment.STATUS_ACTIVE,
+        ).exclude(time_slot=slot).update(time_slot=slot)
+        LectureAdjustment.objects.filter(
+            module=module,
+            swap_lecture_no=lecture_no,
+            status=LectureAdjustment.STATUS_ACTIVE,
+        ).exclude(swap_time_slot=slot).update(swap_time_slot=slot)
 
 
 def _active_upload_for_module(module):
@@ -508,8 +575,25 @@ def manage_mentors(request):
     if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
 
+    mentor_obj = _session_mentor_obj(request)
     module = _active_module(request)
     _ensure_active_timetable(module)
+    modules_in_scope = []
+    if request.user.is_authenticated:
+        modules_in_scope = list(
+            AcademicModule.objects.filter(is_active=True, coordinator_accesses__coordinator=request.user)
+            .distinct()
+            .order_by("-id")
+        )
+    elif mentor_obj and mentor_obj.is_admin:
+        modules_in_scope = list(
+            AcademicModule.objects.filter(is_active=True, mentor_admins__mentor=mentor_obj)
+            .distinct()
+            .order_by("-id")
+        )
+    if modules_in_scope and module.id not in {m.id for m in modules_in_scope}:
+        messages.error(request, "You do not have access to manage mentors for this module.")
+        return redirect("/reports/")
     faculty_names = sorted(
         {
             (name or "").strip()
@@ -546,8 +630,8 @@ def manage_mentors(request):
             messages.success(request, f"Password reset to default rule for mentor {mentor.name}.")
         elif action == "update_access":
             is_admin = bool(request.POST.get("is_admin"))
-            module_ids = [m for m in request.POST.getlist("admin_module_ids") if str(m).isdigit()]
-            modules = list(AcademicModule.objects.filter(id__in=module_ids, is_active=True))
+            module_ids = [m for m in request.POST.getlist("module_access_ids") if str(m).isdigit()]
+            modules = [m for m in modules_in_scope if str(m.id) in {str(mid) for mid in module_ids}]
             mentor.is_admin = is_admin
             mentor.save(update_fields=["is_admin"])
             MentorModuleAccess.objects.filter(mentor=mentor).delete()
@@ -556,6 +640,9 @@ def manage_mentors(request):
                     [MentorModuleAccess(mentor=mentor, module=m) for m in modules],
                     ignore_conflicts=True,
                 )
+            MentorAdminAccess.objects.filter(mentor=mentor, module=module).delete()
+            if is_admin:
+                MentorAdminAccess.objects.get_or_create(mentor=mentor, module=module)
             messages.success(request, f"Access updated for mentor {mentor.name}.")
         else:
             messages.error(request, "Invalid action.")
@@ -571,7 +658,10 @@ def manage_mentors(request):
     access_map = {}
     for acc in MentorModuleAccess.objects.filter(mentor__in=mentors).select_related("module"):
         access_map.setdefault(acc.mentor_id, set()).add(acc.module_id)
-    modules = list(AcademicModule.objects.filter(is_active=True).order_by("-id"))
+    admin_access_ids = {
+        a.mentor_id
+        for a in MentorAdminAccess.objects.filter(module=module, mentor__in=mentors).select_related("mentor")
+    }
     rows = []
     for m in mentors:
         rows.append(
@@ -580,6 +670,7 @@ def manage_mentors(request):
                 "student_count": getattr(m, "student_count", 0),
                 "has_custom_password": m.id in cred_map,
                 "admin_modules": access_map.get(m.id, set()),
+                "admin_for_module": m.id in admin_access_ids,
             }
         )
 
@@ -589,7 +680,7 @@ def manage_mentors(request):
         {
             "rows": rows,
             "module": module,
-            "modules": modules,
+            "modules": modules_in_scope or [module],
         },
     )
 
@@ -3861,7 +3952,7 @@ def switch_module(request):
 @require_http_methods(["POST"])
 def switch_admin_mode(request):
     mentor = _session_mentor_obj(request)
-    if not mentor or not mentor.is_admin:
+    if not mentor or not mentor.is_admin or not MentorAdminAccess.objects.filter(mentor=mentor).exists():
         return redirect("/")
     request.session["admin_mode"] = not bool(request.session.get("admin_mode"))
     next_url = request.POST.get("next") or request.META.get("HTTP_REFERER") or "/mentor-dashboard/"
@@ -4523,75 +4614,236 @@ def view_timetable(request):
     module = _active_module(request)
     _ensure_active_timetable(module)
     choice_lists = _timetable_choice_lists(module)
+    today = timezone.localdate()
+    week_start = today - timedelta(days=today.weekday())
+    week_end = week_start + timedelta(days=5)
+    date_by_day = {i: week_start + timedelta(days=i) for i in range(6)}
+    adjustments = list(
+        LectureAdjustment.objects.filter(
+            module=module,
+            date__gte=week_start,
+            date__lte=week_end,
+            status=LectureAdjustment.STATUS_ACTIVE,
+        ).select_related("proxy_faculty")
+    )
+    adj_map = {(a.date, a.batch, a.lecture_no): a for a in adjustments}
+    selected_date = week_start
     if request.method == "POST":
         action = (request.POST.get("action") or "").strip()
-        if action == "edit":
-            day_val = request.POST.get("day")
-            lecture_raw = request.POST.get("lecture_no")
-            batch = (request.POST.get("batch") or "").strip()
-            subject = (request.POST.get("subject") or "").strip()
-            faculty = (request.POST.get("faculty") or "").strip().upper()
-            room = (request.POST.get("room") or "").strip()
-            time_slot = (request.POST.get("time_slot") or "").strip()
-            if not (day_val and lecture_raw and batch and subject):
-                messages.error(request, "Day, lecture, batch, and subject are required.")
-            else:
-                try:
-                    day_val = int(day_val)
-                    lecture_no = int(lecture_raw)
-                except Exception:
-                    messages.error(request, "Invalid day or lecture number.")
-                else:
-                    active_upload = _active_upload_for_module(module)
-                    if not active_upload:
-                        messages.error(request, "No active timetable found. Upload and activate a timetable first.")
-                    else:
-                        if not time_slot:
-                            existing = TimetableEntry.objects.filter(
-                                module=module,
-                                upload=active_upload,
-                                day_of_week=day_val,
-                                lecture_no=lecture_no,
-                                batch=batch,
-                            ).first()
-                            if not existing:
-                                existing = TimetableEntry.objects.filter(
-                                    module=module,
-                                    upload=active_upload,
-                                    day_of_week=day_val,
-                                    lecture_no=lecture_no,
-                                ).first()
-                            if existing:
-                                time_slot = existing.time_slot or ""
-                        entry, _ = TimetableEntry.objects.update_or_create(
-                            module=module,
-                            day_of_week=day_val,
-                            lecture_no=lecture_no,
-                            batch=batch,
-                            upload=active_upload,
-                            defaults={
-                                "time_slot": time_slot,
-                                "subject": subject,
-                                "faculty": faculty,
-                                "room": room,
-                                "is_active": True,
-                            },
-                        )
-                        TimetableEntry.objects.filter(
-                            module=module,
-                            day_of_week=day_val,
-                            lecture_no=lecture_no,
-                            batch=batch,
-                        ).exclude(id=entry.id).update(is_active=False)
-                        _sync_subjects_from_timetable(module)
-                        messages.success(request, "Timetable updated.")
-            return redirect("/view-timetable/?updated=1")
+        if action == "perm_proxy":
+            entry_id = request.POST.get("entry_id")
+            proxy_name = (request.POST.get("proxy_faculty") or "").strip()
+            proxy_subject = (request.POST.get("proxy_subject") or "").strip()
+            room_select = (request.POST.get("room_select") or "").strip()
+            room_custom = (request.POST.get("room_custom") or "").strip()
+            remarks = (request.POST.get("remarks") or "").strip()
+            entry = TimetableEntry.objects.filter(id=entry_id, module=module, is_active=True).first()
+            if not entry:
+                messages.error(request, "Lecture not found.")
+                return redirect("/view-timetable/?updated=1")
+            proxy = Mentor.objects.filter(name__iexact=proxy_name).first()
+            if not proxy:
+                messages.error(request, "Select a valid proxy faculty.")
+                return redirect("/view-timetable/?updated=1")
+            room = room_custom or room_select or entry.room
+            subject_val = _resolve_proxy_subject(
+                module,
+                proxy.name,
+                batch=entry.batch,
+                lecture_no=entry.lecture_no,
+                day_of_week=entry.day_of_week,
+            ) or proxy_subject or entry.subject
+            change_group = uuid.uuid4().hex
+            fixed_time = _fixed_time_for_lecture(entry.lecture_no, entry.time_slot)
+            TimetableChangeLog.objects.create(
+                module=module,
+                timetable_entry=entry,
+                change_group=change_group,
+                change_type=TimetableChangeLog.TYPE_PROXY,
+                day_of_week=entry.day_of_week,
+                lecture_no=entry.lecture_no,
+                batch=entry.batch,
+                prev_subject=entry.subject,
+                prev_faculty=entry.faculty,
+                prev_room=entry.room,
+                prev_time_slot=entry.time_slot,
+                new_subject=subject_val,
+                new_faculty=proxy.name,
+                new_room=room,
+                new_time_slot=fixed_time,
+                created_by=request.user.username,
+            )
+            TimetableEntry.objects.filter(
+                module=module,
+                day_of_week=entry.day_of_week,
+                lecture_no=entry.lecture_no,
+                batch=entry.batch,
+                is_active=True,
+            ).update(
+                subject=subject_val,
+                faculty=proxy.name,
+                room=room,
+                time_slot=fixed_time,
+            )
+            _sync_subjects_from_timetable(module)
+            messages.success(request, "Timetable updated permanently.")
+            return redirect(
+                f"/view-timetable/?updated=1&highlight=1&last_key={entry.day_of_week}:{entry.lecture_no}:{entry.batch}"
+            )
+        if action == "perm_swap":
+            entry_id = request.POST.get("entry_id")
+            partner_id = request.POST.get("swap_entry_id")
+            swap_room = (request.POST.get("swap_room") or "").strip()
+            current_room = (request.POST.get("current_room") or "").strip()
+            entry = TimetableEntry.objects.filter(
+                id=entry_id,
+                module=module,
+                is_active=True,
+            ).first()
+            partner = TimetableEntry.objects.filter(
+                id=partner_id,
+                module=module,
+                is_active=True,
+            ).exclude(id=entry_id).first()
+            if not entry or not partner:
+                messages.error(request, "Select valid lectures to swap.")
+                return redirect("/view-timetable/?updated=1")
+            room_a = swap_room or partner.room
+            room_b = current_room or entry.room
+            time_a = _fixed_time_for_lecture(entry.lecture_no, entry.time_slot)
+            time_b = _fixed_time_for_lecture(partner.lecture_no, partner.time_slot)
+            change_group = uuid.uuid4().hex
+            TimetableChangeLog.objects.bulk_create(
+                [
+                    TimetableChangeLog(
+                        module=module,
+                        timetable_entry=entry,
+                        change_group=change_group,
+                        change_type=TimetableChangeLog.TYPE_SWAP,
+                        day_of_week=entry.day_of_week,
+                        lecture_no=entry.lecture_no,
+                        batch=entry.batch,
+                        prev_subject=entry.subject,
+                        prev_faculty=entry.faculty,
+                        prev_room=entry.room,
+                        prev_time_slot=entry.time_slot,
+                        new_subject=partner.subject,
+                        new_faculty=partner.faculty,
+                        new_room=room_a,
+                        new_time_slot=time_a,
+                        created_by=request.user.username,
+                    ),
+                    TimetableChangeLog(
+                        module=module,
+                        timetable_entry=partner,
+                        change_group=change_group,
+                        change_type=TimetableChangeLog.TYPE_SWAP,
+                        day_of_week=partner.day_of_week,
+                        lecture_no=partner.lecture_no,
+                        batch=partner.batch,
+                        prev_subject=partner.subject,
+                        prev_faculty=partner.faculty,
+                        prev_room=partner.room,
+                        prev_time_slot=partner.time_slot,
+                        new_subject=entry.subject,
+                        new_faculty=entry.faculty,
+                        new_room=room_b,
+                        new_time_slot=time_b,
+                        created_by=request.user.username,
+                    ),
+                ]
+            )
+            TimetableEntry.objects.filter(
+                module=module,
+                day_of_week=entry.day_of_week,
+                lecture_no=entry.lecture_no,
+                batch=entry.batch,
+                is_active=True,
+            ).update(
+                subject=partner.subject,
+                faculty=partner.faculty,
+                room=room_a,
+                time_slot=time_a,
+            )
+            TimetableEntry.objects.filter(
+                module=module,
+                day_of_week=partner.day_of_week,
+                lecture_no=partner.lecture_no,
+                batch=partner.batch,
+                is_active=True,
+            ).update(
+                subject=entry.subject,
+                faculty=entry.faculty,
+                room=room_b,
+                time_slot=time_b,
+            )
+            messages.success(request, "Timetable updated permanently (swap).")
+            return redirect(
+                f"/view-timetable/?updated=1&highlight=1&last_key={entry.day_of_week}:{entry.lecture_no}:{entry.batch}"
+            )
+        if action == "undo_change":
+            change_group = (request.POST.get("change_group") or "").strip()
+            changes = list(
+                TimetableChangeLog.objects.filter(
+                    module=module, change_group=change_group, is_undone=False
+                ).order_by("id")
+            )
+            if not changes:
+                messages.error(request, "Change not found or already undone.")
+                return redirect("/view-timetable/?recent=1")
+            for change in changes:
+                fixed_time = _fixed_time_for_lecture(change.lecture_no, change.prev_time_slot)
+                TimetableEntry.objects.filter(
+                    module=module,
+                    day_of_week=change.day_of_week,
+                    lecture_no=change.lecture_no,
+                    batch=change.batch,
+                    is_active=True,
+                ).update(
+                    subject=change.prev_subject,
+                    faculty=change.prev_faculty,
+                    room=change.prev_room,
+                    time_slot=fixed_time,
+                )
+                entry = TimetableEntry.objects.filter(
+                    module=module,
+                    day_of_week=change.day_of_week,
+                    lecture_no=change.lecture_no,
+                    batch=change.batch,
+                    is_active=True,
+                ).first()
+                if entry:
+                    _sync_existing_session(
+                        module,
+                        timezone.localdate(),
+                        entry.batch,
+                        entry.lecture_no,
+                        timetable_entry=entry,
+                        day_of_week=entry.day_of_week,
+                        time_slot=fixed_time,
+                        subject=change.prev_subject,
+                        faculty=change.prev_faculty,
+                        room=change.prev_room,
+                    )
+            TimetableChangeLog.objects.filter(
+                module=module, change_group=change_group, is_undone=False
+            ).update(
+                is_undone=True,
+                undone_at=timezone.now(),
+                undone_by=request.user.username,
+            )
+            _sync_subjects_from_timetable(module)
+            messages.success(request, "Change undone.")
+            return redirect("/view-timetable/?recent=1")
     day_filter = request.GET.get("day")
     lecture_filter = (request.GET.get("lecture_no") or "").strip()
     batch_filter = (request.GET.get("batch") or "").strip()
     subject_filter = (request.GET.get("subject") or "").strip()
     faculty_filter = (request.GET.get("faculty") or "").strip()
     room_filter = (request.GET.get("room") or "").strip()
+    highlight_key = ""
+    if request.GET.get("highlight") == "1":
+        highlight_key = (request.GET.get("last_key") or "").strip()
 
     qs = TimetableEntry.objects.filter(module=module, is_active=True).order_by("day_of_week", "lecture_no", "batch")
     if day_filter and str(day_filter).isdigit():
@@ -4617,15 +4869,39 @@ def view_timetable(request):
     for day_key, entries in grouped.items():
         batch_set = sorted({e.batch for e in entries})
         lectures = sorted({e.lecture_no for e in entries})
+        fixed_map = _fixed_lecture_slot_map()
         time_map = {}
+        for e in entries:
+            time_map[e.lecture_no] = fixed_map.get(e.lecture_no, e.time_slot)
         cell_map = {}
         for e in entries:
-            time_map[e.lecture_no] = e.time_slot
-            cell_map.setdefault(e.lecture_no, {})[e.batch] = e
+            display = SimpleNamespace(
+                subject=e.subject,
+                faculty=e.faculty,
+                room=e.room,
+                badge="",
+                time_slot_display=time_map.get(e.lecture_no, e.time_slot),
+            )
+            day_date = date_by_day.get(day_key)
+            adj = adj_map.get((day_date, e.batch, e.lecture_no)) if day_date else None
+            target_lecture = e.lecture_no
+            if adj:
+                display.subject = adj.subject or display.subject
+                display.room = adj.room or display.room
+                if adj.adjustment_type == LectureAdjustment.TYPE_PROXY:
+                    display.time_slot_display = adj.time_slot or display.time_slot_display
+                    if adj.proxy_faculty:
+                        display.faculty = adj.proxy_faculty.name
+                    display.badge = "proxy"
+                elif adj.adjustment_type == LectureAdjustment.TYPE_SWAP:
+                    display.badge = "swap"
+                    display.faculty = adj.original_faculty or display.faculty
+            cell_map.setdefault(target_lecture, {})[e.batch] = display
         day_tables.append(
             {
                 "day": dict(day_choices).get(day_key, str(day_key)),
                 "day_key": day_key,
+                "date_label": date_by_day.get(day_key),
                 "batches": batch_set,
                 "lectures": lectures,
                 "time_map": time_map,
@@ -4635,6 +4911,33 @@ def view_timetable(request):
 
     day_tables.sort(key=lambda d: d["day_key"])
 
+    editor_date = _parse_date_param(request.GET.get("editor_date"), timezone.localdate())
+    editor_faculty = (request.GET.get("editor_faculty") or "").strip()
+    rows, _ = _build_adjustment_rows(
+        module,
+        editor_date,
+        faculty_filter=editor_faculty,
+        allow_started_adjustments=True,
+    )
+
+    recent_changes = []
+    recent_mode = request.GET.get("recent") == "1"
+    if recent_mode:
+        changes = TimetableChangeLog.objects.filter(module=module, is_undone=False).order_by("-created_at", "-id")[:50]
+        grouped = {}
+        for change in changes:
+            grouped.setdefault(change.change_group, []).append(change)
+        for group_id, items in grouped.items():
+            first = items[0]
+            recent_changes.append(
+                {
+                    "group_id": group_id,
+                    "change_type": first.change_type,
+                    "created_at": first.created_at,
+                    "created_by": first.created_by,
+                    "items": items,
+                }
+            )
     return render(
         request,
         "view_timetable.html",
@@ -4645,6 +4948,7 @@ def view_timetable(request):
             "subject_filter": subject_filter,
             "faculty_filter": faculty_filter,
             "room_filter": room_filter,
+            "selected_date": selected_date,
             "day_choices": day_choices,
             "lecture_choices": choice_lists["lecture_choices"],
             "batches": choice_lists["batch_choices"],
@@ -4653,6 +4957,14 @@ def view_timetable(request):
             "rooms": choice_lists["room_choices"],
             "day_tables": day_tables,
             "module": module,
+            "highlight_key": highlight_key,
+            "now": timezone.now(),
+            "selected_date": selected_date,
+            "editor_date": editor_date,
+            "editor_faculty": editor_faculty,
+            "rows": rows,
+            "recent_changes": recent_changes,
+            "recent_mode": recent_mode,
         },
     )
 
@@ -4916,6 +5228,7 @@ def _schedule_entries_for_faculty(modules, selected_date, faculty_name):
             subject_val = entry.subject
             time_slot_val = entry.time_slot
             room_val = merge_room or entry.room
+            faculty_val = entry.faculty
             if adj:
                 if adj.adjustment_type == LectureAdjustment.TYPE_PROXY:
                     if adj.proxy_faculty and adj.proxy_faculty.name.lower() == faculty_name.lower():
@@ -4928,6 +5241,8 @@ def _schedule_entries_for_faculty(modules, selected_date, faculty_name):
                         ) or adj.subject or subject_val
                 else:
                     subject_val = adj.subject or subject_val
+                if adj.adjustment_type == LectureAdjustment.TYPE_SWAP:
+                    faculty_val = adj.original_faculty or faculty_val
                 time_slot_val = adj.time_slot or time_slot_val
                 room_val = adj.room or room_val
             row_highlight = ""
@@ -4961,6 +5276,7 @@ def _schedule_entries_for_faculty(modules, selected_date, faculty_name):
                     "proxy_created": proxy_created,
                     "adjustment_type": adj.adjustment_type if adj else "",
                     "swap_with": f"{adj.swap_batch} L{adj.swap_lecture_no}" if adj and adj.adjustment_type == LectureAdjustment.TYPE_SWAP and adj.swap_batch and adj.swap_lecture_no else "",
+                    "faculty": faculty_val,
                     "total_count": total_count,
                     "absent_count": absent_count,
                     "present_count": present_count,
@@ -5486,6 +5802,7 @@ def _swap_partner_choices(
                 "id": candidate.id,
                 "label": f"L{candidate.lecture_no} · {candidate.time_slot} · {candidate.batch} · {candidate.faculty} · {candidate.subject}",
                 "faculty": candidate.faculty,
+                "room": candidate.room,
                 "batch": candidate.batch,
                 "lecture_no": candidate.lecture_no,
                 "time_slot": candidate.time_slot,
@@ -5495,8 +5812,23 @@ def _swap_partner_choices(
     return partners
 
 
-def _create_swap_adjustments(module, selected_date, entry_a, entry_b, created_by, remarks):
+def _create_swap_adjustments(
+    module,
+    selected_date,
+    entry_a,
+    entry_b,
+    created_by,
+    remarks,
+    room_override_a="",
+    room_override_b="",
+):
+    room_override_a = (room_override_a or "").strip()
+    room_override_b = (room_override_b or "").strip()
     swap_key = uuid.uuid4().hex
+    room_a = room_override_a or entry_b.room
+    room_b = room_override_b or entry_a.room
+    time_a = _fixed_time_for_lecture(entry_a.lecture_no, entry_a.time_slot)
+    time_b = _fixed_time_for_lecture(entry_b.lecture_no, entry_b.time_slot)
     defaults_common = {
         "adjustment_type": LectureAdjustment.TYPE_SWAP,
         "proxy_faculty": None,
@@ -5516,13 +5848,13 @@ def _create_swap_adjustments(module, selected_date, entry_a, entry_b, created_by
         defaults={
             **defaults_common,
             "timetable_entry": entry_a,
-            "time_slot": entry_b.time_slot,
-            "subject": entry_a.subject,
-            "original_faculty": entry_a.faculty,
-            "room": entry_a.room,
+            "time_slot": time_a,
+            "subject": entry_b.subject,
+            "original_faculty": entry_b.faculty,
+            "room": room_a,
             "swap_batch": entry_b.batch,
             "swap_lecture_no": entry_b.lecture_no,
-            "swap_time_slot": entry_b.time_slot,
+            "swap_time_slot": time_b,
         },
     )
     LectureAdjustment.objects.update_or_create(
@@ -5533,13 +5865,13 @@ def _create_swap_adjustments(module, selected_date, entry_a, entry_b, created_by
         defaults={
             **defaults_common,
             "timetable_entry": entry_b,
-            "time_slot": entry_a.time_slot,
-            "subject": entry_b.subject,
-            "original_faculty": entry_b.faculty,
-            "room": entry_b.room,
+            "time_slot": time_b,
+            "subject": entry_a.subject,
+            "original_faculty": entry_a.faculty,
+            "room": room_b,
             "swap_batch": entry_a.batch,
             "swap_lecture_no": entry_a.lecture_no,
-            "swap_time_slot": entry_a.time_slot,
+            "swap_time_slot": time_a,
         },
     )
     _sync_existing_session(
@@ -5549,10 +5881,10 @@ def _create_swap_adjustments(module, selected_date, entry_a, entry_b, created_by
         entry_a.lecture_no,
         timetable_entry=entry_a,
         day_of_week=selected_date.weekday(),
-        time_slot=entry_b.time_slot,
-        subject=entry_a.subject,
-        faculty=entry_a.faculty,
-        room=entry_a.room,
+        time_slot=time_a,
+        subject=entry_b.subject,
+        faculty=entry_b.faculty,
+        room=room_a,
     )
     _sync_existing_session(
         module,
@@ -5561,10 +5893,10 @@ def _create_swap_adjustments(module, selected_date, entry_a, entry_b, created_by
         entry_b.lecture_no,
         timetable_entry=entry_b,
         day_of_week=selected_date.weekday(),
-        time_slot=entry_a.time_slot,
-        subject=entry_b.subject,
-        faculty=entry_b.faculty,
-        room=entry_b.room,
+        time_slot=time_b,
+        subject=entry_a.subject,
+        faculty=entry_a.faculty,
+        room=room_b,
     )
     _trigger_weekly_recompute_for_date(module, selected_date)
 
@@ -6004,6 +6336,8 @@ def mentor_load_adjustment(request):
             entry_id = request.POST.get("entry_id")
             partner_id = request.POST.get("swap_entry_id")
             remarks = (request.POST.get("remarks") or "").strip()
+            swap_room = (request.POST.get("swap_room") or "").strip()
+            current_room = (request.POST.get("current_room") or "").strip()
             entry = TimetableEntry.objects.filter(
                 id=entry_id,
                 module=module,
@@ -6030,7 +6364,16 @@ def mentor_load_adjustment(request):
             if (entry.batch, entry.lecture_no) in active_keys or (partner.batch, partner.lecture_no) in active_keys:
                 messages.error(request, "One of the selected lectures already has an active adjustment.")
                 return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
-            _create_swap_adjustments(module, selected_date, entry, partner, mentor, remarks)
+            _create_swap_adjustments(
+                module,
+                selected_date,
+                entry,
+                partner,
+                mentor,
+                remarks,
+                room_override_a=swap_room,
+                room_override_b=current_room,
+            )
             messages.success(request, "Lecture swap saved.")
             return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
 
@@ -6089,6 +6432,7 @@ def coordinator_load_adjustment(request):
             room_custom = (request.POST.get("room_custom") or "").strip()
             merge_room = (request.POST.get("merge_room") or "").strip()
             remarks = (request.POST.get("remarks") or "").strip()
+            scope = (request.POST.get("scope") or "week").strip().lower()
             entry = TimetableEntry.objects.filter(id=entry_id, module=module, is_active=True).first()
             if not entry:
                 messages.error(request, "Lecture not found.")
@@ -6130,49 +6474,81 @@ def coordinator_load_adjustment(request):
                 .first()
             )
             created_by = Mentor.objects.filter(name__iexact=request.user.username).first()
-            adjustment, _ = LectureAdjustment.objects.update_or_create(
-                module=module,
-                date=selected_date,
-                batch=entry.batch,
-                lecture_no=entry.lecture_no,
-                defaults={
-                    "timetable_entry": entry,
-                    "adjustment_type": LectureAdjustment.TYPE_PROXY,
-                    "time_slot": entry.time_slot,
-                    "subject": proxy_slot_subject or proxy_subject or entry.subject,
-                    "original_faculty": entry.faculty,
-                    "proxy_faculty": proxy,
-                    "room": room,
-                    "merge_room": merge_room,
-                    "swap_pair_key": "",
-                    "swap_batch": "",
-                    "swap_lecture_no": None,
-                    "swap_time_slot": "",
-                    "remarks": remarks,
-                    "status": LectureAdjustment.STATUS_ACTIVE,
-                    "created_by": created_by,
-                    "cancelled_by": "",
-                    "cancelled_at": None,
-                },
-            )
-            _sync_existing_session(
-                module,
-                selected_date,
-                entry.batch,
-                entry.lecture_no,
-                timetable_entry=entry,
-                day_of_week=selected_date.weekday(),
-                time_slot=entry.time_slot,
-                subject=adjustment.subject,
-                faculty=proxy.name,
-                room=room,
-            )
-            _trigger_weekly_recompute_for_date(module, selected_date)
-            messages.success(request, "Proxy assigned.")
+            if scope == "forever":
+                subject_val = proxy_slot_subject or proxy_subject or entry.subject
+                TimetableEntry.objects.filter(
+                    module=module,
+                    day_of_week=day_of_week,
+                    lecture_no=entry.lecture_no,
+                    batch=entry.batch,
+                    is_active=True,
+                ).update(
+                    subject=subject_val,
+                    faculty=proxy.name,
+                    room=room,
+                    time_slot=entry.time_slot,
+                )
+                _sync_existing_session(
+                    module,
+                    selected_date,
+                    entry.batch,
+                    entry.lecture_no,
+                    timetable_entry=entry,
+                    day_of_week=selected_date.weekday(),
+                    time_slot=entry.time_slot,
+                    subject=subject_val,
+                    faculty=proxy.name,
+                    room=room,
+                )
+                _trigger_weekly_recompute_for_date(module, selected_date)
+                messages.success(request, "Proxy assigned (forever).")
+            else:
+                adjustment, _ = LectureAdjustment.objects.update_or_create(
+                    module=module,
+                    date=selected_date,
+                    batch=entry.batch,
+                    lecture_no=entry.lecture_no,
+                    defaults={
+                        "timetable_entry": entry,
+                        "adjustment_type": LectureAdjustment.TYPE_PROXY,
+                        "time_slot": entry.time_slot,
+                        "subject": proxy_slot_subject or proxy_subject or entry.subject,
+                        "original_faculty": entry.faculty,
+                        "proxy_faculty": proxy,
+                        "room": room,
+                        "merge_room": merge_room,
+                        "swap_pair_key": "",
+                        "swap_batch": "",
+                        "swap_lecture_no": None,
+                        "swap_time_slot": "",
+                        "remarks": remarks,
+                        "status": LectureAdjustment.STATUS_ACTIVE,
+                        "created_by": created_by,
+                        "cancelled_by": "",
+                        "cancelled_at": None,
+                    },
+                )
+                _sync_existing_session(
+                    module,
+                    selected_date,
+                    entry.batch,
+                    entry.lecture_no,
+                    timetable_entry=entry,
+                    day_of_week=selected_date.weekday(),
+                    time_slot=entry.time_slot,
+                    subject=adjustment.subject,
+                    faculty=proxy.name,
+                    room=room,
+                )
+                _trigger_weekly_recompute_for_date(module, selected_date)
+                messages.success(request, "Proxy assigned (this week only).")
         elif action == "create_swap":
             entry_id = request.POST.get("entry_id")
             partner_id = request.POST.get("swap_entry_id")
             remarks = (request.POST.get("remarks") or "").strip()
+            swap_room = (request.POST.get("swap_room") or "").strip()
+            current_room = (request.POST.get("current_room") or "").strip()
+            scope = (request.POST.get("scope") or "week").strip().lower()
             entry = TimetableEntry.objects.filter(
                 id=entry_id,
                 module=module,
@@ -6196,8 +6572,71 @@ def coordinator_load_adjustment(request):
                 messages.error(request, "One of the selected lectures already has an active adjustment.")
                 return redirect(f"/coordinator-load-adjustment/?date={selected_date:%Y-%m-%d}")
             created_by = Mentor.objects.filter(name__iexact=request.user.username).first()
-            _create_swap_adjustments(module, selected_date, entry, partner, created_by, remarks)
-            messages.success(request, "Lecture swap saved.")
+            if scope == "forever":
+                room_val = swap_room or partner.room
+                partner_room_val = current_room or entry.room
+                TimetableEntry.objects.filter(
+                    module=module,
+                    day_of_week=day_of_week,
+                    lecture_no=entry.lecture_no,
+                    batch=entry.batch,
+                    is_active=True,
+                ).update(
+                    subject=partner.subject,
+                    faculty=partner.faculty,
+                    room=room_val,
+                    time_slot=_fixed_time_for_lecture(entry.lecture_no, entry.time_slot),
+                )
+                TimetableEntry.objects.filter(
+                    module=module,
+                    day_of_week=day_of_week,
+                    lecture_no=partner.lecture_no,
+                    batch=partner.batch,
+                    is_active=True,
+                ).update(
+                    subject=entry.subject,
+                    faculty=entry.faculty,
+                    room=partner_room_val,
+                    time_slot=_fixed_time_for_lecture(partner.lecture_no, partner.time_slot),
+                )
+                _sync_existing_session(
+                    module,
+                    selected_date,
+                    entry.batch,
+                    entry.lecture_no,
+                    timetable_entry=entry,
+                    day_of_week=selected_date.weekday(),
+                    time_slot=_fixed_time_for_lecture(entry.lecture_no, entry.time_slot),
+                    subject=partner.subject,
+                    faculty=partner.faculty,
+                    room=room_val,
+                )
+                _sync_existing_session(
+                    module,
+                    selected_date,
+                    partner.batch,
+                    partner.lecture_no,
+                    timetable_entry=partner,
+                    day_of_week=selected_date.weekday(),
+                    time_slot=_fixed_time_for_lecture(partner.lecture_no, partner.time_slot),
+                    subject=entry.subject,
+                    faculty=entry.faculty,
+                    room=partner_room_val,
+                )
+                _trigger_weekly_recompute_for_date(module, selected_date)
+                messages.success(request, "Lecture swap saved (forever).")
+            else:
+                _create_swap_adjustments(
+                    module,
+                    selected_date,
+                    entry,
+                    partner,
+                    created_by,
+                    remarks,
+                    room_override_a=swap_room,
+                    room_override_b=current_room,
+                )
+                messages.success(request, "Lecture swap saved (this week only).")
         elif action == "cancel":
             adj_id = request.POST.get("adjustment_id")
             adj = LectureAdjustment.objects.filter(id=adj_id, status=LectureAdjustment.STATUS_ACTIVE).first()

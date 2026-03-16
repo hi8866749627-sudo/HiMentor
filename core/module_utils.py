@@ -1,5 +1,5 @@
 from django.db.models import Q
-from .models import AcademicModule, Mentor, MentorModuleAccess
+from .models import AcademicModule, Mentor, MentorModuleAccess, MentorAdminAccess
 
 
 SUPERADMIN_USERNAMES = {"superadmin1", "superadmin2"}
@@ -44,7 +44,7 @@ def allowed_modules_for_user(request):
             return (
                 AcademicModule.objects.filter(
                     is_active=True,
-                    mentor_admin_accesses__mentor=mentor_obj,
+                    mentor_admins__mentor=mentor_obj,
                 )
                 .distinct()
                 .order_by("-id")
@@ -86,6 +86,7 @@ def allowed_modules_for_user(request):
         if mentor_obj:
             faculty_q |= Q(students__mentor=mentor_obj)
             faculty_q |= Q(lecture_adjustments__proxy_faculty=mentor_obj)
+            faculty_q |= Q(mentor_module_accesses__mentor=mentor_obj)
 
         return (
             AcademicModule.objects.filter(is_active=True)
