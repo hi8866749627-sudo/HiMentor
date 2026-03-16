@@ -4490,6 +4490,23 @@ def view_timetable(request):
                     if not active_upload:
                         messages.error(request, "No active timetable found. Upload and activate a timetable first.")
                     else:
+                        if not time_slot:
+                            existing = TimetableEntry.objects.filter(
+                                module=module,
+                                upload=active_upload,
+                                day_of_week=day_val,
+                                lecture_no=lecture_no,
+                                batch=batch,
+                            ).first()
+                            if not existing:
+                                existing = TimetableEntry.objects.filter(
+                                    module=module,
+                                    upload=active_upload,
+                                    day_of_week=day_val,
+                                    lecture_no=lecture_no,
+                                ).first()
+                            if existing:
+                                time_slot = existing.time_slot or ""
                         entry, _ = TimetableEntry.objects.update_or_create(
                             module=module,
                             day_of_week=day_val,

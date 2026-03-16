@@ -633,6 +633,12 @@
                 <span class="footer-name">H<span class="footer-name-ai">A</span>rd<span class="footer-name-ai">I</span>k
                     Shah</span>
             </p>
+            {% if system_footer_info %}
+            <p class="footer-note">
+                DB: {{ system_footer_info.db_size_pretty|default:"n/a" }} ·
+                Commit: {{ system_footer_info.commit_short|default:"n/a" }}
+            </p>
+            {% endif %}
         </div>
     </div>
 
