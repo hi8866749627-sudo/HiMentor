@@ -32,7 +32,7 @@
 
 {% for row in rows %}
 <div class="card mb-3">
-    <div class="card-header d-flex justify-content-between align-items-center">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
         <span>L{{ row.entry.lecture_no }} · {{ row.entry.time_slot }} · {{ row.entry.batch }} · {{ row.entry.subject }} · {{ row.entry.faculty }} · {{ row.entry.room }}</span>
         {% if row.adjustment %}
             {% if row.adjustment.adjustment_type == "swap" %}
@@ -42,6 +42,12 @@
             {% else %}
                 <span class="badge bg-warning text-dark">Proxy</span>
             {% endif %}
+        {% else %}
+            <div class="d-flex flex-wrap gap-2">
+                <button class="btn btn-sm btn-outline-primary adjustment-toggle" type="button" data-target="proxy">Proxy Lecture</button>
+                <button class="btn btn-sm btn-outline-primary adjustment-toggle" type="button" data-target="swap">Swap Lecture</button>
+                <button class="btn btn-sm btn-outline-primary adjustment-toggle" type="button" data-target="room">Room Change Only</button>
+            </div>
         {% endif %}
     </div>
     <div class="card-body">
@@ -83,11 +89,6 @@
                 {% endif %}
             </form>
         {% else %}
-            <div class="d-flex flex-wrap gap-2 mb-3">
-                <button class="btn btn-sm btn-outline-primary adjustment-toggle" type="button" data-target="proxy">Proxy Lecture</button>
-                <button class="btn btn-sm btn-outline-primary adjustment-toggle" type="button" data-target="swap">Swap Lecture</button>
-                <button class="btn btn-sm btn-outline-primary adjustment-toggle" type="button" data-target="room">Room Change Only</button>
-            </div>
             <div class="adjustment-panel adjustment-panel-proxy border rounded p-3 mb-3 d-none">
                 <div class="fw-semibold mb-2">Proxy Lecture</div>
                 <form method="post" class="row g-2 align-items-end" data-allow-conflict="{{ is_coordinator|yesno:'1,0' }}">
