@@ -4529,7 +4529,7 @@ def view_timetable(request):
                         ).exclude(id=entry.id).update(is_active=False)
                         _sync_subjects_from_timetable(module)
                         messages.success(request, "Timetable updated.")
-            return redirect("/view-timetable/")
+            return redirect("/view-timetable/?updated=1")
     day_filter = request.GET.get("day")
     lecture_filter = (request.GET.get("lecture_no") or "").strip()
     batch_filter = (request.GET.get("batch") or "").strip()

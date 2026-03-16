@@ -106,7 +106,10 @@
 
 <div class="card mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <span>Edit Timetable</span>
+        <div>
+            <span>Edit Timetable</span>
+            <span class="badge bg-light text-dark ms-2">Last updated: {{ now|date:"d M Y H:i" }}</span>
+        </div>
         <button type="button" class="btn btn-sm btn-outline-primary" id="toggle-edit-timetable">Edit Timetable</button>
     </div>
     <div class="card-body" id="edit-timetable-body" style="display:none;">
@@ -228,6 +231,10 @@ document.addEventListener("DOMContentLoaded", function(){
             body.style.display = isOpen ? "none" : "block";
             btn.textContent = isOpen ? "Edit Timetable" : "Hide Editor";
         });
+    }
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("updated") === "1") {
+        setTimeout(() => window.location.reload(), 300);
     }
 });
 </script>
