@@ -33,6 +33,17 @@
     outline-offset: -2px;
     background: #eef4ff;
 }
+.timetable-header th {
+    background: #fff4e0;
+}
+.timetable-firstcol {
+    background: #fff4e0;
+    font-weight: 600;
+}
+.timetable-today-header {
+    background: #e8f4ff;
+    font-weight: 600;
+}
 </style>
 
 <h4 class="mb-3">Timetable</h4>
@@ -265,7 +276,7 @@
 
 {% for day in day_tables %}
 <div class="card mb-4">
-<div class="card-header">
+<div class="card-header {% if day.date_label and day.date_label|date:'Y-m-d' == now|date:'Y-m-d' %}timetable-today-header{% endif %}">
     {{ day.day }} ·
     {% if day.date_label %}
         <span class="text-muted ms-2">{{ day.date_label|date:"d M Y" }}</span>
@@ -275,8 +286,8 @@
         <div class="table-responsive">
             <table class="table table-bordered mb-0">
                 <thead>
-                    <tr>
-                        <th style="min-width:90px;">Lec No</th>
+                    <tr class="timetable-header">
+                        <th style="min-width:90px;" class="timetable-firstcol">Lec No</th>
                         <th style="min-width:140px;">Time</th>
                         {% for b in day.batches %}
                             <th>{{ b }}</th>
@@ -286,7 +297,7 @@
                 <tbody>
                 {% for lec in day.lectures %}
                     <tr>
-                        <td>{{ lec }}</td>
+                        <td class="timetable-firstcol">{{ lec }}</td>
                         <td>{{ day.time_map|get_item:lec }}</td>
                         {% for b in day.batches %}
                             {% with entry=day.cell_map|get_item:lec|get_item:b %}
@@ -299,6 +310,8 @@
                                         <span class="badge bg-warning text-dark mt-1">Proxy</span>
                                     {% elif entry.badge == "swap" %}
                                         <span class="badge bg-info text-dark mt-1">Swap</span>
+                                    {% elif entry.badge == "room" %}
+                                        <span class="badge bg-secondary mt-1">RC</span>
                                     {% endif %}
                                     {% if entry.badge == "swap" and entry.time_slot_display and entry.time_slot_display != day.time_map|get_item:lec %}
                                         <div class="small text-muted mt-1">Slot: {{ entry.time_slot_display }}</div>

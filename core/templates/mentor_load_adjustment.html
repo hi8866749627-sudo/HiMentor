@@ -27,7 +27,7 @@
 </form>
 
 <div class="alert alert-info py-2">
-    Proxy assigns a different faculty to the same lecture. Swap exchanges time slots on the same day, while each faculty keeps their own batch and subject.
+    Proxy assigns a different faculty to the same lecture. Swap exchanges time slots on the same day, while each faculty keeps their own batch and subject. Room change updates only the classroom for the same lecture.
 </div>
 
 {% for row in rows %}
@@ -37,6 +37,8 @@
         {% if row.adjustment %}
             {% if row.adjustment.adjustment_type == "swap" %}
                 <span class="badge bg-info text-dark">Swap</span>
+            {% elif row.adjustment.adjustment_type == "room" %}
+                <span class="badge bg-secondary">Room</span>
             {% else %}
                 <span class="badge bg-warning text-dark">Proxy</span>
             {% endif %}
@@ -53,6 +55,11 @@
                         Partner lecture: <strong>{{ row.adjustment.swap_batch }}</strong> · <strong>L{{ row.adjustment.swap_lecture_no }}</strong>
                         {% if row.adjustment.swap_time_slot %} · {{ row.adjustment.swap_time_slot }}{% endif %}
                     {% endif %}
+                    {% if row.adjustment.remarks %}<div class="small mt-1">Remarks: {{ row.adjustment.remarks }}</div>{% endif %}
+                </div>
+            {% elif row.adjustment.adjustment_type == "room" %}
+                <div class="alert alert-secondary">
+                    Room changed to <strong>{{ row.adjustment.room }}</strong>.
                     {% if row.adjustment.remarks %}<div class="small mt-1">Remarks: {{ row.adjustment.remarks }}</div>{% endif %}
                 </div>
             {% else %}
@@ -184,6 +191,46 @@
                         </form>
                     </div>
                 </div>
+            </div>
+            <div class="mt-3 border rounded p-3">
+                <div class="fw-semibold mb-2">Room Change Only</div>
+                <form method="post" class="row g-2 align-items-end">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="room_change">
+                    <input type="hidden" name="entry_id" value="{{ row.entry.id }}">
+                    {% if is_coordinator and selected_faculty %}
+                        <input type="hidden" name="faculty" value="{{ selected_faculty }}">
+                    {% endif %}
+                    <div class="col-md-5">
+                        <label class="form-label">Available Room</label>
+                        <select name="room_select" class="form-select">
+                            <option value="">Select</option>
+                            {% for r in row.available_rooms %}
+                                <option value="{{ r }}">{{ r }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Custom Room</label>
+                        <input type="text" name="room_custom" class="form-control" placeholder="Optional">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Remarks</label>
+                        <input type="text" name="remarks" class="form-control" placeholder="Optional">
+                    </div>
+                    {% if is_coordinator %}
+                    <div class="col-md-3">
+                        <label class="form-label">Apply</label>
+                        <select name="scope" class="form-select">
+                            <option value="week">This week only</option>
+                            <option value="forever">Forever</option>
+                        </select>
+                    </div>
+                    {% endif %}
+                    <div class="col-md-3">
+                        <button class="btn btn-outline-secondary w-100" type="submit" {% if row.create_locked %}disabled{% endif %}>Save Room</button>
+                    </div>
+                </form>
             </div>
             {% if row.create_locked %}
                 <div class="text-muted small mt-2">Lecture already started. Changes are locked.</div>

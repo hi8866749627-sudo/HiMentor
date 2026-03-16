@@ -50,6 +50,13 @@ class Mentor(models.Model):
     name = models.CharField(max_length=50, unique=True)
     full_name = models.CharField(max_length=100, blank=True, db_index=True)
     is_admin = models.BooleanField(default=False)
+    department = models.CharField(max_length=30, blank=True)
+    phone = models.CharField(max_length=20, blank=True)
+    email = models.EmailField(max_length=120, blank=True)
+    date_of_joining = models.DateField(null=True, blank=True)
+    faculty_type = models.CharField(max_length=40, blank=True)
+    status = models.CharField(max_length=40, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return self.name
@@ -303,9 +310,11 @@ class Room(models.Model):
 class LectureAdjustment(models.Model):
     TYPE_PROXY = "proxy"
     TYPE_SWAP = "swap"
+    TYPE_ROOM = "room"
     TYPE_CHOICES = [
         (TYPE_PROXY, "Proxy"),
         (TYPE_SWAP, "Swap"),
+        (TYPE_ROOM, "Room Change"),
     ]
     STATUS_ACTIVE = "active"
     STATUS_CANCELLED = "cancelled"
@@ -527,6 +536,19 @@ class MentorAdminAccess(models.Model):
 
     def __str__(self):
         return f"{self.mentor.name} (admin) -> {self.module.name}"
+
+
+class MentorModuleOptOut(models.Model):
+    mentor = models.ForeignKey(Mentor, on_delete=models.CASCADE, related_name="module_optouts")
+    module = models.ForeignKey(AcademicModule, on_delete=models.CASCADE, related_name="mentor_optouts")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("mentor", "module")
+        ordering = ["mentor__name", "module__name"]
+
+    def __str__(self):
+        return f"{self.mentor.name} opted out {self.module.name}"
 class PracticalMarkUpload(models.Model):
     module = models.ForeignKey(AcademicModule, on_delete=models.CASCADE, related_name="practical_mark_uploads")
     uploaded_by = models.CharField(max_length=100, blank=True)

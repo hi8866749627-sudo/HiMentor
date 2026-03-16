@@ -28,7 +28,7 @@ from functools import wraps
 from django.contrib import messages
 from django.views.decorators.http import require_http_methods
 from django.http import JsonResponse
-from django.db.models import Max 
+from django.db.models import Max, Case, When, IntegerField, Value 
 from django.db.models import Q
 from urllib.parse import quote
 from django.core.paginator import Paginator
@@ -56,6 +56,7 @@ from .models import (
     MentorModuleAccess,
     MentorAdminAccess,
     MentorPassword,
+    MentorModuleOptOut,
     OtherCallRecord,
     PracticalMarkUpload,
     SifMarksLock,
@@ -79,7 +80,7 @@ from .models import (
 )
 
 # ---------- LOCAL UTILITIES ----------
-from .utils import import_students_from_excel, resolve_mentor_identity
+from .utils import import_students_from_excel, resolve_mentor_identity, import_faculty_from_excel
 from .attendance_utils import import_attendance
 from .lecture_utils import (
     parse_timetable_excel,
@@ -606,13 +607,47 @@ def manage_mentors(request):
     for name in faculty_names:
         Mentor.objects.get_or_create(name=name)
 
+    def _mentor_matches_module(mentor_obj):
+        dept = (mentor_obj.department or "").strip().upper()
+        if not dept:
+            return False
+        if dept in {(module.year_level or "").upper(), (module.variant or "").upper()}:
+            return True
+        if (module.variant or "").upper().startswith(dept):
+            return True
+        if dept in (module.name or "").upper():
+            return True
+        return False
+
+    def _current_mentors_qs():
+        base_ids = set(Mentor.objects.filter(Q(student__module=module) | Q(name__in=faculty_names)).values_list("id", flat=True))
+        dept_ids = {m.id for m in Mentor.objects.all() if _mentor_matches_module(m)}
+        order_case = Case(
+            When(faculty_type__iexact="HoD", then=Value(1)),
+            When(faculty_type__icontains="Administrative", then=Value(2)),
+            When(faculty_type__iexact="Faculty", then=Value(3)),
+            When(faculty_type__iexact="Peon", then=Value(4)),
+            When(faculty_type__iexact="Other", then=Value(5)),
+            default=Value(6),
+            output_field=IntegerField(),
+        )
+        return (
+            Mentor.objects.filter(Q(id__in=base_ids) | Q(id__in=dept_ids))
+            .exclude(module_optouts__module=module)
+            .distinct()
+            .annotate(student_count=Count("student", filter=Q(student__module=module)))
+            .annotate(type_rank=order_case)
+            .order_by("type_rank", "name")
+        )
+
     if request.method == "POST":
         action = (request.POST.get("action") or "").strip()
         mentor_id = request.POST.get("mentor_id")
         mentor = Mentor.objects.filter(id=mentor_id).first() if mentor_id else None
+        allowed_ids = set(_current_mentors_qs().values_list("id", flat=True))
         module_mentor_ids = set(Student.objects.filter(module=module).values_list("mentor_id", flat=True))
         module_faculty_names = {n.lower() for n in faculty_names}
-        if not mentor or (mentor.id not in module_mentor_ids and mentor.name.lower() not in module_faculty_names):
+        if not mentor or mentor.id not in allowed_ids:
             messages.error(request, "Mentor not found for current module.")
             return redirect("/manage-mentors/")
 
@@ -628,36 +663,53 @@ def manage_mentors(request):
         elif action == "reset_default":
             MentorPassword.objects.filter(mentor=mentor).delete()
             messages.success(request, f"Password reset to default rule for mentor {mentor.name}.")
-        elif action == "update_access":
-            is_admin = bool(request.POST.get("is_admin"))
-            module_ids = [m for m in request.POST.getlist("module_access_ids") if str(m).isdigit()]
-            modules = [m for m in modules_in_scope if str(m.id) in {str(mid) for mid in module_ids}]
+        elif action in {"update_access", "update_staff"}:
+            raw_admin = (request.POST.get("is_admin") or "").strip().lower()
+            is_admin = raw_admin in {"yes", "true", "1", "on"}
             mentor.is_admin = is_admin
             mentor.save(update_fields=["is_admin"])
-            MentorModuleAccess.objects.filter(mentor=mentor).delete()
-            if modules:
-                MentorModuleAccess.objects.bulk_create(
-                    [MentorModuleAccess(mentor=mentor, module=m) for m in modules],
-                    ignore_conflicts=True,
-                )
             MentorAdminAccess.objects.filter(mentor=mentor, module=module).delete()
             if is_admin:
                 MentorAdminAccess.objects.get_or_create(mentor=mentor, module=module)
             messages.success(request, f"Access updated for mentor {mentor.name}.")
+        if action in {"update_profile", "update_staff"}:
+            full_name = (request.POST.get("full_name") or "").strip()
+            department = (request.POST.get("department") or "").strip().upper()
+            phone = (request.POST.get("phone") or "").strip()
+            email = (request.POST.get("email") or "").strip()
+            faculty_type = (request.POST.get("faculty_type") or "").strip()
+            status = (request.POST.get("status") or "").strip()
+
+            if full_name:
+                mentor.full_name = full_name
+            if department:
+                mentor.department = department
+            if phone:
+                mentor.phone = phone
+            if email:
+                mentor.email = email
+            if faculty_type:
+                mentor.faculty_type = faculty_type
+            if status:
+                mentor.status = status
+            join_raw = (request.POST.get("date_of_joining") or "").strip()
+            if join_raw:
+                try:
+                    mentor.date_of_joining = datetime.strptime(join_raw, "%Y-%m-%d").date()
+                except Exception:
+                    pass
+            mentor.save()
+            messages.success(request, f"Profile updated for mentor {mentor.name}.")
+        elif action == "remove_from_dept":
+            MentorModuleOptOut.objects.get_or_create(mentor=mentor, module=module)
+            MentorAdminAccess.objects.filter(mentor=mentor, module=module).delete()
+            messages.success(request, f"{mentor.name} removed from this department.")
         else:
             messages.error(request, "Invalid action.")
         return redirect("/manage-mentors/")
 
-    mentors = (
-        Mentor.objects.filter(Q(student__module=module) | Q(name__in=faculty_names))
-        .distinct()
-        .annotate(student_count=Count("student", filter=Q(student__module=module)))
-        .order_by("name")
-    )
+    mentors = _current_mentors_qs()
     cred_map = {c.mentor_id: c for c in MentorPassword.objects.filter(mentor__in=mentors)}
-    access_map = {}
-    for acc in MentorModuleAccess.objects.filter(mentor__in=mentors).select_related("module"):
-        access_map.setdefault(acc.mentor_id, set()).add(acc.module_id)
     admin_access_ids = {
         a.mentor_id
         for a in MentorAdminAccess.objects.filter(module=module, mentor__in=mentors).select_related("mentor")
@@ -669,7 +721,6 @@ def manage_mentors(request):
                 "mentor": m,
                 "student_count": getattr(m, "student_count", 0),
                 "has_custom_password": m.id in cred_map,
-                "admin_modules": access_map.get(m.id, set()),
                 "admin_for_module": m.id in admin_access_ids,
             }
         )
@@ -891,6 +942,96 @@ def upload_students(request):
         'module': module,
         'skipped_rows': skipped_rows[:200],
     })
+
+
+@login_required
+def upload_faculty(request):
+    if request.session.get("mentor"):
+        return redirect("/mentor-dashboard/")
+    if not is_superadmin_user(request.user):
+        return redirect("/reports/")
+
+    message = ""
+    skipped_rows = []
+    debug_info = None
+    form = UploadFileForm()
+
+    if request.method == "POST":
+        form = UploadFileForm(request.POST, request.FILES)
+        if form.is_valid():
+            file = request.FILES["file"]
+            try:
+                added, updated, skipped, skipped_rows, debug_info = import_faculty_from_excel(file)
+                message = f"Added: {added} | Updated: {updated} | Skipped: {skipped}"
+            except Exception as exc:
+                message = f"Upload failed: {exc}"
+        else:
+            message = "Please select a file to upload."
+
+    order_case = Case(
+        When(faculty_type__iexact="HoD", then=Value(1)),
+        When(faculty_type__icontains="Administrative", then=Value(2)),
+        When(faculty_type__iexact="Faculty", then=Value(3)),
+        When(faculty_type__iexact="Peon", then=Value(4)),
+        default=Value(5),
+        output_field=IntegerField(),
+    )
+    mentors = Mentor.objects.all().annotate(type_rank=order_case).order_by("type_rank", "name")
+    last_update = Mentor.objects.aggregate(last=Max("updated_at")).get("last")
+    return render(
+        request,
+        "faculty_upload.html",
+        {
+            "form": form,
+            "message": message,
+            "mentors": mentors,
+            "skipped_rows": skipped_rows[:200],
+            "debug_info": debug_info if request.method == "POST" else None,
+            "last_update": last_update,
+        },
+    )
+
+
+@login_required
+def download_faculty_sample(request):
+    if request.session.get("mentor"):
+        return redirect("/mentor-dashboard/")
+    if not is_superadmin_user(request.user):
+        return redirect("/reports/")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Faculty"
+    ws.append(
+        [
+            "Full Name",
+            "Short Name",
+            "Department",
+            "Phone",
+            "Type",
+            "Email",
+            "Date of Joining",
+            "Status",
+        ]
+    )
+    ws.append(
+        [
+            "Hardik Shah",
+            "HDS",
+            "FY2",
+            "8866749627",
+            "Faculty",
+            "hardik.shah@ljinstitutes.edu.in",
+            "20-Feb-2017",
+            "Active",
+        ]
+    )
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    response["Content-Disposition"] = "attachment; filename=faculty_sample.xlsx"
+    wb.save(response)
+    return response
 
 # ---------------- ATTENDANCE VIEW & UPLOAD ----------------
 @require_http_methods(["GET","POST"])
@@ -4896,6 +5037,8 @@ def view_timetable(request):
                 elif adj.adjustment_type == LectureAdjustment.TYPE_SWAP:
                     display.badge = "swap"
                     display.faculty = adj.original_faculty or display.faculty
+                elif adj.adjustment_type == LectureAdjustment.TYPE_ROOM:
+                    display.badge = "room"
             cell_map.setdefault(target_lecture, {})[e.batch] = display
         day_tables.append(
             {
@@ -6072,6 +6215,8 @@ def _build_adjustment_rows(
                 module=module, date=selected_date, lecture_no=entry.lecture_no, status=LectureAdjustment.STATUS_ACTIVE
             ).exclude(room="").values_list("room", flat=True)
         )
+        if adj and adj.adjustment_type == LectureAdjustment.TYPE_ROOM and entry.room:
+            used_rooms.discard(entry.room)
         available_rooms = [r for r in sorted(r for r in rooms_base if r and r not in used_rooms)]
         if entry.room and entry.room not in available_rooms:
             available_rooms.insert(0, entry.room)
@@ -6377,6 +6522,66 @@ def mentor_load_adjustment(request):
             messages.success(request, "Lecture swap saved.")
             return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
 
+        if action == "room_change":
+            entry_id = request.POST.get("entry_id")
+            room_select = (request.POST.get("room_select") or "").strip()
+            room_custom = (request.POST.get("room_custom") or "").strip()
+            remarks = (request.POST.get("remarks") or "").strip()
+            entry = TimetableEntry.objects.filter(
+                id=entry_id,
+                module=module,
+                day_of_week=day_of_week,
+                faculty__iexact=mentor.name,
+                is_active=True,
+            ).first()
+            if not entry:
+                messages.error(request, "Lecture not found.")
+                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+            if _slot_has_started(selected_date, entry.time_slot):
+                messages.error(request, "Lecture already started. Room change not allowed.")
+                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+            existing = LectureAdjustment.objects.filter(
+                module=module,
+                date=selected_date,
+                batch=entry.batch,
+                lecture_no=entry.lecture_no,
+                status=LectureAdjustment.STATUS_ACTIVE,
+            ).first()
+            if existing:
+                messages.error(request, "This lecture already has an active adjustment.")
+                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+            room_val = room_custom or room_select or entry.room
+            adjustment = LectureAdjustment.objects.create(
+                module=module,
+                date=selected_date,
+                batch=entry.batch,
+                lecture_no=entry.lecture_no,
+                timetable_entry=entry,
+                time_slot=entry.time_slot,
+                subject=entry.subject,
+                original_faculty=entry.faculty,
+                adjustment_type=LectureAdjustment.TYPE_ROOM,
+                room=room_val,
+                remarks=remarks,
+                status=LectureAdjustment.STATUS_ACTIVE,
+                created_by=mentor,
+            )
+            _sync_existing_session(
+                module,
+                selected_date,
+                entry.batch,
+                entry.lecture_no,
+                timetable_entry=entry,
+                day_of_week=selected_date.weekday(),
+                time_slot=entry.time_slot,
+                subject=entry.subject,
+                faculty=entry.faculty,
+                room=room_val,
+            )
+            _trigger_weekly_recompute_for_date(module, selected_date)
+            messages.success(request, "Room change saved.")
+            return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+
         if action == "cancel":
             adj_id = request.POST.get("adjustment_id")
             adj = LectureAdjustment.objects.filter(id=adj_id, created_by=mentor, status=LectureAdjustment.STATUS_ACTIVE).first()
@@ -6637,6 +6842,88 @@ def coordinator_load_adjustment(request):
                     room_override_b=current_room,
                 )
                 messages.success(request, "Lecture swap saved (this week only).")
+        elif action == "room_change":
+            entry_id = request.POST.get("entry_id")
+            room_select = (request.POST.get("room_select") or "").strip()
+            room_custom = (request.POST.get("room_custom") or "").strip()
+            remarks = (request.POST.get("remarks") or "").strip()
+            scope = (request.POST.get("scope") or "week").strip().lower()
+            entry = TimetableEntry.objects.filter(
+                id=entry_id,
+                module=module,
+                day_of_week=day_of_week,
+                is_active=True,
+            ).first()
+            if not entry:
+                messages.error(request, "Lecture not found.")
+                return redirect(f"/coordinator-load-adjustment/?date={selected_date:%Y-%m-%d}")
+            existing = LectureAdjustment.objects.filter(
+                module=module,
+                date=selected_date,
+                batch=entry.batch,
+                lecture_no=entry.lecture_no,
+                status=LectureAdjustment.STATUS_ACTIVE,
+            ).first()
+            if existing:
+                messages.error(request, "This lecture already has an active adjustment.")
+                return redirect(f"/coordinator-load-adjustment/?date={selected_date:%Y-%m-%d}")
+            room_val = room_custom or room_select or entry.room
+            created_by = Mentor.objects.filter(name__iexact=request.user.username).first()
+            if scope == "forever":
+                TimetableEntry.objects.filter(
+                    module=module,
+                    day_of_week=day_of_week,
+                    lecture_no=entry.lecture_no,
+                    batch=entry.batch,
+                    is_active=True,
+                ).update(
+                    room=room_val,
+                    time_slot=entry.time_slot,
+                )
+                _sync_existing_session(
+                    module,
+                    selected_date,
+                    entry.batch,
+                    entry.lecture_no,
+                    timetable_entry=entry,
+                    day_of_week=selected_date.weekday(),
+                    time_slot=entry.time_slot,
+                    subject=entry.subject,
+                    faculty=entry.faculty,
+                    room=room_val,
+                )
+                _trigger_weekly_recompute_for_date(module, selected_date)
+                messages.success(request, "Room updated (forever).")
+            else:
+                LectureAdjustment.objects.create(
+                    module=module,
+                    date=selected_date,
+                    batch=entry.batch,
+                    lecture_no=entry.lecture_no,
+                    timetable_entry=entry,
+                    time_slot=entry.time_slot,
+                    subject=entry.subject,
+                    original_faculty=entry.faculty,
+                    adjustment_type=LectureAdjustment.TYPE_ROOM,
+                    room=room_val,
+                    remarks=remarks,
+                    status=LectureAdjustment.STATUS_ACTIVE,
+                    created_by=created_by,
+                )
+                _sync_existing_session(
+                    module,
+                    selected_date,
+                    entry.batch,
+                    entry.lecture_no,
+                    timetable_entry=entry,
+                    day_of_week=selected_date.weekday(),
+                    time_slot=entry.time_slot,
+                    subject=entry.subject,
+                    faculty=entry.faculty,
+                    room=room_val,
+                )
+                _trigger_weekly_recompute_for_date(module, selected_date)
+                messages.success(request, "Room updated (this week only).")
         elif action == "cancel":
             adj_id = request.POST.get("adjustment_id")
             adj = LectureAdjustment.objects.filter(id=adj_id, status=LectureAdjustment.STATUS_ACTIVE).first()

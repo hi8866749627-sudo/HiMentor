@@ -1,5 +1,6 @@
 import pandas as pd
-from .models import Mentor, Student
+from datetime import datetime
+from .models import Mentor, Student, MentorModuleAccess, AcademicModule
 
 
 # ---------------- PHONE FORMAT ----------------
@@ -29,10 +30,14 @@ def format_phone(num):
     # remove country code if already exists
     if num.startswith("91") and len(num) > 10:
         num = num[-10:]
+    if num.startswith("0091") and len(num) > 10:
+        num = num[-10:]
+    if num.startswith("+91") and len(num) > 10:
+        num = num[-10:]
 
     # add country code
     if len(num) == 10:
-        num = "91" + num
+        num = "+91" + num
 
     return num
 
@@ -78,6 +83,262 @@ def safe_text(value, max_len):
     if not text or text.lower() == "nan":
         return ""
     return text[:max_len]
+
+
+def _normalize_faculty_type(raw):
+    raw = (raw or "").strip().lower()
+    if not raw:
+        return ""
+    if "hod" in raw:
+        return "HoD"
+    if "admin" in raw or "administrative" in raw or "non" in raw:
+        return "Administrative Staff"
+    if "peon" in raw or "helper" in raw:
+        return "Peon"
+    return "Faculty"
+
+
+def _normalize_status(raw):
+    raw = (raw or "").strip().lower()
+    if not raw:
+        return ""
+    if "resign" in raw or "left" in raw:
+        return "Resigned"
+    if "not" in raw and "work" in raw:
+        return "Not Working"
+    return "Working"
+
+
+def _parse_date(val):
+    if val in (None, "", "nan"):
+        return None
+    if pd.isna(val):
+        return None
+    if isinstance(val, datetime):
+        return val.date()
+    if isinstance(val, pd.Timestamp):
+        if pd.isna(val):
+            return None
+        return val.date()
+    try:
+        return pd.to_datetime(val).date()
+    except Exception:
+        return None
+
+
+def _normalize_name_tokens(name):
+    cleaned = "".join(ch.lower() if ch.isalnum() or ch.isspace() else " " for ch in str(name or ""))
+    tokens = [t for t in cleaned.split() if t]
+    return tokens
+
+
+def _names_equivalent(a, b):
+    if not a or not b:
+        return False
+    a_tokens = _normalize_name_tokens(a)
+    b_tokens = _normalize_name_tokens(b)
+    if not a_tokens or not b_tokens:
+        return False
+    return set(a_tokens) == set(b_tokens) or set(a_tokens).issubset(set(b_tokens)) or set(b_tokens).issubset(set(a_tokens))
+
+
+def _modules_for_department(dept_key):
+    if not dept_key:
+        return []
+    dept_key = dept_key.upper()
+    if dept_key in {"FY", "SY", "TY", "LY"}:
+        return list(AcademicModule.objects.filter(year_level__iexact=dept_key, is_active=True))
+    if dept_key.startswith(("FY", "SY", "TY", "LY")):
+        return list(
+            AcademicModule.objects.filter(
+                is_active=True,
+                variant__istartswith=dept_key,
+            )
+        )
+    return list(AcademicModule.objects.filter(is_active=True, name__icontains=dept_key))
+
+
+def _read_faculty_excel(file):
+    df = pd.read_excel(file)
+    if not df.empty:
+        return df
+    return df
+
+
+def import_faculty_from_excel(file):
+    df = _read_faculty_excel(file)
+    if df.empty:
+        return 0, 0, 0, [], {}
+
+    added = updated = skipped = 0
+    skipped_rows = []
+
+    def _norm_key(val):
+        return "".join(ch for ch in str(val or "").lower() if ch.isalnum())
+
+    def col_match(options):
+        for col in df.columns:
+            key = _norm_key(col)
+            for opt in options:
+                if _norm_key(opt) in key:
+                    return col
+        return None
+
+    full_col = col_match(["full name", "fullname", "faculty full name", "faculty name", "name"])
+    short_col = col_match(["short", "code", "mentor", "initial", "3 letter", "3-letter", "faculty 3 letter"])
+    dept_col = col_match(["department", "dept", "year"])
+    phone_col = col_match(["phone", "mobile", "contact", "contact no", "contact number"])
+    email_col = col_match(["email", "mail", "official mail", "lj official mail", "lj official mail id"])
+    doj_col = col_match(["joining", "doj", "date of joining", "doj in lj"])
+    type_col = col_match(["type", "designation", "role", "faculty type"])
+    status_col = col_match(["status", "working", "active"])
+    if not email_col:
+        email_col = col_match(["mailid", "officialmailid"])
+    if not doj_col:
+        doj_col = col_match(["dojinlj"])
+    if not type_col:
+        type_col = col_match(["type"])
+    if not status_col:
+        status_col = col_match(["status"])
+
+    missing_cols = []
+    if not full_col:
+        missing_cols.append("Full Name")
+    if not short_col:
+        missing_cols.append("Short Name")
+    if not phone_col:
+        missing_cols.append("Phone")
+    if missing_cols:
+        try:
+            file.seek(0)
+            raw = pd.read_excel(file, header=None)
+            header_row = None
+            best_score = 0
+            for idx in range(min(10, len(raw))):
+                row_vals = [str(v).strip().lower() for v in raw.iloc[idx].tolist()]
+                score = 0
+                for val in row_vals:
+                    if "full name" in val or "faculty full name" in val:
+                        score += 2
+                    if "3 letter" in val or "initial" in val or "short" in val:
+                        score += 2
+                    if "contact" in val or "phone" in val or "mobile" in val:
+                        score += 1
+                if score > best_score:
+                    best_score = score
+                    header_row = idx
+            if header_row is not None and best_score > 0:
+                file.seek(0)
+                df = pd.read_excel(file, header=header_row)
+                df.columns = [str(c).strip() for c in df.columns]
+                full_col = col_match(["full name", "fullname", "faculty full name", "faculty name", "name"])
+                short_col = col_match(["short", "code", "mentor", "initial", "3 letter", "3-letter", "faculty 3 letter"])
+                dept_col = col_match(["department", "dept", "year"])
+                phone_col = col_match(["phone", "mobile", "contact", "contact no", "contact number"])
+                email_col = col_match(["email", "mail", "official mail", "lj official mail", "lj official mail id"])
+                doj_col = col_match(["joining", "doj", "date of joining", "doj in lj"])
+                type_col = col_match(["type", "designation", "role", "faculty type"])
+                status_col = col_match(["status", "working", "active"])
+                if not email_col:
+                    email_col = col_match(["mailid", "officialmailid"])
+                if not doj_col:
+                    doj_col = col_match(["dojinlj"])
+                if not type_col:
+                    type_col = col_match(["type"])
+                if not status_col:
+                    status_col = col_match(["status"])
+        except Exception:
+            pass
+        missing_cols = []
+        if not full_col:
+            missing_cols.append("Full Name")
+        if not short_col:
+            missing_cols.append("Short Name")
+        if not phone_col:
+            missing_cols.append("Phone")
+        if missing_cols:
+            raise ValueError("Missing required columns: " + ", ".join(missing_cols))
+
+    debug_info = {
+        "columns": [str(c) for c in df.columns],
+        "mapped": {},
+    }
+
+    def _blank_if_placeholder(val):
+        text = str(val or "").strip()
+        if text in {"-", "--", "na", "n/a", "nan"}:
+            return ""
+        return text
+
+    for idx, row in df.iterrows():
+        full_name = safe_text(_blank_if_placeholder(row.get(full_col)), 100)
+        short_name = safe_text(_blank_if_placeholder(row.get(short_col)), 50).upper()
+        department = safe_text(_blank_if_placeholder(row.get(dept_col)), 30).upper() or "PENDING"
+        phone = format_phone(clean_number(row.get(phone_col)))[:20]
+        email = safe_text(_blank_if_placeholder(row.get(email_col)), 120)
+        doj = _parse_date(_blank_if_placeholder(row.get(doj_col)))
+        raw_type = _normalize_faculty_type(_blank_if_placeholder(row.get(type_col)))
+        if not raw_type and short_name and len(short_name) <= 2:
+            raw_type = "Peon"
+        f_type = raw_type or "Faculty"
+        status = _normalize_status(_blank_if_placeholder(row.get(status_col))) or "Working"
+
+        mentor, created = Mentor.objects.get_or_create(name=short_name)
+        if created:
+            if not (full_name and short_name and phone):
+                skipped += 1
+                skipped_rows.append(
+                    {
+                        "row": idx + 2,
+                        "name": full_name or short_name,
+                        "reason": "Missing required: full name, short name, or phone",
+                    }
+                )
+                mentor.delete()
+                continue
+            added += 1
+        else:
+            updated += 1
+
+        resolved_full = mentor.full_name
+        if full_name:
+            if not mentor.full_name:
+                resolved_full = full_name
+            elif _names_equivalent(mentor.full_name, full_name):
+                resolved_full = full_name if len(full_name) >= len(mentor.full_name) else mentor.full_name
+
+        updates = {
+            "full_name": resolved_full or mentor.full_name,
+            "department": department or mentor.department,
+            "phone": phone or mentor.phone,
+            "email": email or mentor.email,
+            "date_of_joining": doj or mentor.date_of_joining,
+            "faculty_type": f_type or mentor.faculty_type,
+            "status": status or mentor.status,
+        }
+        for key, value in updates.items():
+            setattr(mentor, key, value)
+        mentor.save()
+
+        modules = _modules_for_department(department)
+        if modules:
+            MentorModuleAccess.objects.filter(mentor=mentor, module__in=modules).delete()
+            MentorModuleAccess.objects.bulk_create(
+                [MentorModuleAccess(mentor=mentor, module=m) for m in modules],
+                ignore_conflicts=True,
+            )
+
+    debug_info["mapped"] = {
+        "full_name": str(full_col),
+        "short_name": str(short_col),
+        "department": str(dept_col),
+        "phone": str(phone_col),
+        "email": str(email_col),
+        "doj": str(doj_col),
+        "type": str(type_col),
+        "status": str(status_col),
+    }
+    return added, updated, skipped, skipped_rows, debug_info
 
 
 # ---------------- NORMALIZE TEXT ----------------

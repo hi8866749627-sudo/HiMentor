@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h3>Faculty Master Upload</h3>
+<div class="text-muted mb-2">Upload faculty details for direct account creation.</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <form method="post" enctype="multipart/form-data" class="row g-3">
+            {% csrf_token %}
+            <div class="col-md-6">
+                <label class="form-label">Excel File</label>
+                {{ form.file }}
+            </div>
+            <div class="col-md-6 d-flex align-items-end gap-2">
+                <button class="btn btn-primary">Upload</button>
+                <a class="btn btn-outline-secondary" href="/upload-faculty/sample/">Download Sample</a>
+            </div>
+        </form>
+        {% if message %}
+            <div class="alert alert-info mt-3">{{ message }}</div>
+        {% endif %}
+        <div class="small text-muted mt-2">
+            Required columns: Full Name, Short Name, Phone. Department defaults to Pending, Type defaults to Faculty, Status defaults to Working if blank.
+        </div>
+    </div>
+</div>
+
+{% if skipped_rows %}
+<div class="card mb-3">
+    <div class="card-header">Skipped Rows</div>
+    <div class="card-body">
+        <ul class="small">
+            {% for row in skipped_rows %}
+                <li>Row {{ row.row }} ({{ row.name|default:"-" }}): {{ row.reason }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+</div>
+{% endif %}
+
+{% if debug_info %}
+<div class="card mb-3">
+    <div class="card-header">Detected Columns (Debug)</div>
+    <div class="card-body small">
+        <div class="mb-2"><strong>Columns:</strong> {{ debug_info.columns|join:", " }}</div>
+        <div><strong>Mapped:</strong></div>
+        <ul class="mb-0">
+            {% for key, value in debug_info.mapped.items %}
+                <li>{{ key }} → {{ value }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Faculty Records</span>
+        <div class="d-flex align-items-center gap-2">
+            <span class="text-muted small">Last updated: {{ last_update|date:"d M Y H:i" }}</span>
+            <a class="btn btn-sm btn-outline-primary" href="/manage-mentors/">Update Faculty Data</a>
+        </div>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-bordered table-sm align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Short Name</th>
+                    <th>Full Name</th>
+                    <th>Department</th>
+                    <th>Phone</th>
+                    <th>Email</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Joining</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for m in mentors %}
+                <tr>
+                    <td>{{ m.name }}</td>
+                    <td>{{ m.full_name|default:"-" }}</td>
+                    <td>{{ m.department|default:"-" }}</td>
+                    <td>{{ m.phone|default:"-" }}</td>
+                    <td>{{ m.email|default:"-" }}</td>
+                    <td>{{ m.faculty_type|default:"-" }}</td>
+                    <td>{{ m.status|default:"-" }}</td>
+                    <td>{{ m.date_of_joining|date:"d M Y"|default:"-" }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="8" class="text-center text-muted">No faculty records.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}

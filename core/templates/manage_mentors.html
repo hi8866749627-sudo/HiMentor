@@ -1,95 +1,105 @@
 {% extends "base.html" %}
+
 {% block content %}
 
-<h3>Manage Mentor</h3>
+<h3>Manage Dept. Staff</h3>
 <div class="mb-2 text-muted">Module: {{ module.name }}</div>
 
 {% if rows %}
 <div class="table-responsive">
-    <table class="table table-bordered table-sm align-middle">
+    <table class="table table-bordered align-middle">
         <thead class="table-dark">
             <tr>
                 <th>Mentor Code</th>
                 <th>Mentor Name</th>
                 <th>Students</th>
                 <th>Admin Access</th>
-                <th>Module Access</th>
-                <th>Password Mode</th>
-                <th>Admin Access</th>
-                <th>Actions</th>
+                <th>Dept.</th>
+                <th>Email</th>
+                <th>Contact</th>
+                <th>Type</th>
+                <th>DOJ</th>
+                <th>Status</th>
+                <th>Action</th>
             </tr>
         </thead>
         <tbody>
             {% for r in rows %}
-            <tr>
+            <tr class="mentor-row {% if r.mentor.faculty_type == 'HoD' %}staff-row-hod{% elif r.mentor.faculty_type == 'Administrative Staff' %}staff-row-admin{% elif r.mentor.faculty_type == 'Peon' %}staff-row-peon{% endif %}">
                 <td>{{ r.mentor.name }}</td>
                 <td>{{ r.mentor.full_name|default:"-" }}</td>
                 <td>{{ r.student_count }}</td>
-                <td>
-                    <form method="post" class="d-flex gap-2 flex-wrap align-items-center">
-                        {% csrf_token %}
-                        <input type="hidden" name="action" value="update_access">
-                        <input type="hidden" name="mentor_id" value="{{ r.mentor.id }}">
-                        <div class="form-check me-2">
-                            <input class="form-check-input" type="checkbox" name="is_admin" id="admin-{{ r.mentor.id }}"
-                                   {% if r.admin_for_module %}checked{% endif %}>
-                            <label class="form-check-label" for="admin-{{ r.mentor.id }}">Admin for this module</label>
-                        </div>
-                        <button class="btn btn-sm btn-outline-primary">Save</button>
-                    </form>
+                <td class="text-center">
+                    <div class="mentor-display">{% if r.admin_for_module %}Yes{% else %}No{% endif %}</div>
+                    <select name="is_admin" class="form-select form-select-sm mentor-input mentor-edit"
+                            form="mentor-form-{{ r.mentor.id }}"
+                            data-original="{% if r.admin_for_module %}yes{% else %}no{% endif %}">
+                        <option value="yes">Yes</option>
+                        <option value="no">No</option>
+                    </select>
                 </td>
                 <td>
-                    <form method="post" class="d-flex gap-2 flex-wrap align-items-center">
-                        {% csrf_token %}
-                        <input type="hidden" name="action" value="update_access">
-                        <input type="hidden" name="mentor_id" value="{{ r.mentor.id }}">
-                        <select name="module_access_ids" class="form-select form-select-sm" multiple size="2" style="min-width:220px;">
-                            {% for m in modules %}
-                                <option value="{{ m.id }}" {% if m.id in r.admin_modules %}selected{% endif %}>{{ m.name }}</option>
-                            {% endfor %}
-                        </select>
-                        <button class="btn btn-sm btn-outline-primary">Save</button>
-                    </form>
+                    <div class="mentor-display">{{ r.mentor.department|default:"-" }}</div>
+                    <input type="text" name="department" class="form-control form-control-sm mentor-input mentor-edit"
+                           form="mentor-form-{{ r.mentor.id }}"
+                           value="{{ r.mentor.department }}" data-original="{{ r.mentor.department }}">
                 </td>
                 <td>
-                    {% if r.has_custom_password %}
-                        <span class="badge bg-warning text-dark">Custom</span>
-                    {% else %}
-                        <span class="badge bg-secondary">Default (shortname@LJ123)</span>
-                    {% endif %}
+                    <div class="mentor-display">{{ r.mentor.email|default:"-" }}</div>
+                    <input type="email" name="email" class="form-control form-control-sm mentor-input mentor-edit"
+                           form="mentor-form-{{ r.mentor.id }}"
+                           value="{{ r.mentor.email }}" data-original="{{ r.mentor.email }}">
                 </td>
                 <td>
-                    <form method="post" class="d-flex gap-2 flex-wrap align-items-center">
-                        {% csrf_token %}
-                        <input type="hidden" name="action" value="update_access">
-                        <input type="hidden" name="mentor_id" value="{{ r.mentor.id }}">
-                        <div class="form-check me-2">
-                            <input class="form-check-input" type="checkbox" name="is_admin" id="admin-{{ r.mentor.id }}"
-                                   {% if r.mentor.is_admin %}checked{% endif %}>
-                            <label class="form-check-label" for="admin-{{ r.mentor.id }}">Admin</label>
-                        </div>
-                        <select name="admin_module_ids" class="form-select form-select-sm" multiple size="2" style="min-width:200px;">
-                            {% for m in modules %}
-                                <option value="{{ m.id }}" {% if m.id in r.admin_modules %}selected{% endif %}>{{ m.name }}</option>
-                            {% endfor %}
-                        </select>
-                        <button class="btn btn-sm btn-outline-primary">Save Access</button>
-                    </form>
-                    <div class="form-text">Assign modules to enable Admin portal access.</div>
+                    <div class="mentor-display">{{ r.mentor.phone|default:"-" }}</div>
+                    <input type="text" name="phone" class="form-control form-control-sm mentor-input mentor-edit"
+                           form="mentor-form-{{ r.mentor.id }}"
+                           value="{{ r.mentor.phone }}" data-original="{{ r.mentor.phone }}">
                 </td>
                 <td>
-                    <form method="post" class="d-flex gap-2 flex-wrap align-items-center">
+                    <div class="mentor-display">{{ r.mentor.faculty_type|default:"-" }}</div>
+                    <select name="faculty_type" class="form-select form-select-sm mentor-input mentor-edit"
+                            form="mentor-form-{{ r.mentor.id }}"
+                            data-original="{{ r.mentor.faculty_type }}">
+                        <option value="">Select</option>
+                        <option value="HoD" {% if r.mentor.faculty_type == "HoD" %}selected{% endif %}>HoD</option>
+                        <option value="Faculty" {% if r.mentor.faculty_type == "Faculty" %}selected{% endif %}>Faculty</option>
+                        <option value="Administrative Staff" {% if r.mentor.faculty_type == "Administrative Staff" %}selected{% endif %}>Administrative Staff</option>
+                        <option value="Peon" {% if r.mentor.faculty_type == "Peon" %}selected{% endif %}>Peon</option>
+                        <option value="Other" {% if r.mentor.faculty_type == "Other" %}selected{% endif %}>Other</option>
+                    </select>
+                </td>
+                <td>
+                    <div class="mentor-display">
+                        {% if r.mentor.date_of_joining %}{{ r.mentor.date_of_joining|date:"d M Y" }}{% else %}-{% endif %}
+                    </div>
+                    <input type="date" name="date_of_joining" class="form-control form-control-sm mentor-input mentor-edit"
+                           form="mentor-form-{{ r.mentor.id }}"
+                           value="{{ r.mentor.date_of_joining|date:'Y-m-d' }}" data-original="{{ r.mentor.date_of_joining|date:'Y-m-d' }}">
+                </td>
+                <td>
+                    <div class="mentor-display">{{ r.mentor.status|default:"-" }}</div>
+                    <input type="text" name="status" class="form-control form-control-sm mentor-input mentor-edit"
+                           form="mentor-form-{{ r.mentor.id }}"
+                           value="{{ r.mentor.status }}" data-original="{{ r.mentor.status }}">
+                </td>
+                <td>
+                    <form method="post" class="mentor-row-form" id="mentor-form-{{ r.mentor.id }}">
                         {% csrf_token %}
-                        <input type="hidden" name="action" value="update_password">
+                        <input type="hidden" name="action" value="update_staff">
                         <input type="hidden" name="mentor_id" value="{{ r.mentor.id }}">
-                        <input type="password" name="new_password" class="form-control form-control-sm" style="max-width:220px;" placeholder="Set new password">
-                        <button class="btn btn-sm btn-primary">Save Password</button>
+                        <input type="hidden" name="full_name" value="{{ r.mentor.full_name }}">
                     </form>
-                    <form method="post" class="mt-2" onsubmit="return confirm('Reset to default password rule for {{ r.mentor.name }}?');">
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-sm btn-primary mentor-edit-btn" type="button">Edit</button>
+                        <button class="btn btn-sm btn-success mentor-save-btn d-none" type="submit" form="mentor-form-{{ r.mentor.id }}">Save</button>
+                        <button class="btn btn-sm btn-outline-secondary mentor-cancel-btn d-none" type="button">Cancel</button>
+                    </div>
+                    <form method="post" class="mt-2" onsubmit="return confirm('Remove {{ r.mentor.name }} from this department?');">
                         {% csrf_token %}
-                        <input type="hidden" name="action" value="reset_default">
+                        <input type="hidden" name="action" value="remove_from_dept">
                         <input type="hidden" name="mentor_id" value="{{ r.mentor.id }}">
-                        <button class="btn btn-sm btn-outline-danger">Reset Default</button>
+                        <button class="btn btn-sm btn-outline-danger">Remove</button>
                     </form>
                 </td>
             </tr>
@@ -100,5 +110,83 @@
 {% else %}
 <div class="alert alert-info">No mentors found in current module.</div>
 {% endif %}
+
+<style>
+.table td,
+.table th {
+    padding: 6px;
+    vertical-align: middle;
+}
+.admin-check {
+    width: 18px;
+    height: 18px;
+    accent-color: #0d6efd;
+}
+.mentor-edit {
+    display: none;
+}
+.staff-row-hod td {
+    background: #e8f0ff !important;
+}
+.staff-row-admin td {
+    background: #fff7e6 !important;
+}
+.staff-row-peon td {
+    background: #e6f4ea !important;
+}
+</style>
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    document.querySelectorAll(".mentor-row").forEach(row => {
+        const inputs = row.querySelectorAll(".mentor-input");
+        const editBtn = row.querySelector(".mentor-edit-btn");
+        const saveBtn = row.querySelector(".mentor-save-btn");
+        const cancelBtn = row.querySelector(".mentor-cancel-btn");
+        inputs.forEach(input => { input.disabled = true; });
+
+        function setEditing(editing) {
+            inputs.forEach(input => { input.disabled = !editing; });
+            editBtn.classList.toggle("d-none", editing);
+            saveBtn.classList.toggle("d-none", !editing);
+            cancelBtn.classList.toggle("d-none", !editing);
+            row.querySelectorAll(".mentor-display").forEach(el => {
+                el.style.display = editing ? "none" : "block";
+            });
+            row.querySelectorAll(".mentor-edit").forEach(el => {
+                el.style.display = editing ? "block" : "none";
+            });
+            row.classList.toggle("table-warning", editing);
+        }
+
+        editBtn.addEventListener("click", () => setEditing(true));
+
+        cancelBtn.addEventListener("click", () => {
+            inputs.forEach(input => {
+                const original = input.getAttribute("data-original");
+                if (original !== null) {
+                    input.value = original;
+                }
+            });
+            setEditing(false);
+        });
+
+        row.addEventListener("keydown", (event) => {
+            if (editBtn.classList.contains("d-none")) {
+                if (event.key === "Escape") {
+                    event.preventDefault();
+                    cancelBtn.click();
+                }
+                if (event.key === "Enter") {
+                    event.preventDefault();
+                    saveBtn.click();
+                }
+            }
+        });
+
+        setEditing(false);
+    });
+});
+</script>
 
 {% endblock %}

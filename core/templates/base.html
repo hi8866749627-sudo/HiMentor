@@ -587,6 +587,9 @@
 
                 <div class="menu-group">Setup</div>
                 <a href="/upload-students/" class="d-block mb-2">Student Master</a>
+                {% if can_manage_modules %}
+                <a href="/upload-faculty/" class="d-block mb-2">Faculty Master</a>
+                {% endif %}
                 <a href="/upload-timetable/" class="d-block mb-2">Upload Timetable</a>
                 <a href="/view-timetable/" class="d-block mb-2">View Timetable</a>
                 <a href="/academic-calendar/" class="d-block mb-2">Academic Calendar</a>

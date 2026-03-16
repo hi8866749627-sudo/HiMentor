@@ -43,6 +43,8 @@
                         <td>
                             {% if a.adjustment_type == "swap" %}
                                 <span class="badge bg-info text-dark">Swap</span>
+                            {% elif a.adjustment_type == "room" %}
+                                <span class="badge bg-secondary">Room</span>
                             {% else %}
                                 <span class="badge bg-warning text-dark">Proxy</span>
                             {% endif %}
