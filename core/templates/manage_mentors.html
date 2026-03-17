@@ -4,6 +4,26 @@
 
 <h3>Manage Dept. Staff</h3>
 <div class="mb-2 text-muted">Module: {{ module.name }}</div>
+{% if debug %}
+<div class="alert alert-warning mt-2">
+    <div class="fw-semibold mb-1">Debug: Manage Dept. Staff</div>
+    <div>Module ID: {{ debug.module_id }}</div>
+    <div>Module Name: {{ debug.module_name }}</div>
+    <div>Variant: {{ debug.module_variant|default:"-" }}</div>
+    <div>Year Level: {{ debug.module_year_level|default:"-" }}</div>
+    <div>Dept Label: {{ debug.dept_label|default:"-" }}</div>
+    <div>Timetable Entries (Active): {{ debug.timetable_entries }}</div>
+    <div>Load Adjustments (Active): {{ debug.adjustment_entries }}</div>
+    <div>Faculty Names Count: {{ debug.faculty_names_count }}</div>
+    <div>Faculty Names Sample: {{ debug.faculty_names_sample|join:", " }}</div>
+    <div>Mentors Total: {{ debug.mentors_total }}</div>
+    <div>Mentors from Students: {{ debug.mentors_student_in_module }}</div>
+    <div>Mentors Name Match: {{ debug.mentors_name_match }}</div>
+    <div>Mentors Dept Match: {{ debug.mentors_dept_match }}</div>
+    <div>Mentors Current QS: {{ debug.mentors_current_qs }}</div>
+    <div>Fallback IDs Count: {{ debug.fallback_ids_count }}</div>
+</div>
+{% endif %}
 
 {% if rows %}
 <div class="table-responsive">

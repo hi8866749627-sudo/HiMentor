@@ -752,6 +752,7 @@ def manage_mentors(request):
             return redirect("/manage-mentors/")
 
         mentors = _current_mentors_qs()
+        fallback_ids = set()
         if not mentors.exists():
             dept_label = _dept_label_from_module(module)
             fallback_ids = set(
@@ -785,6 +786,39 @@ def manage_mentors(request):
                     )
                     .order_by("type_rank", "name")
                 )
+        debug = None
+        if request.GET.get("debug") == "1":
+            dept_label = _dept_label_from_module(module)
+            timetable_qs = TimetableEntry.objects.filter(module=module, is_active=True)
+            adjustment_qs = LectureAdjustment.objects.filter(
+                module=module, status=LectureAdjustment.STATUS_ACTIVE
+            )
+            student_mentors_count = (
+                Mentor.objects.filter(student__module=module).distinct().count()
+            )
+            name_match_count = (
+                Mentor.objects.filter(Q(name__in=faculty_names) | Q(full_name__in=faculty_names))
+                .distinct()
+                .count()
+            )
+            dept_match_count = len([m for m in Mentor.objects.all() if _mentor_matches_module(m)])
+            debug = {
+                "module_id": module.id,
+                "module_name": module.name,
+                "module_variant": module.variant,
+                "module_year_level": module.year_level,
+                "dept_label": dept_label,
+                "timetable_entries": timetable_qs.count(),
+                "adjustment_entries": adjustment_qs.count(),
+                "faculty_names_count": len(faculty_names),
+                "faculty_names_sample": sorted(faculty_names)[:25],
+                "mentors_total": Mentor.objects.count(),
+                "mentors_student_in_module": student_mentors_count,
+                "mentors_name_match": name_match_count,
+                "mentors_dept_match": dept_match_count,
+                "mentors_current_qs": mentors.count(),
+                "fallback_ids_count": len(fallback_ids),
+            }
         cred_map = {c.mentor_id: c for c in MentorPassword.objects.filter(mentor__in=mentors)}
         admin_access_ids = {
             a.mentor_id
@@ -808,6 +842,7 @@ def manage_mentors(request):
                 "rows": rows,
                 "module": module,
                 "modules": modules_in_scope or [module],
+                "debug": debug,
             },
         )
     except (OperationalError, ProgrammingError):
