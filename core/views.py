@@ -819,6 +819,8 @@ def manage_mentors(request):
                 "mentors_current_qs": mentors.count(),
                 "fallback_ids_count": len(fallback_ids),
             }
+            if request.GET.get("format") == "json":
+                return JsonResponse(debug)
         cred_map = {c.mentor_id: c for c in MentorPassword.objects.filter(mentor__in=mentors)}
         admin_access_ids = {
             a.mentor_id
