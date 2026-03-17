@@ -771,7 +771,7 @@ def manage_mentors(request):
                 return True
             return False
 
-            def _current_mentors_qs():
+        def _current_mentors_qs():
             base_ids = set(
                 Mentor.objects.filter(
                     Q(student__module=module)
