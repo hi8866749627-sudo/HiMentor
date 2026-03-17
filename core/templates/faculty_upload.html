@@ -60,7 +60,7 @@
         <span>Faculty Records</span>
         <div class="d-flex align-items-center gap-2">
             <span class="text-muted small">Last updated: {{ last_update|date:"d M Y H:i" }}</span>
-            <a class="btn btn-sm btn-outline-primary" href="/manage-mentors/">Update Faculty Data</a>
+            <span class="text-muted small">Edit records directly below</span>
         </div>
     </div>
     <div class="table-responsive">
@@ -81,13 +81,50 @@
                 {% for m in mentors %}
                 <tr>
                     <td>{{ m.name }}</td>
-                    <td>{{ m.full_name|default:"-" }}</td>
-                    <td>{{ m.department|default:"-" }}</td>
-                    <td>{{ m.phone|default:"-" }}</td>
-                    <td>{{ m.email|default:"-" }}</td>
-                    <td>{{ m.faculty_type|default:"-" }}</td>
-                    <td>{{ m.status|default:"-" }}</td>
-                    <td>{{ m.date_of_joining|date:"d M Y"|default:"-" }}</td>
+                    <td>
+                        <form method="post" id="faculty-form-{{ m.id }}">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="update_faculty">
+                            <input type="hidden" name="mentor_id" value="{{ m.id }}">
+                            <div class="faculty-display">{{ m.full_name|default:"-" }}</div>
+                            <input type="text" name="full_name" class="form-control form-control-sm faculty-input d-none" value="{{ m.full_name }}">
+                        </form>
+                    </td>
+                    <td>
+                        <div class="faculty-display">{{ m.department|default:"-" }}</div>
+                        <input type="text" name="department" class="form-control form-control-sm faculty-input d-none" form="faculty-form-{{ m.id }}" value="{{ m.department }}">
+                    </td>
+                    <td>
+                        <div class="faculty-display">{{ m.phone|default:"-" }}</div>
+                        <input type="text" name="phone" class="form-control form-control-sm faculty-input d-none" form="faculty-form-{{ m.id }}" value="{{ m.phone }}">
+                    </td>
+                    <td>
+                        <div class="faculty-display">{{ m.email|default:"-" }}</div>
+                        <input type="email" name="email" class="form-control form-control-sm faculty-input d-none" form="faculty-form-{{ m.id }}" value="{{ m.email }}">
+                    </td>
+                    <td>
+                        <div class="faculty-display">{{ m.faculty_type|default:"-" }}</div>
+                        <select name="faculty_type" class="form-select form-select-sm faculty-input d-none" form="faculty-form-{{ m.id }}">
+                            <option value="HoD" {% if m.faculty_type == "HoD" %}selected{% endif %}>HoD</option>
+                            <option value="Faculty" {% if m.faculty_type == "Faculty" %}selected{% endif %}>Faculty</option>
+                            <option value="Administrative Staff" {% if m.faculty_type == "Administrative Staff" %}selected{% endif %}>Administrative Staff</option>
+                            <option value="Peon" {% if m.faculty_type == "Peon" %}selected{% endif %}>Peon</option>
+                            <option value="Other" {% if m.faculty_type == "Other" %}selected{% endif %}>Other</option>
+                        </select>
+                    </td>
+                    <td>
+                        <div class="faculty-display">{{ m.status|default:"-" }}</div>
+                        <input type="text" name="status" class="form-control form-control-sm faculty-input d-none" form="faculty-form-{{ m.id }}" value="{{ m.status }}">
+                    </td>
+                    <td>
+                        <div class="faculty-display">{{ m.date_of_joining|date:"d M Y"|default:"-" }}</div>
+                        <input type="date" name="date_of_joining" class="form-control form-control-sm faculty-input d-none" form="faculty-form-{{ m.id }}" value="{{ m.date_of_joining|date:'Y-m-d' }}">
+                        <div class="mt-2 d-flex gap-2">
+                            <button type="button" class="btn btn-sm btn-outline-primary faculty-edit-btn">Edit</button>
+                            <button type="submit" class="btn btn-sm btn-success faculty-save-btn d-none" form="faculty-form-{{ m.id }}">Save</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary faculty-cancel-btn d-none">Cancel</button>
+                        </div>
+                    </td>
                 </tr>
                 {% empty %}
                 <tr><td colspan="8" class="text-center text-muted">No faculty records.</td></tr>
@@ -96,5 +133,34 @@
         </table>
     </div>
 </div>
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    document.querySelectorAll("tr").forEach(row => {
+        const editBtn = row.querySelector(".faculty-edit-btn");
+        const saveBtn = row.querySelector(".faculty-save-btn");
+        const cancelBtn = row.querySelector(".faculty-cancel-btn");
+        const displays = row.querySelectorAll(".faculty-display");
+        const inputs = row.querySelectorAll(".faculty-input");
+        if (!editBtn || !saveBtn || !cancelBtn) return;
+        const originals = Array.from(inputs).map(input => input.value);
+        function setEditing(editing) {
+            displays.forEach(el => el.classList.toggle("d-none", editing));
+            inputs.forEach(el => el.classList.toggle("d-none", !editing));
+            editBtn.classList.toggle("d-none", editing);
+            saveBtn.classList.toggle("d-none", !editing);
+            cancelBtn.classList.toggle("d-none", !editing);
+            row.classList.toggle("table-warning", editing);
+        }
+        editBtn.addEventListener("click", () => setEditing(true));
+        cancelBtn.addEventListener("click", () => {
+            Array.from(inputs).forEach((input, idx) => {
+                input.value = originals[idx];
+            });
+            setEditing(false);
+        });
+    });
+});
+</script>
 
 {% endblock %}

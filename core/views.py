@@ -404,11 +404,7 @@ def _manage_mentors_debug_payload(module):
                 if _compact_key(m.name) in faculty_compact or _compact_key(m.full_name) in faculty_compact:
                     base_ids.add(m.id)
     dept_ids = {m.id for m in Mentor.objects.all() if _mentor_matches_module(m)}
-    mentors_current_qs = (
-        Mentor.objects.filter(Q(id__in=base_ids) | Q(id__in=dept_ids))
-        .exclude(module_optouts__module=module)
-        .distinct()
-    )
+    mentors_current_qs = Mentor.objects.filter(Q(id__in=base_ids) | Q(id__in=dept_ids)).distinct()
 
     return {
         "module_id": module.id,
@@ -431,6 +427,24 @@ def _manage_mentors_debug_payload(module):
         "mentors_current_qs": mentors_current_qs.count(),
         "rows_sample": list(mentors_current_qs.values_list("name", flat=True)[:20]),
     }
+
+
+def _safe_optional_mentor_maps(module, mentors):
+    cred_map = {}
+    admin_access_ids = set()
+    optional_warnings = []
+    try:
+        cred_map = {c.mentor_id: c for c in MentorPassword.objects.filter(mentor__in=mentors)}
+    except (OperationalError, ProgrammingError):
+        optional_warnings.append("mentor_password_table_missing")
+    try:
+        admin_access_ids = {
+            a.mentor_id
+            for a in MentorAdminAccess.objects.filter(module=module, mentor__in=mentors).select_related("mentor")
+        }
+    except (OperationalError, ProgrammingError):
+        optional_warnings.append("mentor_admin_access_table_missing")
+    return cred_map, admin_access_ids, optional_warnings
 
 
 def _attendance_fully_marked_for_date(module, date_val):
@@ -817,22 +831,31 @@ def manage_mentors(request):
                 if len(new_password) < 6:
                     messages.error(request, "Password must be at least 6 characters.")
                 else:
-                    cred, _ = MentorPassword.objects.get_or_create(mentor=mentor, defaults={"password_hash": ""})
-                    cred.set_password(new_password)
-                    cred.save(update_fields=["password_hash", "updated_at"])
-                    messages.success(request, f"Password updated for mentor {mentor.name}.")
+                    try:
+                        cred, _ = MentorPassword.objects.get_or_create(mentor=mentor, defaults={"password_hash": ""})
+                        cred.set_password(new_password)
+                        cred.save(update_fields=["password_hash", "updated_at"])
+                        messages.success(request, f"Password updated for mentor {mentor.name}.")
+                    except (OperationalError, ProgrammingError):
+                        messages.error(request, "Password table is not available in this deployment yet.")
             elif action == "reset_default":
-                MentorPassword.objects.filter(mentor=mentor).delete()
-                messages.success(request, f"Password reset to default rule for mentor {mentor.name}.")
+                try:
+                    MentorPassword.objects.filter(mentor=mentor).delete()
+                    messages.success(request, f"Password reset to default rule for mentor {mentor.name}.")
+                except (OperationalError, ProgrammingError):
+                    messages.error(request, "Password table is not available in this deployment yet.")
             elif action in {"update_access", "update_staff"}:
                 raw_admin = (request.POST.get("is_admin") or "").strip().lower()
                 is_admin = raw_admin in {"yes", "true", "1", "on"}
                 mentor.is_admin = is_admin
                 mentor.save(update_fields=["is_admin"])
-                MentorAdminAccess.objects.filter(mentor=mentor, module=module).delete()
-                if is_admin:
-                    MentorAdminAccess.objects.get_or_create(mentor=mentor, module=module)
-                messages.success(request, f"Access updated for mentor {mentor.name}.")
+                try:
+                    MentorAdminAccess.objects.filter(mentor=mentor, module=module).delete()
+                    if is_admin:
+                        MentorAdminAccess.objects.get_or_create(mentor=mentor, module=module)
+                    messages.success(request, f"Access updated for mentor {mentor.name}.")
+                except (OperationalError, ProgrammingError):
+                    messages.warning(request, f"Access saved on mentor profile, but admin-access table is unavailable for {mentor.name}.")
             if action in {"update_profile", "update_staff"}:
                 full_name = (request.POST.get("full_name") or "").strip()
                 department = (request.POST.get("department") or "").strip().upper()
@@ -862,8 +885,14 @@ def manage_mentors(request):
                 mentor.save()
                 messages.success(request, f"Profile updated for mentor {mentor.name}.")
             elif action == "remove_from_dept":
-                MentorModuleOptOut.objects.get_or_create(mentor=mentor, module=module)
-                MentorAdminAccess.objects.filter(mentor=mentor, module=module).delete()
+                try:
+                    MentorModuleOptOut.objects.get_or_create(mentor=mentor, module=module)
+                except (OperationalError, ProgrammingError):
+                    pass
+                try:
+                    MentorAdminAccess.objects.filter(mentor=mentor, module=module).delete()
+                except (OperationalError, ProgrammingError):
+                    pass
                 messages.success(request, f"{mentor.name} removed from this department.")
             else:
                 messages.error(request, "Invalid action.")
@@ -905,17 +934,15 @@ def manage_mentors(request):
                     .order_by("type_rank", "name")
                 )
         debug_requested = request.GET.get("debug") == "1"
-        cred_map = {c.mentor_id: c for c in MentorPassword.objects.filter(mentor__in=mentors)}
-        admin_access_ids = {
-            a.mentor_id
-            for a in MentorAdminAccess.objects.filter(module=module, mentor__in=mentors).select_related("mentor")
-        }
+        cred_map, admin_access_ids, optional_warnings = _safe_optional_mentor_maps(module, mentors)
         if module:
             print("MODULE:", module.id, module.name)
         else:
             print("MODULE: None")
         print("FACULTY COUNT:", len(faculty_names))
         print("MENTORS COUNT:", mentors.count())
+        if optional_warnings:
+            print("MENTOR OPTIONAL WARNINGS:", ",".join(optional_warnings))
         rows = [
             {
                 "mentor": m,
@@ -930,6 +957,7 @@ def manage_mentors(request):
             debug = _manage_mentors_debug_payload(module)
             debug["fallback_ids_count"] = len(fallback_ids)
             debug["rows_count"] = len(rows)
+            debug["optional_warnings"] = optional_warnings
             if request.GET.get("format") == "json":
                 return JsonResponse(debug)
 
@@ -1176,7 +1204,34 @@ def upload_faculty(request):
     debug_info = None
     form = UploadFileForm()
 
-    if request.method == "POST":
+    if request.method == "POST" and (request.POST.get("action") or "").strip() == "update_faculty":
+        mentor_id = request.POST.get("mentor_id")
+        mentor = Mentor.objects.filter(id=mentor_id).first()
+        if not mentor:
+            message = "Faculty record not found."
+        else:
+            full_name = (request.POST.get("full_name") or "").strip()
+            department = (request.POST.get("department") or "").strip().upper()
+            phone = (request.POST.get("phone") or "").strip()
+            email = (request.POST.get("email") or "").strip()
+            faculty_type = (request.POST.get("faculty_type") or "").strip()
+            status = (request.POST.get("status") or "").strip()
+            if full_name:
+                mentor.full_name = full_name
+            mentor.department = department or mentor.department or "PENDING"
+            mentor.phone = phone
+            mentor.email = email
+            mentor.faculty_type = faculty_type or mentor.faculty_type or "Faculty"
+            mentor.status = status or mentor.status or "Working"
+            join_raw = (request.POST.get("date_of_joining") or "").strip()
+            if join_raw:
+                try:
+                    mentor.date_of_joining = datetime.strptime(join_raw, "%Y-%m-%d").date()
+                except Exception:
+                    pass
+            mentor.save()
+            message = f"Faculty record updated for {mentor.name}."
+    elif request.method == "POST":
         form = UploadFileForm(request.POST, request.FILES)
         if form.is_valid():
             file = request.FILES["file"]
