@@ -677,6 +677,13 @@ def manage_mentors(request):
 
         mentor_obj = _session_mentor_obj(request)
         module = _active_module(request)
+        if not module or not AcademicModule.objects.filter(id=module.id).exists():
+            module = AcademicModule.objects.filter(is_active=True).order_by("-id").first()
+        if module:
+            request.session["current_module_id"] = module.id
+        if request.GET.get("format") == "json":
+            debug = _manage_mentors_debug_payload(module)
+            return JsonResponse(debug)
         if request.user.is_authenticated and is_superadmin_user(request.user):
             if request.GET.get("no_auto") != "1":
                 has_timetable = TimetableEntry.objects.filter(module=module, is_active=True).exists()
@@ -764,7 +771,7 @@ def manage_mentors(request):
                 return True
             return False
 
-        def _current_mentors_qs():
+            def _current_mentors_qs():
             base_ids = set(
                 Mentor.objects.filter(
                     Q(student__module=module)
@@ -790,7 +797,6 @@ def manage_mentors(request):
             )
             return (
                 Mentor.objects.filter(Q(id__in=base_ids) | Q(id__in=dept_ids))
-                .exclude(module_optouts__module=module)
                 .distinct()
                 .annotate(student_count=Count("student", filter=Q(student__module=module)))
                 .annotate(type_rank=order_case)
@@ -904,16 +910,21 @@ def manage_mentors(request):
             a.mentor_id
             for a in MentorAdminAccess.objects.filter(module=module, mentor__in=mentors).select_related("mentor")
         }
-        rows = []
-        for m in mentors:
-            rows.append(
-                {
-                    "mentor": m,
-                    "student_count": getattr(m, "student_count", 0),
-                    "has_custom_password": m.id in cred_map,
-                    "admin_for_module": m.id in admin_access_ids,
-                }
-            )
+        if module:
+            print("MODULE:", module.id, module.name)
+        else:
+            print("MODULE: None")
+        print("FACULTY COUNT:", len(faculty_names))
+        print("MENTORS COUNT:", mentors.count())
+        rows = [
+            {
+                "mentor": m,
+                "student_count": getattr(m, "student_count", 0),
+                "has_custom_password": m.id in cred_map,
+                "admin_for_module": m.id in admin_access_ids,
+            }
+            for m in mentors
+        ]
         debug = None
         if debug_requested:
             debug = _manage_mentors_debug_payload(module)
