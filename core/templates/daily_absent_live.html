@@ -43,6 +43,10 @@
     </div>
 </form>
 
+{% if attendance_pending %}
+<div class="alert alert-warning">Attendance is not fully marked for this date. Showing available records.</div>
+{% endif %}
+
 <div class="card mb-3">
     <div class="card-body">
         <div class="fw-bold">{{ module.name }}</div>

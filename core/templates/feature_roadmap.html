@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+.roadmap-section {
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 16px;
+    background: #fff;
+}
+.roadmap-section h5 {
+    margin-bottom: 12px;
+}
+.roadmap-badge {
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-weight: 700;
+}
+.roadmap-list li {
+    margin-bottom: 6px;
+}
+.roadmap-item {
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-color: rgba(13, 110, 253, 0.4);
+    text-underline-offset: 3px;
+}
+.roadmap-item:hover {
+    color: #0b5ed7;
+}
+.roadmap-detail {
+    display: none;
+    margin-top: 6px;
+    padding: 8px 10px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    font-size: 0.92rem;
+    color: #334155;
+}
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h4 class="mb-1">Product Roadmap</h4>
+        <div class="text-muted">Quick snapshot of what already exists vs. what’s coming next.</div>
+    </div>
+    {% if module %}
+    <span class="badge bg-secondary">Module: {{ module.name }}</span>
+    {% endif %}
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-4">
+        <div class="roadmap-section h-100">
+            <div class="d-flex align-items-center gap-2 mb-2">
+                <span class="badge bg-success roadmap-badge">Already Live</span>
+            </div>
+            <ul class="roadmap-list mb-0">
+                <li class="roadmap-item" data-detail="Student master is live with enrollment, roll, batch, and mentor mapping. Mentors are auto-resolved by short/full name, with clean import handling. Updates are supported via re-upload without losing history. Data is locked per module to prevent cross-mixing.">Student master & mentor assignment</li>
+                <li class="roadmap-item" data-detail="Separate mentor and coordinator dashboards are active. Each role sees only relevant modules and actions. Quick navigation and workflow-specific summaries are available.">Mentor & coordinator dashboards</li>
+                <li class="roadmap-item" data-detail="Timetable can be uploaded from Excel, viewed by day/batch, and edited directly. Active timetable switching is supported with immediate effect. Edits sync into schedule, attendance, and reports.">Timetable upload, view, edit</li>
+                <li class="roadmap-item" data-detail="Daily attendance marking is available for mentors and coordinators. Absents are captured per lecture, with save controls and change prompts. Attendance supports proxy and swap adjustments.">Daily attendance marking</li>
+                <li class="roadmap-item" data-detail="Weekly and overall percentages are computed from daily sessions. Analytics include subject-wise and week-wise summaries. Exports are available in Excel and PDF.">Daily/weekly attendance analytics</li>
+                <li class="roadmap-item" data-detail="Daily absent live view and downloadable reports exist. Lecture-wise absents, present count, and batch-wise totals are shown. PDF/Excel outputs match the live view.">Absent reports (daily live, PDFs, Excel)</li>
+                <li class="roadmap-item" data-detail="Load adjustment supports proxy and swap. Schedule and attendance respect these changes. Coordinators can override conflicts when required.">Load adjustment (proxy / swap)</li>
+                <li class="roadmap-item" data-detail="Subject master supports canonical names and alias mapping. Aliases auto-suggest from timetable and attendance sheets. Canonical names are used in analytics and reports.">Subjects & alias mapping</li>
+                <li class="roadmap-item" data-detail="Result uploads support T1–T4 plus remedial. Results flow into mentor dashboards and reports. Result call workflows are integrated.">Results upload and reports</li>
+                <li class="roadmap-item" data-detail="Mentors can view and download SIF PDFs per student or in bulk. SIF includes attendance and result call history. This is ready for printing and sharing.">SIF viewing & PDF export</li>
+                <li class="roadmap-item" data-detail="Attendance and result follow-up calls are tracked. Call status, remarks, and message status are recorded. Retry lists and summary views are available.">Call tracking (attendance + results)</li>
+                <li class="roadmap-item" data-detail="Student master uploads allow bulk add/update with validation. Failed rows are reported without breaking imports. Multiple columns are auto-detected from Excel.">Bulk upload students</li>
+                <li class="roadmap-item" data-detail="Student data is stored per module with controlled access. Only authorized roles can access modules. Sensitive fields are not exposed to other modules.">Secure student information storage</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="roadmap-section h-100">
+            <div class="d-flex align-items-center gap-2 mb-2">
+                <span class="badge bg-warning text-dark roadmap-badge">Partially Done</span>
+            </div>
+            <ul class="roadmap-list mb-0">
+                <li class="roadmap-item" data-detail="Parent numbers are stored against students and used in call flows. There is no separate guardian module yet. A future step will add guardian profiles and contact history.">Guardian contact management (stored, no dedicated module)</li>
+                <li class="roadmap-item" data-detail="Batches/divisions are supported across timetable and attendance. There is no advanced group logic yet. A group builder can be added on top of the current structure.">Student grouping (batch/division only)</li>
+                <li class="roadmap-item" data-detail="Academic calendar exists with T1–T4 ranges and holidays. Attendance is allowed only inside active dates. We will extend this into full academic year management.">Academic term/year setup (calendar exists)</li>
+                <li class="roadmap-item" data-detail="Weekly and compiled exports give a monthly-style view. True monthly sheets and auto-mails are planned. Current outputs are ready for manual monthly filing.">Monthly attendance sheets (weekly/compiled export)</li>
+                <li class="roadmap-item" data-detail="Enrollment is implicit via student master + timetable subjects. There is no explicit enrollment flow yet. A dedicated enrollment module can reuse existing subject data.">Course enrollment insights (via timetable + subjects)</li>
+                <li class="roadmap-item" data-detail="Mentor/coordinator/superadmin access is enforced. Fine-grained permissions are not yet configurable. Next step would be role templates.">Role-based access controls (mentor/coordinator/superadmin)</li>
+                <li class="roadmap-item" data-detail="Reports exist for daily, weekly, and compiled attendance. Additional KPIs and trend charts are not yet included. We can add benchmarks per batch/subject.">Attendance performance reports (limited set today)</li>
+                <li class="roadmap-item" data-detail="Admissions workflow is not active. Only the student upload exists. An inquiry-to-admission pipeline can be added later.">Inquiry / admissions tracking (basic placeholders only)</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="roadmap-section h-100">
+            <div class="d-flex align-items-center gap-2 mb-2">
+                <span class="badge bg-primary roadmap-badge">Coming Soon</span>
+            </div>
+            <ul class="roadmap-list mb-0">
+                <li class="roadmap-item" data-detail="Admissions will cover inquiry → application → enrollment with tracking. It will include counselor workflows and reports. This is planned after attendance stabilization.">Admissions module (applicant → enrollment)</li>
+                <li class="roadmap-item" data-detail="Fees will include structures, schedules, concessions, and payment tracking. Reports will cover daily collections and outstanding dues. Online payments can be integrated later.">Fees (structure, schedule, collection reports)</li>
+                <li class="roadmap-item" data-detail="Assessments will include plans, criteria, and results. This will enable continuous assessment and final grades. Reporting will align with your academic format.">Assessment engine (plans, criteria, reports)</li>
+                <li class="roadmap-item" data-detail="Leave requests for students and staff with approvals. Calendar-level auto-blocking for attendance will be supported.">Leave applications</li>
+                <li class="roadmap-item" data-detail="Content delivery with articles, videos, quizzes, and assignments. Lightweight LMS features will be optional per module.">Content modules (articles, videos, quizzes)</li>
+                <li class="roadmap-item" data-detail="Group builder for sections, electives, and custom cohorts. This will allow targeted analytics and messaging.">Advanced student groups & categories</li>
+                <li class="roadmap-item" data-detail="Custom report builder with filters and export formats. Will include attendance, results, and operational KPIs.">Extended analytics & custom reports</li>
+                <li class="roadmap-item" data-detail="Placement portal for resumes, eligibility, drives, and outcomes. Includes company profiles and interview scheduling.">Placement / training portal</li>
+                <li class="roadmap-item" data-detail="Online registration with payment gateway integration. Supports registration form builder and inquiry conversion.">Online registration + payment</li>
+                <li class="roadmap-item" data-detail="Inquiry follow-up pipeline with stages and conversion analytics. Counselors and interviews can be tracked here.">Inquiry follow-up & conversion reports</li>
+                <li class="roadmap-item" data-detail="Generate student ID cards and gate passes in bulk. QR code support can be added later.">Auto-generate ID cards & passes</li>
+                <li class="roadmap-item" data-detail="Document vault for certificates and proofs. Includes access controls and expiry reminders.">Student certificates storage</li>
+                <li class="roadmap-item" data-detail="Design custom inquiry or admission forms without dev changes. Built for quick department-level needs.">Custom form builder</li>
+                <li class="roadmap-item" data-detail="Auto-generation of timetable using constraints and preferences. Includes clash detection and room optimization.">Auto timetable generation</li>
+                <li class="roadmap-item" data-detail="Exam scheduling, seating, hall tickets, and result publishing. Can integrate with existing results pipeline.">Examination management</li>
+                <li class="roadmap-item" data-detail="Support for multiple grading systems and GPA rules. Will be configured per module or program.">Multiple grading systems</li>
+                <li class="roadmap-item" data-detail="Complete hostel suite: allocation, attendance, gate pass, and fines. Includes mess billing and visitor logs.">Hostel management suite</li>
+                <li class="roadmap-item" data-detail="Library system with issue/return, fines, barcode, and stock verification. Reservation and overdue notices included.">Library management suite</li>
+                <li class="roadmap-item" data-detail="Finance and payroll for staff with salary slips and reimbursements. Budget and P&L reporting included.">Finance + payroll + reimbursements</li>
+                <li class="roadmap-item" data-detail="Lab attendance, coverage, and assessment tracking. Supports viva and experiment grading.">Lab management & lab attendance</li>
+                <li class="roadmap-item" data-detail="Student grievance submissions and gate pass approvals. Includes tracking and resolution history.">Student grievance & gate pass</li>
+                <li class="roadmap-item" data-detail="Staff records, attendance, leaves, and transfers. HR reports and compliance logs included.">HR & staff management</li>
+                <li class="roadmap-item" data-detail="LMS with live classes, quizzes, assignments, and progress analytics. Premium course support planned.">Learning management (content, classes, quizzes, assignments)</li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function(){
+    document.querySelectorAll(".roadmap-item").forEach(function(item){
+        const detailText = item.getAttribute("data-detail") || "";
+        const detail = document.createElement("div");
+        detail.className = "roadmap-detail";
+        detail.textContent = detailText;
+        item.appendChild(detail);
+        item.addEventListener("click", function(e){
+            e.preventDefault();
+            document.querySelectorAll(".roadmap-detail").forEach(function(d){
+                if(d !== detail){ d.style.display = "none"; }
+            });
+            detail.style.display = detail.style.display === "block" ? "none" : "block";
+        });
+    });
+});
+</script>
+
+{% endblock %}

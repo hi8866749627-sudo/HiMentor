@@ -7798,8 +7798,7 @@ def daily_absent_excel(request):
     if not _attendance_allowed_for_date(module, date_val):
         return HttpResponse("Attendance is not allowed for this date.", status=400)
 
-    if is_coordinator and not _attendance_fully_marked_for_date(module, date_val):
-        return HttpResponse("Attendance is not fully marked for this date.", status=400)
+    attendance_pending = bool(is_coordinator and not _attendance_fully_marked_for_date(module, date_val))
 
     sessions_qs = LectureSession.objects.filter(module=module, date=date_val)
     if batch_filter:
@@ -7827,6 +7826,12 @@ def daily_absent_excel(request):
     ws.cell(row=1, column=1, value=title)
 
     row_cursor = 2
+    if attendance_pending:
+        ws.cell(row=row_cursor, column=1, value="Note: Attendance is not fully marked for this date.")
+        row_cursor += 1
+    if attendance_pending:
+        ws.cell(row=row_cursor, column=1, value="Note: Attendance is not fully marked for this date.")
+        row_cursor += 1
     for i in range(0, len(batches), 2):
         left = batches[i]
         right = batches[i + 1] if i + 1 < len(batches) else None
@@ -8069,8 +8074,7 @@ def daily_absent_live(request):
     if not _attendance_allowed_for_date(module, date_val):
         return HttpResponse("Attendance is not allowed for this date.", status=400)
 
-    if is_coordinator and not _attendance_fully_marked_for_date(module, date_val):
-        return HttpResponse("Attendance is not fully marked for this date.", status=400)
+    attendance_pending = bool(is_coordinator and not _attendance_fully_marked_for_date(module, date_val))
 
     batch_cards, batches = _daily_absent_cards(module, date_val, batch_filter)
     return render(
@@ -8082,6 +8086,7 @@ def daily_absent_live(request):
             "batch_filter": batch_filter,
             "batch_cards": batch_cards,
             "batches": batches,
+            "attendance_pending": attendance_pending,
         },
     )
 
@@ -8109,8 +8114,7 @@ def daily_absent_live_pdf(request):
     if not _attendance_allowed_for_date(module, date_val):
         return HttpResponse("Attendance is not allowed for this date.", status=400)
 
-    if is_coordinator and not _attendance_fully_marked_for_date(module, date_val):
-        return HttpResponse("Attendance is not fully marked for this date.", status=400)
+    attendance_pending = bool(is_coordinator and not _attendance_fully_marked_for_date(module, date_val))
 
     batch_cards, _ = _daily_absent_cards_for_pdf(module, date_val, batch_filter)
     response = HttpResponse(content_type="application/pdf")
@@ -8154,6 +8158,12 @@ def daily_absent_live_pdf(request):
         )
     )
     story = [title_table, Spacer(1, 10)]
+    if attendance_pending:
+        story.append(Paragraph("Note: Attendance is not fully marked for this date.", styles["BodyText"]))
+        story.append(Spacer(1, 8))
+    if attendance_pending:
+        story.append(Paragraph("Note: Attendance is not fully marked for this date.", styles["BodyText"]))
+        story.append(Spacer(1, 8))
 
     for card in batch_cards:
         story.append(Paragraph(f"Batch: {card['batch']}", styles["Heading5"]))
@@ -8266,8 +8276,7 @@ def weekly_attendance_live(request):
             },
         )
 
-    if is_coordinator and not _attendance_fully_marked_for_range(module, start, range_end):
-        return HttpResponse("Attendance is not fully marked for the selected range.", status=400)
+    attendance_pending = bool(is_coordinator and not _attendance_fully_marked_for_range(module, start, range_end))
 
     sessions = list(
         LectureSession.objects.filter(module=module, date__gte=start, date__lte=range_end)
@@ -8391,6 +8400,7 @@ def weekly_attendance_live(request):
             "range_start": start,
             "range_end": range_end,
             "insights": insights,
+            "attendance_pending": attendance_pending,
         },
     )
 
@@ -8808,9 +8818,6 @@ def weekly_attendance_excel(request):
     if range_end < start:
         return HttpResponse("Weekly attendance is available only up to today.", status=400)
 
-    if is_coordinator and not _attendance_fully_marked_for_range(module, start, range_end):
-        return HttpResponse("Attendance is not fully marked for the selected range.", status=400)
-
     export_format = (request.GET.get("format") or "compiled").strip().lower()
     batch_filter = (request.GET.get("batch") or "").strip()
     export_data = _weekly_export_data(module, calendar, phase, week_no, batch_filter=batch_filter)
@@ -8877,3 +8884,10 @@ def recompute_week_from_daily(request):
     if err:
         return JsonResponse({"ok": False, "msg": err}, status=400)
     return JsonResponse({"ok": True, "updated": updated})
+
+
+def feature_roadmap(request):
+    if request.session.get("mentor"):
+        return redirect("/mentor-dashboard/")
+    module = _active_module(request)
+    return render(request, "feature_roadmap.html", {"module": module})

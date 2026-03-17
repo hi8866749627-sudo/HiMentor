@@ -42,6 +42,9 @@
 {% if message %}
 <div class="alert alert-warning">{{ message }}</div>
 {% endif %}
+{% if attendance_pending %}
+<div class="alert alert-warning">Attendance is not fully marked for the selected range. Showing available records.</div>
+{% endif %}
 
 <form method="get" class="row g-2 align-items-end mb-3">
     <div class="col-md-2">
