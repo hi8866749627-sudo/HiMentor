@@ -608,17 +608,6 @@ def manage_mentors(request):
         faculty_names = [n for n in faculty_names if n]
         for name in faculty_names:
             Mentor.objects.get_or_create(name=name)
-    except (OperationalError, ProgrammingError) as exc:
-        module = _active_module(request)
-        messages.error(
-            request,
-            "Database migration pending for mentor/staff fields. Please run migrations and reload.",
-        )
-        return render(
-            request,
-            "manage_mentors.html",
-            {"rows": [], "module": module, "modules": [module]},
-        )
 
     def _mentor_matches_module(mentor_obj):
         dept = (mentor_obj.department or "").strip().upper()
@@ -721,32 +710,43 @@ def manage_mentors(request):
             messages.error(request, "Invalid action.")
         return redirect("/manage-mentors/")
 
-    mentors = _current_mentors_qs()
-    cred_map = {c.mentor_id: c for c in MentorPassword.objects.filter(mentor__in=mentors)}
-    admin_access_ids = {
-        a.mentor_id
-        for a in MentorAdminAccess.objects.filter(module=module, mentor__in=mentors).select_related("mentor")
-    }
-    rows = []
-    for m in mentors:
-        rows.append(
-            {
-                "mentor": m,
-                "student_count": getattr(m, "student_count", 0),
-                "has_custom_password": m.id in cred_map,
-                "admin_for_module": m.id in admin_access_ids,
-            }
-        )
+        mentors = _current_mentors_qs()
+        cred_map = {c.mentor_id: c for c in MentorPassword.objects.filter(mentor__in=mentors)}
+        admin_access_ids = {
+            a.mentor_id
+            for a in MentorAdminAccess.objects.filter(module=module, mentor__in=mentors).select_related("mentor")
+        }
+        rows = []
+        for m in mentors:
+            rows.append(
+                {
+                    "mentor": m,
+                    "student_count": getattr(m, "student_count", 0),
+                    "has_custom_password": m.id in cred_map,
+                    "admin_for_module": m.id in admin_access_ids,
+                }
+            )
 
-    return render(
-        request,
-        "manage_mentors.html",
-        {
-            "rows": rows,
-            "module": module,
-            "modules": modules_in_scope or [module],
-        },
-    )
+        return render(
+            request,
+            "manage_mentors.html",
+            {
+                "rows": rows,
+                "module": module,
+                "modules": modules_in_scope or [module],
+            },
+        )
+    except (OperationalError, ProgrammingError):
+        module = _active_module(request)
+        messages.error(
+            request,
+            "Database migration pending for mentor/staff fields. Please run migrations and reload.",
+        )
+        return render(
+            request,
+            "manage_mentors.html",
+            {"rows": [], "module": module, "modules": [module]},
+        )
 
 
 @login_required
