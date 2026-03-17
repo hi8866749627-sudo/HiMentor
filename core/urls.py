@@ -87,6 +87,7 @@ from .views import (
     manage_mentors,
     healthz,
     feature_roadmap,
+    manage_mentors_debug,
 )
 from .mobile_api import (
     api_mobile_login,
@@ -212,6 +213,7 @@ urlpatterns = [
     path("mentor-result-report/", mentor_result_report),
     path("result-reports/", coordinator_result_report),
     path("manage-mentors/", manage_mentors),
+    path("manage-mentors/debug/", manage_mentors_debug),
     path("feature-roadmap/", feature_roadmap),
     path("api/mobile/login/", api_mobile_login),
     path("api/mobile/logout/", api_mobile_logout),

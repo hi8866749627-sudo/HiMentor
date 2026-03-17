@@ -336,6 +336,103 @@ def _dept_label_from_module(module):
     return (getattr(module, "year_level", "") or "").upper() or "NA"
 
 
+def _manage_mentors_debug_payload(module):
+    def _compact_key(value):
+        return "".join(ch for ch in str(value or "").upper() if ch.isalnum())
+
+    _ensure_active_timetable(module)
+    faculty_names = set(
+        (name or "").strip()
+        for name in TimetableEntry.objects.filter(module=module, is_active=True)
+        .exclude(faculty="")
+        .values_list("faculty", flat=True)
+    )
+    faculty_names |= set(
+        (name or "").strip()
+        for name in LectureAdjustment.objects.filter(module=module, status=LectureAdjustment.STATUS_ACTIVE)
+        .exclude(original_faculty="")
+        .values_list("original_faculty", flat=True)
+    )
+    proxy_names = list(
+        Mentor.objects.filter(
+            proxy_adjustments__module=module,
+            proxy_adjustments__status=LectureAdjustment.STATUS_ACTIVE,
+        ).values_list("name", flat=True)
+    )
+    faculty_names |= {n for n in proxy_names if n}
+    faculty_names = {n for n in faculty_names if n}
+
+    def _mentor_matches_module(mentor_obj):
+        dept_raw = (mentor_obj.department or "").strip()
+        if not dept_raw:
+            return False
+        dept = dept_raw.upper()
+        variant = (module.variant or "").upper()
+        year_level = (module.year_level or "").upper()
+        name = (module.name or "").upper()
+
+        if dept in {year_level, variant}:
+            return True
+        if variant.startswith(dept):
+            return True
+        if dept in name:
+            return True
+
+        dept_c = _compact_key(dept)
+        variant_c = _compact_key(variant)
+        name_c = _compact_key(name)
+        year_c = _compact_key(year_level)
+        if dept_c and (dept_c == variant_c or variant_c.startswith(dept_c)):
+            return True
+        if dept_c and dept_c in name_c:
+            return True
+        if year_c and dept_c.startswith(year_c):
+            return True
+        return False
+
+    base_ids = set(
+        Mentor.objects.filter(
+            Q(student__module=module)
+            | Q(name__in=faculty_names)
+            | Q(full_name__in=faculty_names)
+        ).values_list("id", flat=True)
+    )
+    if faculty_names:
+        faculty_compact = {_compact_key(n) for n in faculty_names if n}
+        if faculty_compact:
+            for m in Mentor.objects.all():
+                if _compact_key(m.name) in faculty_compact or _compact_key(m.full_name) in faculty_compact:
+                    base_ids.add(m.id)
+    dept_ids = {m.id for m in Mentor.objects.all() if _mentor_matches_module(m)}
+    mentors_current_qs = (
+        Mentor.objects.filter(Q(id__in=base_ids) | Q(id__in=dept_ids))
+        .exclude(module_optouts__module=module)
+        .distinct()
+    )
+
+    return {
+        "module_id": module.id,
+        "module_name": module.name,
+        "module_variant": module.variant,
+        "module_year_level": module.year_level,
+        "dept_label": _dept_label_from_module(module),
+        "timetable_entries": TimetableEntry.objects.filter(module=module, is_active=True).count(),
+        "adjustment_entries": LectureAdjustment.objects.filter(
+            module=module, status=LectureAdjustment.STATUS_ACTIVE
+        ).count(),
+        "faculty_names_count": len(faculty_names),
+        "faculty_names_sample": sorted(faculty_names)[:25],
+        "mentors_total": Mentor.objects.count(),
+        "mentors_student_in_module": Mentor.objects.filter(student__module=module).distinct().count(),
+        "mentors_name_match": Mentor.objects.filter(
+            Q(name__in=faculty_names) | Q(full_name__in=faculty_names)
+        ).distinct().count(),
+        "mentors_dept_match": len([m for m in Mentor.objects.all() if _mentor_matches_module(m)]),
+        "mentors_current_qs": mentors_current_qs.count(),
+        "rows_sample": list(mentors_current_qs.values_list("name", flat=True)[:20]),
+    }
+
+
 def _attendance_fully_marked_for_date(module, date_val):
     _ensure_active_timetable(module)
     if not _attendance_allowed_for_date(module, date_val):
@@ -819,39 +916,9 @@ def manage_mentors(request):
             )
         debug = None
         if debug_requested:
-            dept_label = _dept_label_from_module(module)
-            timetable_qs = TimetableEntry.objects.filter(module=module, is_active=True)
-            adjustment_qs = LectureAdjustment.objects.filter(
-                module=module, status=LectureAdjustment.STATUS_ACTIVE
-            )
-            student_mentors_count = (
-                Mentor.objects.filter(student__module=module).distinct().count()
-            )
-            name_match_count = (
-                Mentor.objects.filter(Q(name__in=faculty_names) | Q(full_name__in=faculty_names))
-                .distinct()
-                .count()
-            )
-            dept_match_count = len([m for m in Mentor.objects.all() if _mentor_matches_module(m)])
-            debug = {
-                "module_id": module.id,
-                "module_name": module.name,
-                "module_variant": module.variant,
-                "module_year_level": module.year_level,
-                "dept_label": dept_label,
-                "timetable_entries": timetable_qs.count(),
-                "adjustment_entries": adjustment_qs.count(),
-                "faculty_names_count": len(faculty_names),
-                "faculty_names_sample": sorted(faculty_names)[:25],
-                "mentors_total": Mentor.objects.count(),
-                "mentors_student_in_module": student_mentors_count,
-                "mentors_name_match": name_match_count,
-                "mentors_dept_match": dept_match_count,
-                "mentors_current_qs": mentors.count(),
-                "fallback_ids_count": len(fallback_ids),
-                "rows_count": len(rows),
-                "rows_sample": [r["mentor"].name for r in rows[:20]],
-            }
+            debug = _manage_mentors_debug_payload(module)
+            debug["fallback_ids_count"] = len(fallback_ids)
+            debug["rows_count"] = len(rows)
             if request.GET.get("format") == "json":
                 return JsonResponse(debug)
 
@@ -9033,3 +9100,20 @@ def feature_roadmap(request):
         return redirect("/mentor-dashboard/")
     module = _active_module(request)
     return render(request, "feature_roadmap.html", {"module": module})
+
+
+@admin_or_mentor_admin_required
+def manage_mentors_debug(request):
+    if _block_mentor_only(request):
+        return JsonResponse({"ok": False, "msg": "Forbidden"}, status=403)
+    module = _active_module(request)
+    module_id = request.GET.get("module_id")
+    if module_id:
+        allowed_qs = allowed_modules_for_user(request)
+        chosen = allowed_qs.filter(id=module_id).first()
+        if chosen:
+            module = chosen
+    payload = _manage_mentors_debug_payload(module)
+    resp = JsonResponse(payload)
+    resp["Cache-Control"] = "no-store"
+    return resp
