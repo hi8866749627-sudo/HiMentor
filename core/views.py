@@ -22,6 +22,7 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 from django.db import close_old_connections
+from django.db.utils import OperationalError, ProgrammingError
 from django.db.models import Count
 from django.contrib.auth.decorators import login_required
 from functools import wraps
@@ -573,39 +574,51 @@ def login_page(request):
 
 @admin_or_mentor_admin_required
 def manage_mentors(request):
-    if _block_mentor_only(request):
-        return redirect("/mentor-dashboard/")
+    try:
+        if _block_mentor_only(request):
+            return redirect("/mentor-dashboard/")
 
-    mentor_obj = _session_mentor_obj(request)
-    module = _active_module(request)
-    _ensure_active_timetable(module)
-    modules_in_scope = []
-    if request.user.is_authenticated:
-        modules_in_scope = list(
-            AcademicModule.objects.filter(is_active=True, coordinator_accesses__coordinator=request.user)
-            .distinct()
-            .order_by("-id")
+        mentor_obj = _session_mentor_obj(request)
+        module = _active_module(request)
+        _ensure_active_timetable(module)
+        modules_in_scope = []
+        if request.user.is_authenticated:
+            modules_in_scope = list(
+                AcademicModule.objects.filter(is_active=True, coordinator_accesses__coordinator=request.user)
+                .distinct()
+                .order_by("-id")
+            )
+        elif mentor_obj and mentor_obj.is_admin:
+            modules_in_scope = list(
+                AcademicModule.objects.filter(is_active=True, mentor_admins__mentor=mentor_obj)
+                .distinct()
+                .order_by("-id")
+            )
+        if modules_in_scope and module.id not in {m.id for m in modules_in_scope}:
+            messages.error(request, "You do not have access to manage mentors for this module.")
+            return redirect("/reports/")
+        faculty_names = sorted(
+            {
+                (name or "").strip()
+                for name in TimetableEntry.objects.filter(module=module, is_active=True)
+                .exclude(faculty="")
+                .values_list("faculty", flat=True)
+            }
         )
-    elif mentor_obj and mentor_obj.is_admin:
-        modules_in_scope = list(
-            AcademicModule.objects.filter(is_active=True, mentor_admins__mentor=mentor_obj)
-            .distinct()
-            .order_by("-id")
+        faculty_names = [n for n in faculty_names if n]
+        for name in faculty_names:
+            Mentor.objects.get_or_create(name=name)
+    except (OperationalError, ProgrammingError) as exc:
+        module = _active_module(request)
+        messages.error(
+            request,
+            "Database migration pending for mentor/staff fields. Please run migrations and reload.",
         )
-    if modules_in_scope and module.id not in {m.id for m in modules_in_scope}:
-        messages.error(request, "You do not have access to manage mentors for this module.")
-        return redirect("/reports/")
-    faculty_names = sorted(
-        {
-            (name or "").strip()
-            for name in TimetableEntry.objects.filter(module=module, is_active=True)
-            .exclude(faculty="")
-            .values_list("faculty", flat=True)
-        }
-    )
-    faculty_names = [n for n in faculty_names if n]
-    for name in faculty_names:
-        Mentor.objects.get_or_create(name=name)
+        return render(
+            request,
+            "manage_mentors.html",
+            {"rows": [], "module": module, "modules": [module]},
+        )
 
     def _mentor_matches_module(mentor_obj):
         dept = (mentor_obj.department or "").strip().upper()
