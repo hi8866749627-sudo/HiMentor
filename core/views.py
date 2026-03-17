@@ -609,106 +609,108 @@ def manage_mentors(request):
         for name in faculty_names:
             Mentor.objects.get_or_create(name=name)
 
-    def _mentor_matches_module(mentor_obj):
-        dept = (mentor_obj.department or "").strip().upper()
-        if not dept:
+        def _mentor_matches_module(mentor_obj):
+            dept = (mentor_obj.department or "").strip().upper()
+            if not dept:
+                return False
+            if dept in {(module.year_level or "").upper(), (module.variant or "").upper()}:
+                return True
+            if (module.variant or "").upper().startswith(dept):
+                return True
+            if dept in (module.name or "").upper():
+                return True
             return False
-        if dept in {(module.year_level or "").upper(), (module.variant or "").upper()}:
-            return True
-        if (module.variant or "").upper().startswith(dept):
-            return True
-        if dept in (module.name or "").upper():
-            return True
-        return False
 
-    def _current_mentors_qs():
-        base_ids = set(Mentor.objects.filter(Q(student__module=module) | Q(name__in=faculty_names)).values_list("id", flat=True))
-        dept_ids = {m.id for m in Mentor.objects.all() if _mentor_matches_module(m)}
-        order_case = Case(
-            When(faculty_type__iexact="HoD", then=Value(1)),
-            When(faculty_type__icontains="Administrative", then=Value(2)),
-            When(faculty_type__iexact="Faculty", then=Value(3)),
-            When(faculty_type__iexact="Peon", then=Value(4)),
-            When(faculty_type__iexact="Other", then=Value(5)),
-            default=Value(6),
-            output_field=IntegerField(),
-        )
-        return (
-            Mentor.objects.filter(Q(id__in=base_ids) | Q(id__in=dept_ids))
-            .exclude(module_optouts__module=module)
-            .distinct()
-            .annotate(student_count=Count("student", filter=Q(student__module=module)))
-            .annotate(type_rank=order_case)
-            .order_by("type_rank", "name")
-        )
+        def _current_mentors_qs():
+            base_ids = set(
+                Mentor.objects.filter(Q(student__module=module) | Q(name__in=faculty_names)).values_list(
+                    "id", flat=True
+                )
+            )
+            dept_ids = {m.id for m in Mentor.objects.all() if _mentor_matches_module(m)}
+            order_case = Case(
+                When(faculty_type__iexact="HoD", then=Value(1)),
+                When(faculty_type__icontains="Administrative", then=Value(2)),
+                When(faculty_type__iexact="Faculty", then=Value(3)),
+                When(faculty_type__iexact="Peon", then=Value(4)),
+                When(faculty_type__iexact="Other", then=Value(5)),
+                default=Value(6),
+                output_field=IntegerField(),
+            )
+            return (
+                Mentor.objects.filter(Q(id__in=base_ids) | Q(id__in=dept_ids))
+                .exclude(module_optouts__module=module)
+                .distinct()
+                .annotate(student_count=Count("student", filter=Q(student__module=module)))
+                .annotate(type_rank=order_case)
+                .order_by("type_rank", "name")
+            )
 
-    if request.method == "POST":
-        action = (request.POST.get("action") or "").strip()
-        mentor_id = request.POST.get("mentor_id")
-        mentor = Mentor.objects.filter(id=mentor_id).first() if mentor_id else None
-        allowed_ids = set(_current_mentors_qs().values_list("id", flat=True))
-        module_mentor_ids = set(Student.objects.filter(module=module).values_list("mentor_id", flat=True))
-        module_faculty_names = {n.lower() for n in faculty_names}
-        if not mentor or mentor.id not in allowed_ids:
-            messages.error(request, "Mentor not found for current module.")
-            return redirect("/manage-mentors/")
+        if request.method == "POST":
+            action = (request.POST.get("action") or "").strip()
+            mentor_id = request.POST.get("mentor_id")
+            mentor = Mentor.objects.filter(id=mentor_id).first() if mentor_id else None
+            allowed_ids = set(_current_mentors_qs().values_list("id", flat=True))
+            if not mentor or mentor.id not in allowed_ids:
+                messages.error(request, "Mentor not found for current module.")
+                return redirect("/manage-mentors/")
 
-        if action == "update_password":
-            new_password = (request.POST.get("new_password") or "").strip()
-            if len(new_password) < 6:
-                messages.error(request, "Password must be at least 6 characters.")
+            if action == "update_password":
+                new_password = (request.POST.get("new_password") or "").strip()
+                if len(new_password) < 6:
+                    messages.error(request, "Password must be at least 6 characters.")
+                else:
+                    cred, _ = MentorPassword.objects.get_or_create(mentor=mentor, defaults={"password_hash": ""})
+                    cred.set_password(new_password)
+                    cred.save(update_fields=["password_hash", "updated_at"])
+                    messages.success(request, f"Password updated for mentor {mentor.name}.")
+            elif action == "reset_default":
+                MentorPassword.objects.filter(mentor=mentor).delete()
+                messages.success(request, f"Password reset to default rule for mentor {mentor.name}.")
+            elif action in {"update_access", "update_staff"}:
+                raw_admin = (request.POST.get("is_admin") or "").strip().lower()
+                is_admin = raw_admin in {"yes", "true", "1", "on"}
+                mentor.is_admin = is_admin
+                mentor.save(update_fields=["is_admin"])
+                MentorAdminAccess.objects.filter(mentor=mentor, module=module).delete()
+                if is_admin:
+                    MentorAdminAccess.objects.get_or_create(mentor=mentor, module=module)
+                messages.success(request, f"Access updated for mentor {mentor.name}.")
+            if action in {"update_profile", "update_staff"}:
+                full_name = (request.POST.get("full_name") or "").strip()
+                department = (request.POST.get("department") or "").strip().upper()
+                phone = (request.POST.get("phone") or "").strip()
+                email = (request.POST.get("email") or "").strip()
+                faculty_type = (request.POST.get("faculty_type") or "").strip()
+                status = (request.POST.get("status") or "").strip()
+
+                if full_name:
+                    mentor.full_name = full_name
+                if department:
+                    mentor.department = department
+                if phone:
+                    mentor.phone = phone
+                if email:
+                    mentor.email = email
+                if faculty_type:
+                    mentor.faculty_type = faculty_type
+                if status:
+                    mentor.status = status
+                join_raw = (request.POST.get("date_of_joining") or "").strip()
+                if join_raw:
+                    try:
+                        mentor.date_of_joining = datetime.strptime(join_raw, "%Y-%m-%d").date()
+                    except Exception:
+                        pass
+                mentor.save()
+                messages.success(request, f"Profile updated for mentor {mentor.name}.")
+            elif action == "remove_from_dept":
+                MentorModuleOptOut.objects.get_or_create(mentor=mentor, module=module)
+                MentorAdminAccess.objects.filter(mentor=mentor, module=module).delete()
+                messages.success(request, f"{mentor.name} removed from this department.")
             else:
-                cred, _ = MentorPassword.objects.get_or_create(mentor=mentor, defaults={"password_hash": ""})
-                cred.set_password(new_password)
-                cred.save(update_fields=["password_hash", "updated_at"])
-                messages.success(request, f"Password updated for mentor {mentor.name}.")
-        elif action == "reset_default":
-            MentorPassword.objects.filter(mentor=mentor).delete()
-            messages.success(request, f"Password reset to default rule for mentor {mentor.name}.")
-        elif action in {"update_access", "update_staff"}:
-            raw_admin = (request.POST.get("is_admin") or "").strip().lower()
-            is_admin = raw_admin in {"yes", "true", "1", "on"}
-            mentor.is_admin = is_admin
-            mentor.save(update_fields=["is_admin"])
-            MentorAdminAccess.objects.filter(mentor=mentor, module=module).delete()
-            if is_admin:
-                MentorAdminAccess.objects.get_or_create(mentor=mentor, module=module)
-            messages.success(request, f"Access updated for mentor {mentor.name}.")
-        if action in {"update_profile", "update_staff"}:
-            full_name = (request.POST.get("full_name") or "").strip()
-            department = (request.POST.get("department") or "").strip().upper()
-            phone = (request.POST.get("phone") or "").strip()
-            email = (request.POST.get("email") or "").strip()
-            faculty_type = (request.POST.get("faculty_type") or "").strip()
-            status = (request.POST.get("status") or "").strip()
-
-            if full_name:
-                mentor.full_name = full_name
-            if department:
-                mentor.department = department
-            if phone:
-                mentor.phone = phone
-            if email:
-                mentor.email = email
-            if faculty_type:
-                mentor.faculty_type = faculty_type
-            if status:
-                mentor.status = status
-            join_raw = (request.POST.get("date_of_joining") or "").strip()
-            if join_raw:
-                try:
-                    mentor.date_of_joining = datetime.strptime(join_raw, "%Y-%m-%d").date()
-                except Exception:
-                    pass
-            mentor.save()
-            messages.success(request, f"Profile updated for mentor {mentor.name}.")
-        elif action == "remove_from_dept":
-            MentorModuleOptOut.objects.get_or_create(mentor=mentor, module=module)
-            MentorAdminAccess.objects.filter(mentor=mentor, module=module).delete()
-            messages.success(request, f"{mentor.name} removed from this department.")
-        else:
-            messages.error(request, "Invalid action.")
-        return redirect("/manage-mentors/")
+                messages.error(request, "Invalid action.")
+            return redirect("/manage-mentors/")
 
         mentors = _current_mentors_qs()
         cred_map = {c.mentor_id: c for c in MentorPassword.objects.filter(mentor__in=mentors)}
