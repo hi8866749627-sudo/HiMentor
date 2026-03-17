@@ -81,7 +81,7 @@ from .models import (
 )
 
 # ---------- LOCAL UTILITIES ----------
-from .utils import import_students_from_excel, resolve_mentor_identity, import_faculty_from_excel
+from .utils import import_students_from_excel, resolve_mentor_identity, import_faculty_from_excel, resolve_mentor_reference
 from .attendance_utils import import_attendance
 from .lecture_utils import (
     parse_timetable_excel,
@@ -4960,6 +4960,14 @@ def upload_timetable(request):
                 continue
             faculty = (entry.get("faculty") or "").strip().upper()
             if faculty:
+                matched_faculty = resolve_mentor_reference(
+                    short_name=faculty if len(faculty.replace(" ", "")) <= 5 else "",
+                    full_name=faculty if len(faculty.replace(" ", "")) > 5 else "",
+                    fallback_raw=faculty,
+                    require_students=False,
+                )
+                if matched_faculty:
+                    faculty = (matched_faculty.name or faculty).strip().upper()
                 Mentor.objects.get_or_create(name=faculty)
             TimetableEntry.objects.update_or_create(
                 module=module,
