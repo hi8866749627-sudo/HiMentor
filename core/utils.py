@@ -350,6 +350,71 @@ def _compact_upper(text):
     return "".join(ch for ch in str(text or "").upper() if ch.isalnum())
 
 
+def _mentor_identity_queryset():
+    return Mentor.objects.all()
+
+
+def _mentor_by_compact_identity(raw_value):
+    compact_raw = _compact_upper(raw_value)
+    if not compact_raw:
+        return None
+    for mentor in _mentor_identity_queryset():
+        if _compact_upper(mentor.name) == compact_raw or _compact_upper(mentor.full_name) == compact_raw:
+            return mentor
+    return None
+
+
+def _mentor_by_subsequence_identity(raw_value, require_students=False):
+    compact_raw = _compact_upper(raw_value)
+    if not compact_raw or len(compact_raw) > 5:
+        return None
+    candidates = []
+    for mentor in _mentor_identity_queryset():
+        student_count = Student.objects.filter(mentor=mentor).count()
+        if require_students and student_count == 0:
+            continue
+        name_compact = _compact_upper(mentor.name)
+        full_compact = _compact_upper(mentor.full_name)
+        if _is_subsequence(compact_raw, name_compact) or _is_subsequence(compact_raw, full_compact):
+            candidates.append((student_count, mentor))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (-item[0], item[1].name))
+    return candidates[0][1]
+
+
+def resolve_mentor_reference(short_name="", full_name="", fallback_raw="", require_students=False):
+    short_name = str(short_name or "").strip()
+    full_name = str(full_name or "").strip()
+    fallback_raw = str(fallback_raw or "").strip()
+
+    if short_name:
+        direct = Mentor.objects.filter(name__iexact=short_name).first()
+        if direct and (not require_students or Student.objects.filter(mentor=direct).exists()):
+            return direct
+        compact_match = _mentor_by_compact_identity(short_name)
+        if compact_match and (not require_students or Student.objects.filter(mentor=compact_match).exists()):
+            return compact_match
+        subseq_match = _mentor_by_subsequence_identity(short_name, require_students=require_students)
+        if subseq_match:
+            return subseq_match
+
+    for candidate in [full_name, fallback_raw]:
+        if not candidate:
+            continue
+        by_full = Mentor.objects.filter(full_name__iexact=candidate).first()
+        if by_full and (not require_students or Student.objects.filter(mentor=by_full).exists()):
+            return by_full
+        by_name = Mentor.objects.filter(name__iexact=candidate).first()
+        if by_name and (not require_students or Student.objects.filter(mentor=by_name).exists()):
+            return by_name
+        compact_match = _mentor_by_compact_identity(candidate)
+        if compact_match and (not require_students or Student.objects.filter(mentor=compact_match).exists()):
+            return compact_match
+
+    return None
+
+
 def _is_subsequence(small, big):
     it = iter(big)
     return all(ch in it for ch in small)
@@ -364,43 +429,13 @@ def resolve_mentor_identity(username):
     if not raw:
         return None
 
-    # 1) Exact name match (short/full stored in Mentor.name)
+    resolved = resolve_mentor_reference(fallback_raw=raw, require_students=True)
+    if resolved:
+        return resolved
     direct = Mentor.objects.filter(name__iexact=raw).first()
-    if direct and Student.objects.filter(mentor=direct).exists():
-        return direct
-
-    # 2) Exact full_name match
-    by_full = Mentor.objects.filter(full_name__iexact=raw).first()
-    if by_full and Student.objects.filter(mentor=by_full).exists():
-        return by_full
-
-    # 3) Compact exact comparison (ignores spaces/symbols)
-    compact_raw = _compact_upper(raw)
-    for m in Mentor.objects.all():
-        if _compact_upper(m.name) == compact_raw or _compact_upper(m.full_name) == compact_raw:
-            if Student.objects.filter(mentor=m).exists():
-                return m
-
-    # 4) If entered value is short code and direct match has no students,
-    #    map code to a full-name mentor using subsequence match (HDS -> HARDIK SHAH).
-    if len(compact_raw) <= 5:
-        candidates = []
-        for m in Mentor.objects.all():
-            student_count = Student.objects.filter(mentor=m).count()
-            if student_count == 0:
-                continue
-            name_compact = _compact_upper(m.name)
-            full_compact = _compact_upper(m.full_name)
-            if _is_subsequence(compact_raw, name_compact) or _is_subsequence(compact_raw, full_compact):
-                candidates.append((student_count, m))
-        if candidates:
-            candidates.sort(key=lambda x: (-x[0], x[1].name))
-            return candidates[0][1]
-
-    # 5) Fall back to direct mentor row even if no students (keeps current behavior for unknown mappings)
     if direct:
         return direct
-    return by_full
+    return Mentor.objects.filter(full_name__iexact=raw).first()
 
 
 # ---------------- DETECT HEADER ----------------
@@ -496,18 +531,21 @@ def import_students_from_excel(file, module):
             # Canonical mentor code:
             # - 3 letters => short code
             # - full name => resolve via known full_name mapping, else keep as-is
-            mentor_name = ""
-            if mentor_short:
+            mentor_obj = resolve_mentor_reference(
+                short_name=mentor_short or mentor_raw,
+                full_name=mentor_full,
+                fallback_raw=mentor_raw,
+                require_students=False,
+            )
+            if mentor_obj:
+                mentor_name = (mentor_obj.name or mentor_short or mentor_raw or "UNKNOWN")[:50]
+            elif mentor_short:
                 mentor_name = mentor_short[:50]
             elif mentor_raw and len(mentor_raw.replace(" ", "")) <= 3:
                 mentor_name = mentor_raw.upper()[:50]
             else:
                 full_candidate = mentor_full or mentor_raw
-                if full_candidate:
-                    matched = Mentor.objects.filter(full_name__iexact=full_candidate).first()
-                    mentor_name = (matched.name if matched else full_candidate)[:50]
-                else:
-                    mentor_name = "UNKNOWN"
+                mentor_name = (full_candidate or "UNKNOWN")[:50]
 
             student_mobile = format_phone(clean_number(row.get(student_col)))[:15]
             father = format_phone(clean_number(row.get(father_col)))[:15]
