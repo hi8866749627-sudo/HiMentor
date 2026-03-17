@@ -597,36 +597,75 @@ def manage_mentors(request):
         if modules_in_scope and module.id not in {m.id for m in modules_in_scope}:
             messages.error(request, "You do not have access to manage mentors for this module.")
             return redirect("/reports/")
-        faculty_names = sorted(
-            {
-                (name or "").strip()
-                for name in TimetableEntry.objects.filter(module=module, is_active=True)
-                .exclude(faculty="")
-                .values_list("faculty", flat=True)
-            }
+        def _compact_key(value):
+            return "".join(ch for ch in str(value or "").upper() if ch.isalnum())
+
+        faculty_names = set(
+            (name or "").strip()
+            for name in TimetableEntry.objects.filter(module=module, is_active=True)
+            .exclude(faculty="")
+            .values_list("faculty", flat=True)
         )
-        faculty_names = [n for n in faculty_names if n]
-        for name in faculty_names:
+        faculty_names |= set(
+            (name or "").strip()
+            for name in LectureAdjustment.objects.filter(module=module, status=LectureAdjustment.STATUS_ACTIVE)
+            .exclude(original_faculty="")
+            .values_list("original_faculty", flat=True)
+        )
+        proxy_names = list(
+            Mentor.objects.filter(
+                proxy_adjustments__module=module,
+                proxy_adjustments__status=LectureAdjustment.STATUS_ACTIVE,
+            ).values_list("name", flat=True)
+        )
+        faculty_names |= {n for n in proxy_names if n}
+        faculty_names = {n for n in faculty_names if n}
+        for name in sorted(faculty_names):
             Mentor.objects.get_or_create(name=name)
 
         def _mentor_matches_module(mentor_obj):
-            dept = (mentor_obj.department or "").strip().upper()
-            if not dept:
+            dept_raw = (mentor_obj.department or "").strip()
+            if not dept_raw:
                 return False
-            if dept in {(module.year_level or "").upper(), (module.variant or "").upper()}:
+            dept = dept_raw.upper()
+            variant = (module.variant or "").upper()
+            year_level = (module.year_level or "").upper()
+            name = (module.name or "").upper()
+
+            if dept in {year_level, variant}:
                 return True
-            if (module.variant or "").upper().startswith(dept):
+            if variant.startswith(dept):
                 return True
-            if dept in (module.name or "").upper():
+            if dept in name:
+                return True
+
+            # Compact comparisons (ignore spaces, dashes, etc.)
+            dept_c = _compact_key(dept)
+            variant_c = _compact_key(variant)
+            name_c = _compact_key(name)
+            year_c = _compact_key(year_level)
+            if dept_c and (dept_c == variant_c or variant_c.startswith(dept_c)):
+                return True
+            if dept_c and dept_c in name_c:
+                return True
+            if year_c and dept_c.startswith(year_c):
                 return True
             return False
 
         def _current_mentors_qs():
             base_ids = set(
-                Mentor.objects.filter(Q(student__module=module) | Q(name__in=faculty_names)).values_list(
-                    "id", flat=True
-                )
+                Mentor.objects.filter(
+                    Q(student__module=module)
+                    | Q(name__in=faculty_names)
+                    | Q(full_name__in=faculty_names)
+                ).values_list("id", flat=True)
             )
+            if faculty_names:
+                faculty_compact = {_compact_key(n) for n in faculty_names if n}
+                if faculty_compact:
+                    for m in Mentor.objects.all():
+                        if _compact_key(m.name) in faculty_compact or _compact_key(m.full_name) in faculty_compact:
+                            base_ids.add(m.id)
             dept_ids = {m.id for m in Mentor.objects.all() if _mentor_matches_module(m)}
             order_case = Case(
                 When(faculty_type__iexact="HoD", then=Value(1)),
