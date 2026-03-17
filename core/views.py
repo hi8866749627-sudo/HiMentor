@@ -580,6 +580,21 @@ def manage_mentors(request):
 
         mentor_obj = _session_mentor_obj(request)
         module = _active_module(request)
+        if request.user.is_authenticated and is_superadmin_user(request.user):
+            if request.GET.get("no_auto") != "1":
+                has_timetable = TimetableEntry.objects.filter(module=module, is_active=True).exists()
+                has_students = Student.objects.filter(module=module).exists()
+                if not has_timetable and not has_students:
+                    for candidate in allowed_modules_for_user(request):
+                        if candidate.id == module.id:
+                            continue
+                        cand_has_timetable = TimetableEntry.objects.filter(
+                            module=candidate, is_active=True
+                        ).exists()
+                        cand_has_students = Student.objects.filter(module=candidate).exists()
+                        if cand_has_timetable or cand_has_students:
+                            request.session["current_module_id"] = candidate.id
+                            return redirect(f"/manage-mentors/?no_auto=1")
         _ensure_active_timetable(module)
         modules_in_scope = []
         if request.user.is_authenticated:
@@ -786,8 +801,24 @@ def manage_mentors(request):
                     )
                     .order_by("type_rank", "name")
                 )
+        debug_requested = request.GET.get("debug") == "1"
+        cred_map = {c.mentor_id: c for c in MentorPassword.objects.filter(mentor__in=mentors)}
+        admin_access_ids = {
+            a.mentor_id
+            for a in MentorAdminAccess.objects.filter(module=module, mentor__in=mentors).select_related("mentor")
+        }
+        rows = []
+        for m in mentors:
+            rows.append(
+                {
+                    "mentor": m,
+                    "student_count": getattr(m, "student_count", 0),
+                    "has_custom_password": m.id in cred_map,
+                    "admin_for_module": m.id in admin_access_ids,
+                }
+            )
         debug = None
-        if request.GET.get("debug") == "1":
+        if debug_requested:
             dept_label = _dept_label_from_module(module)
             timetable_qs = TimetableEntry.objects.filter(module=module, is_active=True)
             adjustment_qs = LectureAdjustment.objects.filter(
@@ -818,24 +849,11 @@ def manage_mentors(request):
                 "mentors_dept_match": dept_match_count,
                 "mentors_current_qs": mentors.count(),
                 "fallback_ids_count": len(fallback_ids),
+                "rows_count": len(rows),
+                "rows_sample": [r["mentor"].name for r in rows[:20]],
             }
             if request.GET.get("format") == "json":
                 return JsonResponse(debug)
-        cred_map = {c.mentor_id: c for c in MentorPassword.objects.filter(mentor__in=mentors)}
-        admin_access_ids = {
-            a.mentor_id
-            for a in MentorAdminAccess.objects.filter(module=module, mentor__in=mentors).select_related("mentor")
-        }
-        rows = []
-        for m in mentors:
-            rows.append(
-                {
-                    "mentor": m,
-                    "student_count": getattr(m, "student_count", 0),
-                    "has_custom_password": m.id in cred_map,
-                    "admin_for_module": m.id in admin_access_ids,
-                }
-            )
 
         return render(
             request,
