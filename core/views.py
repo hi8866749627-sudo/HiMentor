@@ -336,11 +336,11 @@ def _dept_label_from_module(module):
     return (getattr(module, "year_level", "") or "").upper() or "NA"
 
 
-def _manage_mentors_debug_payload(module):
-    def _compact_key(value):
-        return "".join(ch for ch in str(value or "").upper() if ch.isalnum())
+def _compact_staff_key(value):
+    return "".join(ch for ch in str(value or "").upper() if ch.isalnum())
 
-    _ensure_active_timetable(module)
+
+def _collect_module_faculty_names(module):
     faculty_names = set(
         (name or "").strip()
         for name in TimetableEntry.objects.filter(module=module, is_active=True)
@@ -359,8 +359,27 @@ def _manage_mentors_debug_payload(module):
             proxy_adjustments__status=LectureAdjustment.STATUS_ACTIVE,
         ).values_list("name", flat=True)
     )
-    faculty_names |= {n for n in proxy_names if n}
-    faculty_names = {n for n in faculty_names if n}
+    faculty_names |= {name for name in proxy_names if name}
+    return {name for name in faculty_names if name}
+
+
+def _ensure_mentor_records_for_faculty_names(faculty_names):
+    existing = {
+        _compact_staff_key(value): mentor.id
+        for mentor in Mentor.objects.all()
+        for value in [mentor.name, mentor.full_name]
+        if _compact_staff_key(value)
+    }
+    for faculty_name in sorted(faculty_names):
+        compact = _compact_staff_key(faculty_name)
+        if compact and compact not in existing:
+            mentor = Mentor.objects.create(name=faculty_name)
+            existing[compact] = mentor.id
+
+
+def _manage_mentors_debug_payload(module):
+    _ensure_active_timetable(module)
+    faculty_names = _collect_module_faculty_names(module)
 
     def _mentor_matches_module(mentor_obj):
         dept_raw = (mentor_obj.department or "").strip()
@@ -378,10 +397,10 @@ def _manage_mentors_debug_payload(module):
         if dept in name:
             return True
 
-        dept_c = _compact_key(dept)
-        variant_c = _compact_key(variant)
-        name_c = _compact_key(name)
-        year_c = _compact_key(year_level)
+        dept_c = _compact_staff_key(dept)
+        variant_c = _compact_staff_key(variant)
+        name_c = _compact_staff_key(name)
+        year_c = _compact_staff_key(year_level)
         if dept_c and (dept_c == variant_c or variant_c.startswith(dept_c)):
             return True
         if dept_c and dept_c in name_c:
@@ -398,10 +417,10 @@ def _manage_mentors_debug_payload(module):
         ).values_list("id", flat=True)
     )
     if faculty_names:
-        faculty_compact = {_compact_key(n) for n in faculty_names if n}
+        faculty_compact = {_compact_staff_key(n) for n in faculty_names if n}
         if faculty_compact:
             for m in Mentor.objects.all():
-                if _compact_key(m.name) in faculty_compact or _compact_key(m.full_name) in faculty_compact:
+                if _compact_staff_key(m.name) in faculty_compact or _compact_staff_key(m.full_name) in faculty_compact:
                     base_ids.add(m.id)
     dept_ids = {m.id for m in Mentor.objects.all() if _mentor_matches_module(m)}
     mentors_current_qs = Mentor.objects.filter(Q(id__in=base_ids) | Q(id__in=dept_ids)).distinct()
@@ -695,9 +714,6 @@ def manage_mentors(request):
             module = AcademicModule.objects.filter(is_active=True).order_by("-id").first()
         if module:
             request.session["current_module_id"] = module.id
-        if request.GET.get("format") == "json":
-            debug = _manage_mentors_debug_payload(module)
-            return JsonResponse(debug)
         if request.user.is_authenticated and is_superadmin_user(request.user):
             if request.GET.get("no_auto") != "1":
                 has_timetable = TimetableEntry.objects.filter(module=module, is_active=True).exists()
@@ -730,31 +746,8 @@ def manage_mentors(request):
         if modules_in_scope and module.id not in {m.id for m in modules_in_scope}:
             messages.error(request, "You do not have access to manage mentors for this module.")
             return redirect("/reports/")
-        def _compact_key(value):
-            return "".join(ch for ch in str(value or "").upper() if ch.isalnum())
-
-        faculty_names = set(
-            (name or "").strip()
-            for name in TimetableEntry.objects.filter(module=module, is_active=True)
-            .exclude(faculty="")
-            .values_list("faculty", flat=True)
-        )
-        faculty_names |= set(
-            (name or "").strip()
-            for name in LectureAdjustment.objects.filter(module=module, status=LectureAdjustment.STATUS_ACTIVE)
-            .exclude(original_faculty="")
-            .values_list("original_faculty", flat=True)
-        )
-        proxy_names = list(
-            Mentor.objects.filter(
-                proxy_adjustments__module=module,
-                proxy_adjustments__status=LectureAdjustment.STATUS_ACTIVE,
-            ).values_list("name", flat=True)
-        )
-        faculty_names |= {n for n in proxy_names if n}
-        faculty_names = {n for n in faculty_names if n}
-        for name in sorted(faculty_names):
-            Mentor.objects.get_or_create(name=name)
+        faculty_names = _collect_module_faculty_names(module)
+        _ensure_mentor_records_for_faculty_names(faculty_names)
 
         def _mentor_matches_module(mentor_obj):
             dept_raw = (mentor_obj.department or "").strip()
@@ -773,10 +766,10 @@ def manage_mentors(request):
                 return True
 
             # Compact comparisons (ignore spaces, dashes, etc.)
-            dept_c = _compact_key(dept)
-            variant_c = _compact_key(variant)
-            name_c = _compact_key(name)
-            year_c = _compact_key(year_level)
+            dept_c = _compact_staff_key(dept)
+            variant_c = _compact_staff_key(variant)
+            name_c = _compact_staff_key(name)
+            year_c = _compact_staff_key(year_level)
             if dept_c and (dept_c == variant_c or variant_c.startswith(dept_c)):
                 return True
             if dept_c and dept_c in name_c:
@@ -794,10 +787,10 @@ def manage_mentors(request):
                 ).values_list("id", flat=True)
             )
             if faculty_names:
-                faculty_compact = {_compact_key(n) for n in faculty_names if n}
+                faculty_compact = {_compact_staff_key(n) for n in faculty_names if n}
                 if faculty_compact:
                     for m in Mentor.objects.all():
-                        if _compact_key(m.name) in faculty_compact or _compact_key(m.full_name) in faculty_compact:
+                        if _compact_staff_key(m.name) in faculty_compact or _compact_staff_key(m.full_name) in faculty_compact:
                             base_ids.add(m.id)
             dept_ids = {m.id for m in Mentor.objects.all() if _mentor_matches_module(m)}
             order_case = Case(
@@ -911,10 +904,10 @@ def manage_mentors(request):
                 ).values_list("id", flat=True)
             )
             if faculty_names:
-                faculty_compact = {_compact_key(n) for n in faculty_names if n}
+                faculty_compact = {_compact_staff_key(n) for n in faculty_names if n}
                 if faculty_compact:
                     for m in Mentor.objects.all():
-                        if _compact_key(m.name) in faculty_compact or _compact_key(m.full_name) in faculty_compact:
+                        if _compact_staff_key(m.name) in faculty_compact or _compact_staff_key(m.full_name) in faculty_compact:
                             fallback_ids.add(m.id)
             if fallback_ids:
                 mentors = (
@@ -935,14 +928,6 @@ def manage_mentors(request):
                 )
         debug_requested = request.GET.get("debug") == "1"
         cred_map, admin_access_ids, optional_warnings = _safe_optional_mentor_maps(module, mentors)
-        if module:
-            print("MODULE:", module.id, module.name)
-        else:
-            print("MODULE: None")
-        print("FACULTY COUNT:", len(faculty_names))
-        print("MENTORS COUNT:", mentors.count())
-        if optional_warnings:
-            print("MENTOR OPTIONAL WARNINGS:", ",".join(optional_warnings))
         rows = [
             {
                 "mentor": m,
