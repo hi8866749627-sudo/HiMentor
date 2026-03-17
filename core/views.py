@@ -752,6 +752,39 @@ def manage_mentors(request):
             return redirect("/manage-mentors/")
 
         mentors = _current_mentors_qs()
+        if not mentors.exists():
+            dept_label = _dept_label_from_module(module)
+            fallback_ids = set(
+                Mentor.objects.filter(
+                    Q(student__module=module)
+                    | Q(name__in=faculty_names)
+                    | Q(full_name__in=faculty_names)
+                    | Q(department__icontains=dept_label)
+                ).values_list("id", flat=True)
+            )
+            if faculty_names:
+                faculty_compact = {_compact_key(n) for n in faculty_names if n}
+                if faculty_compact:
+                    for m in Mentor.objects.all():
+                        if _compact_key(m.name) in faculty_compact or _compact_key(m.full_name) in faculty_compact:
+                            fallback_ids.add(m.id)
+            if fallback_ids:
+                mentors = (
+                    Mentor.objects.filter(id__in=fallback_ids)
+                    .annotate(student_count=Count("student", filter=Q(student__module=module)))
+                    .annotate(
+                        type_rank=Case(
+                            When(faculty_type__iexact="HoD", then=Value(1)),
+                            When(faculty_type__icontains="Administrative", then=Value(2)),
+                            When(faculty_type__iexact="Faculty", then=Value(3)),
+                            When(faculty_type__iexact="Peon", then=Value(4)),
+                            When(faculty_type__iexact="Other", then=Value(5)),
+                            default=Value(6),
+                            output_field=IntegerField(),
+                        )
+                    )
+                    .order_by("type_rank", "name")
+                )
         cred_map = {c.mentor_id: c for c in MentorPassword.objects.filter(mentor__in=mentors)}
         admin_access_ids = {
             a.mentor_id
