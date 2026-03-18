@@ -8543,8 +8543,22 @@ def daily_absent_live(request):
     date_val = _parse_date_param(request.GET.get("date"), timezone.localdate())
     batch_filter = (request.GET.get("batch") or "").strip()
 
-    if not _attendance_allowed_for_date(module, date_val):
-        return HttpResponse("Attendance is not allowed for this date.", status=400)
+    block_reason = _attendance_block_reason(module, date_val)
+    if block_reason:
+        return render(
+            request,
+            "daily_absent_live.html",
+            {
+                "module": module,
+                "selected_date": date_val,
+                "batch_filter": batch_filter,
+                "batch_cards": [],
+                "batches": [],
+                "attendance_pending": False,
+                "attendance_blocked": True,
+                "attendance_block_reason": block_reason,
+            },
+        )
 
     attendance_pending = bool(is_coordinator and not _attendance_fully_marked_for_date(module, date_val))
 
@@ -8559,6 +8573,8 @@ def daily_absent_live(request):
             "batch_cards": batch_cards,
             "batches": batches,
             "attendance_pending": attendance_pending,
+            "attendance_blocked": False,
+            "attendance_block_reason": "",
         },
     )
 
@@ -8713,6 +8729,8 @@ def weekly_attendance_live(request):
     week_param = (request.GET.get("week") or "all").strip().lower()
     week_no = None if week_param in {"all", ""} else int(week_param) + 1
     batch_filter = (request.GET.get("batch") or "").strip()
+    if batch_filter.lower() == "all":
+        batch_filter = ""
     batch_filter_key = _norm_batch_key(batch_filter)
     try:
         page_number = max(int((request.GET.get("page") or "1").strip()), 1)

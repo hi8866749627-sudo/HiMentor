@@ -11,11 +11,11 @@
 <h4 class="mb-3">Daily Absent (Live)</h4>
 
 <form method="get" class="row g-2 align-items-end mb-3">
-    <div class="col-md-3">
+    <div class="col-md-4">
         <label class="form-label">Date</label>
         <input type="date" name="date" class="form-control" value="{{ selected_date|date:'Y-m-d' }}">
     </div>
-    <div class="col-md-3">
+    <div class="col-md-4">
         <label class="form-label">Batch (optional)</label>
         <select name="batch" class="form-select">
             <option value="">All</option>
@@ -27,17 +27,19 @@
     {% if request.session.mentor %}
     <input type="hidden" name="module_id" value="{{ module.id }}">
     {% endif %}
-    <div class="col-md-2">
+    <div class="col-md-4 d-flex gap-2 align-items-end">
         <button class="btn btn-primary" type="submit">Show</button>
+    {% if request.session.mentor %}
+        <button class="btn btn-outline-secondary" type="button" onclick="shiftDailyDate(-1)">Previous</button>
+        <button class="btn btn-outline-secondary" type="button" onclick="shiftDailyDate(1)">Next</button>
+    {% endif %}
     </div>
-    <div class="col-md-2">
-        <a class="btn btn-outline-secondary w-100"
+    <div class="col-md-12 d-flex gap-2">
+        <a class="btn btn-outline-secondary"
            href="/attendance-analytics/daily-live-pdf/?date={{ selected_date|date:'Y-m-d' }}{% if batch_filter %}&batch={{ batch_filter|urlencode }}{% endif %}{% if request.session.mentor %}&module_id={{ module.id }}{% endif %}">
             Download PDF
         </a>
-    </div>
-    <div class="col-md-2">
-        <button type="button" class="btn btn-outline-success w-100" onclick="openWhatsappSearch()">
+        <button type="button" class="btn btn-outline-success" onclick="openWhatsappSearch()">
             Send to WhatsApp
         </button>
     </div>
@@ -45,6 +47,9 @@
 
 {% if attendance_pending %}
 <div class="alert alert-warning">Attendance is not fully marked for this date. Showing available records.</div>
+{% endif %}
+{% if attendance_blocked %}
+<div class="alert alert-info">{{ attendance_block_reason }}</div>
 {% endif %}
 
 <div class="card mb-3">
@@ -102,10 +107,29 @@
     </div>
 </div>
 {% empty %}
+{% if not attendance_blocked %}
 <div class="alert alert-info">No lectures found.</div>
+{% endif %}
 {% endfor %}
 
 <script>
+function shiftDailyDate(deltaDays) {
+    const input = document.querySelector("input[name='date']");
+    if (!input || !input.value) {
+        return;
+    }
+    const current = new Date(input.value + "T00:00:00");
+    if (Number.isNaN(current.getTime())) {
+        return;
+    }
+    current.setDate(current.getDate() + deltaDays);
+    const yyyy = current.getFullYear();
+    const mm = String(current.getMonth() + 1).padStart(2, "0");
+    const dd = String(current.getDate()).padStart(2, "0");
+    input.value = `${yyyy}-${mm}-${dd}`;
+    input.form.submit();
+}
+
 function openWhatsappSearch() {
     const searchText = "2025 LJ";
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
