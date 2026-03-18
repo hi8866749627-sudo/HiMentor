@@ -1,5 +1,7 @@
+from datetime import time
+from django.utils import timezone
 from django.db.models import Q
-from .models import AcademicModule, Mentor, MentorModuleAccess, MentorAdminAccess, MentorModuleOptOut
+from .models import AcademicModule, Mentor, MentorModuleAccess, MentorAdminAccess, MentorModuleOptOut, MentorHomeSetting
 
 
 SUPERADMIN_USERNAMES = {"superadmin1", "superadmin2"}
@@ -128,3 +130,24 @@ def get_current_module(request):
     if module:
         request.session["current_module_id"] = module.id
     return module
+
+
+def get_mentor_home_url(module):
+    default_before = MentorHomeSetting.PAGE_SCHEDULE
+    default_after = MentorHomeSetting.PAGE_DAILY_CALLS
+    default_manual = MentorHomeSetting.PAGE_SCHEDULE
+    default_cutoff = time(12, 35)
+
+    setting = MentorHomeSetting.objects.filter(module=module).first()
+    if not setting:
+        now_t = timezone.localtime().time()
+        return default_before if now_t < default_cutoff else default_after
+
+    if setting.mode == MentorHomeSetting.MODE_MANUAL:
+        return setting.manual_page or default_manual
+
+    cutoff = setting.cutoff_time or default_cutoff
+    now_t = timezone.localtime().time()
+    before_page = setting.before_page or default_before
+    after_page = setting.after_page or default_after
+    return before_page if now_t < cutoff else after_page

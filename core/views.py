@@ -60,6 +60,7 @@ from .models import (
     MentorAdminAccess,
     MentorPassword,
     MentorModuleOptOut,
+    MentorHomeSetting,
     OtherCallRecord,
     PracticalMarkUpload,
     SifMarksLock,
@@ -96,7 +97,7 @@ from .lecture_utils import (
 from .result_utils import import_compiled_bulk_all, import_compiled_result_sheet, import_result_sheet
 from .practical_utils import import_practical_marks, ordered_subjects
 from .pdf_report import generate_student_pdf, generate_student_prefilled_pdf
-from .module_utils import allowed_modules_for_user, get_current_module, is_superadmin_user
+from .module_utils import allowed_modules_for_user, get_current_module, is_superadmin_user, get_mentor_home_url
 
 TEST_NAMES = ["T1", "T2", "T3", "T4", "REMEDIAL"]
 IST = ZoneInfo("Asia/Kolkata")
@@ -866,8 +867,9 @@ def login_page(request):
             if custom_ok or entered_password in {expected_short, expected_entered, "mentor@lj123"}:
                 request.session["mentor"] = mentor.name
                 request.session["admin_mode"] = False
-                _active_module(request)
-                return redirect("/mentor-dashboard/")
+                module = _active_module(request)
+                target = get_mentor_home_url(module) if module else "/mentor-dashboard/"
+                return redirect(target)
 
         error = "Invalid username or password"
 
@@ -3941,8 +3943,59 @@ def control_panel(request):
 
     module = _active_module(request)
     students = Student.objects.select_related("mentor").filter(module=module).order_by("roll_no")
+    home_setting = MentorHomeSetting.objects.filter(module=module).first()
+    home_defaults = {
+        "mode": home_setting.mode if home_setting else MentorHomeSetting.MODE_AUTO,
+        "cutoff_time": home_setting.cutoff_time if home_setting else time(12, 35),
+        "before_page": home_setting.before_page if home_setting else MentorHomeSetting.PAGE_SCHEDULE,
+        "after_page": home_setting.after_page if home_setting else MentorHomeSetting.PAGE_DAILY_CALLS,
+        "manual_page": home_setting.manual_page if home_setting else MentorHomeSetting.PAGE_SCHEDULE,
+    }
 
-    return render(request,"control_panel.html",{"students":students})
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip()
+        if action == "mentor_home":
+            setting, _ = MentorHomeSetting.objects.get_or_create(module=module)
+            mode = (request.POST.get("mode") or MentorHomeSetting.MODE_AUTO).strip()
+            if mode not in {MentorHomeSetting.MODE_AUTO, MentorHomeSetting.MODE_MANUAL}:
+                mode = MentorHomeSetting.MODE_AUTO
+            cutoff_raw = (request.POST.get("cutoff_time") or "").strip()
+            try:
+                cutoff_val = datetime.strptime(cutoff_raw, "%H:%M").time() if cutoff_raw else setting.cutoff_time
+            except Exception:
+                cutoff_val = setting.cutoff_time
+
+            before_page = (request.POST.get("before_page") or setting.before_page).strip()
+            after_page = (request.POST.get("after_page") or setting.after_page).strip()
+            manual_page = (request.POST.get("manual_page") or setting.manual_page).strip()
+            valid_pages = {choice[0] for choice in MentorHomeSetting.PAGE_CHOICES}
+            if before_page not in valid_pages:
+                before_page = MentorHomeSetting.PAGE_SCHEDULE
+            if after_page not in valid_pages:
+                after_page = MentorHomeSetting.PAGE_DAILY_CALLS
+            if manual_page not in valid_pages:
+                manual_page = MentorHomeSetting.PAGE_SCHEDULE
+
+            setting.mode = mode
+            setting.cutoff_time = cutoff_val
+            setting.before_page = before_page
+            setting.after_page = after_page
+            setting.manual_page = manual_page
+            setting.save()
+            messages.success(request, "Mentor homepage settings updated.")
+            return redirect("/control-panel/")
+
+    return render(
+        request,
+        "control_panel.html",
+        {
+            "students": students,
+            "home_setting": home_setting,
+            "home_defaults": home_defaults,
+            "home_mode_choices": MentorHomeSetting.MODE_CHOICES,
+            "home_page_choices": MentorHomeSetting.PAGE_CHOICES,
+        },
+    )
 
 
 def mentor_print_sif(request):

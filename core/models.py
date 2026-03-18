@@ -1,4 +1,5 @@
 from django.db import models
+from datetime import time
 from django.utils import timezone
 from django.contrib.auth.models import User
 from django.contrib.auth.hashers import make_password, check_password
@@ -549,6 +550,40 @@ class MentorModuleOptOut(models.Model):
 
     def __str__(self):
         return f"{self.mentor.name} opted out {self.module.name}"
+
+
+class MentorHomeSetting(models.Model):
+    MODE_AUTO = "auto"
+    MODE_MANUAL = "manual"
+    MODE_CHOICES = [
+        (MODE_AUTO, "Auto (time based)"),
+        (MODE_MANUAL, "Manual"),
+    ]
+
+    PAGE_SCHEDULE = "/mentor-schedule/"
+    PAGE_DAILY_CALLS = "/mentor-daily-absentees/"
+    PAGE_WEEKLY_CALLS = "/mentor-dashboard/"
+    PAGE_MARK_ATTENDANCE = "/mentor-mark-attendance/"
+    PAGE_CHOICES = [
+        (PAGE_SCHEDULE, "My Schedule"),
+        (PAGE_DAILY_CALLS, "Daily Absent Calls"),
+        (PAGE_WEEKLY_CALLS, "Weekly Calls"),
+        (PAGE_MARK_ATTENDANCE, "Mark Attendance"),
+    ]
+
+    module = models.OneToOneField(AcademicModule, on_delete=models.CASCADE, related_name="mentor_home_setting")
+    mode = models.CharField(max_length=12, choices=MODE_CHOICES, default=MODE_AUTO)
+    cutoff_time = models.TimeField(default=time(12, 35))
+    before_page = models.CharField(max_length=64, choices=PAGE_CHOICES, default=PAGE_SCHEDULE)
+    after_page = models.CharField(max_length=64, choices=PAGE_CHOICES, default=PAGE_DAILY_CALLS)
+    manual_page = models.CharField(max_length=64, choices=PAGE_CHOICES, default=PAGE_SCHEDULE)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["module__name"]
+
+    def __str__(self):
+        return f"MentorHomeSetting({self.module.name})"
 class PracticalMarkUpload(models.Model):
     module = models.ForeignKey(AcademicModule, on_delete=models.CASCADE, related_name="practical_mark_uploads")
     uploaded_by = models.CharField(max_length=100, blank=True)

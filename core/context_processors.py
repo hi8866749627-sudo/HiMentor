@@ -4,7 +4,7 @@ import time
 from django.conf import settings
 from django.db import connection
 
-from .module_utils import allowed_modules_for_user, get_current_module, is_superadmin_user
+from .module_utils import allowed_modules_for_user, get_current_module, is_superadmin_user, get_mentor_home_url
 from .models import MentorAdminAccess
 from .utils import resolve_mentor_identity
 
@@ -123,6 +123,9 @@ def module_context(request):
         admin_mode = bool(request.session.get("admin_mode")) if mentor_is_admin else False
         if admin_mode:
             home_url = "/reports/"
+        else:
+            if current:
+                home_url = get_mentor_home_url(current)
     login_role_name = ""
     if request.user.is_authenticated and not request.session.get("mentor"):
         login_role_name = "Superadmin" if is_superadmin_user(request.user) else "Coordinator"
