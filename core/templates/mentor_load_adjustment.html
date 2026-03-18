@@ -209,7 +209,7 @@
                     {% if is_coordinator and selected_faculty %}
                         <input type="hidden" name="faculty" value="{{ selected_faculty }}">
                     {% endif %}
-                    <div class="col-md-5">
+                    <div class="col-lg-4 col-md-6">
                         <label class="form-label">Available Room</label>
                         <select name="room_select" class="form-select">
                             <option value="">Select</option>
@@ -218,16 +218,16 @@
                             {% endfor %}
                         </select>
                     </div>
-                    <div class="col-md-3">
+                    <div class="col-lg-2 col-md-6">
                         <label class="form-label">Custom Room</label>
                         <input type="text" name="room_custom" class="form-control" placeholder="Optional">
                     </div>
-                    <div class="col-md-3">
+                    <div class="col-lg-3 col-md-6">
                         <label class="form-label">Remarks</label>
                         <input type="text" name="remarks" class="form-control" placeholder="Optional">
                     </div>
                     {% if is_coordinator %}
-                    <div class="col-md-3">
+                    <div class="col-lg-2 col-md-6">
                         <label class="form-label">Apply</label>
                         <select name="scope" class="form-select">
                             <option value="week">This week only</option>
@@ -235,7 +235,8 @@
                         </select>
                     </div>
                     {% endif %}
-                    <div class="col-md-3">
+                    <div class="col-lg-1 col-md-6">
+                        <label class="form-label d-lg-block d-none">&nbsp;</label>
                         <button class="btn btn-outline-secondary w-100" type="submit" {% if row.create_locked %}disabled{% endif %}>Save Room</button>
                     </div>
                 </form>

@@ -8,6 +8,8 @@ import threading
 import uuid
 import zipfile
 import json
+import time as perf_time
+import logging
 from types import SimpleNamespace
 from datetime import datetime, date, timedelta, time
 from zoneinfo import ZoneInfo
@@ -98,6 +100,31 @@ from .module_utils import allowed_modules_for_user, get_current_module, is_super
 
 TEST_NAMES = ["T1", "T2", "T3", "T4", "REMEDIAL"]
 IST = ZoneInfo("Asia/Kolkata")
+logger = logging.getLogger(__name__)
+
+
+def _start_perf(request, label):
+    if not settings.DEBUG:
+        return None
+    return {
+        "label": label,
+        "started_at": perf_time.perf_counter(),
+        "path": getattr(request, "path", ""),
+        "query": getattr(request, "META", {}).get("QUERY_STRING", ""),
+    }
+
+
+def _finish_perf(request, perf_state, extra=None):
+    if not perf_state:
+        return
+    elapsed_ms = (perf_time.perf_counter() - perf_state["started_at"]) * 1000
+    extra_text = f" | {extra}" if extra else ""
+    message = (
+        f"[PERF] {perf_state['label']} took {elapsed_ms:.1f} ms | "
+        f"path={perf_state['path']} | query={perf_state['query']}{extra_text}"
+    )
+    print(message)
+    logger.info(message)
 
 
 def _session_mentor_obj(request):
@@ -466,6 +493,58 @@ def _safe_optional_mentor_maps(module, mentors):
     return cred_map, admin_access_ids, optional_warnings
 
 
+def _module_staff_candidate_ids(module, faculty_names):
+    all_mentors = list(
+        Mentor.objects.only(
+            "id",
+            "name",
+            "full_name",
+            "department",
+            "faculty_type",
+            "is_admin",
+        )
+    )
+    base_ids = set(
+        Mentor.objects.filter(
+            Q(student__module=module)
+            | Q(name__in=faculty_names)
+            | Q(full_name__in=faculty_names)
+        ).values_list("id", flat=True)
+    )
+    faculty_compact = {_compact_staff_key(name) for name in faculty_names if name}
+    if faculty_compact:
+        for mentor in all_mentors:
+            if (
+                _compact_staff_key(mentor.name) in faculty_compact
+                or _compact_staff_key(mentor.full_name) in faculty_compact
+            ):
+                base_ids.add(mentor.id)
+
+    variant = (module.variant or "").upper()
+    year_level = (module.year_level or "").upper()
+    name = (module.name or "").upper()
+    variant_c = _compact_staff_key(variant)
+    name_c = _compact_staff_key(name)
+    year_c = _compact_staff_key(year_level)
+
+    dept_ids = set()
+    for mentor in all_mentors:
+        dept_raw = (mentor.department or "").strip()
+        if not dept_raw:
+            continue
+        dept = dept_raw.upper()
+        if dept in {year_level, variant} or variant.startswith(dept) or dept in name:
+            dept_ids.add(mentor.id)
+            continue
+        dept_c = _compact_staff_key(dept)
+        if dept_c and (dept_c == variant_c or variant_c.startswith(dept_c) or dept_c in name_c):
+            dept_ids.add(mentor.id)
+            continue
+        if year_c and dept_c.startswith(year_c):
+            dept_ids.add(mentor.id)
+    return base_ids | dept_ids
+
+
 def _attendance_fully_marked_for_date(module, date_val):
     _ensure_active_timetable(module)
     if not _attendance_allowed_for_date(module, date_val):
@@ -489,6 +568,99 @@ def _attendance_fully_marked_for_range(module, start_date, end_date):
             return False
         cur += timedelta(days=1)
     return True
+
+
+def _attendance_stats_dataset(module, calendar, start, range_end, *, batch_filter_key="", students=None):
+    alias_map = _subject_alias_map(module)
+    sessions = list(
+        LectureSession.objects.filter(module=module, date__gte=start, date__lte=range_end)
+        .only("id", "date", "batch", "subject")
+        .order_by("date", "lecture_no", "batch", "time_slot")
+    )
+    allowed_dates = {
+        session_date
+        for session_date in {session.date for session in sessions}
+        if _attendance_allowed_for_date(module, session_date)
+    }
+    if batch_filter_key:
+        sessions = [
+            session
+            for session in sessions
+            if session.date in allowed_dates and _norm_batch_key(session.batch) == batch_filter_key
+        ]
+    else:
+        sessions = [session for session in sessions if session.date in allowed_dates]
+
+    subject_name_cache = {}
+    session_subject_map = {}
+    session_week_map = {}
+    subject_set = set()
+    week_set = set()
+    held_by_batch = {}
+    held_by_batch_subject = {}
+    held_by_batch_week = {}
+
+    for session in sessions:
+        batch_key = _norm_batch_key(session.batch)
+        if not batch_key:
+            continue
+        subject_name = subject_name_cache.setdefault(
+            session.subject or "",
+            _canonical_subject_name(module, session.subject, alias_map),
+        )
+        session_subject_map[session.id] = subject_name
+        held_by_batch[batch_key] = held_by_batch.get(batch_key, 0) + 1
+        if subject_name:
+            subject_set.add(subject_name)
+            held_by_batch_subject.setdefault(batch_key, {}).setdefault(subject_name, 0)
+            held_by_batch_subject[batch_key][subject_name] += 1
+        _, week_idx = week_for_date(calendar, session.date)
+        if week_idx:
+            session_week_map[session.id] = week_idx
+            week_set.add(week_idx)
+            held_by_batch_week.setdefault(batch_key, {}).setdefault(week_idx, 0)
+            held_by_batch_week[batch_key][week_idx] += 1
+
+    session_ids = [session.id for session in sessions]
+    absences = list(
+        LectureAbsence.objects.filter(session_id__in=session_ids)
+        .select_related("session")
+        .only("student_id", "session_id", "session__subject")
+    )
+    absent_by_student = {}
+    absent_by_student_subject = {}
+    absent_by_student_week = {}
+    for absence in absences:
+        student_id = absence.student_id
+        absent_by_student[student_id] = absent_by_student.get(student_id, 0) + 1
+        subject_name = session_subject_map.get(absence.session_id, "")
+        if subject_name:
+            absent_by_student_subject.setdefault(student_id, {}).setdefault(subject_name, 0)
+            absent_by_student_subject[student_id][subject_name] += 1
+        week_idx = session_week_map.get(absence.session_id)
+        if week_idx:
+            absent_by_student_week.setdefault(student_id, {}).setdefault(week_idx, 0)
+            absent_by_student_week[student_id][week_idx] += 1
+
+    subject_list = sorted(subject_set)
+    week_list = sorted(week_set)
+    student_batch_keys_map = {
+        student.id: _student_batch_keys(student)
+        for student in (students or [])
+    }
+    return {
+        "alias_map": alias_map,
+        "sessions": sessions,
+        "subject_list": subject_list,
+        "week_list": week_list,
+        "held_by_batch": held_by_batch,
+        "held_by_batch_subject": held_by_batch_subject,
+        "held_by_batch_week": held_by_batch_week,
+        "absent_by_student": absent_by_student,
+        "absent_by_student_subject": absent_by_student_subject,
+        "absent_by_student_week": absent_by_student_week,
+        "student_batch_keys_map": student_batch_keys_map,
+    }
 
 
 def _sif_marks_rows_for_student(student, module):
@@ -704,6 +876,7 @@ def login_page(request):
 
 @admin_or_mentor_admin_required
 def manage_mentors(request):
+    perf_state = _start_perf(request, "manage_mentors")
     try:
         if _block_mentor_only(request):
             return redirect("/mentor-dashboard/")
@@ -749,50 +922,8 @@ def manage_mentors(request):
         faculty_names = _collect_module_faculty_names(module)
         _ensure_mentor_records_for_faculty_names(faculty_names)
 
-        def _mentor_matches_module(mentor_obj):
-            dept_raw = (mentor_obj.department or "").strip()
-            if not dept_raw:
-                return False
-            dept = dept_raw.upper()
-            variant = (module.variant or "").upper()
-            year_level = (module.year_level or "").upper()
-            name = (module.name or "").upper()
-
-            if dept in {year_level, variant}:
-                return True
-            if variant.startswith(dept):
-                return True
-            if dept in name:
-                return True
-
-            # Compact comparisons (ignore spaces, dashes, etc.)
-            dept_c = _compact_staff_key(dept)
-            variant_c = _compact_staff_key(variant)
-            name_c = _compact_staff_key(name)
-            year_c = _compact_staff_key(year_level)
-            if dept_c and (dept_c == variant_c or variant_c.startswith(dept_c)):
-                return True
-            if dept_c and dept_c in name_c:
-                return True
-            if year_c and dept_c.startswith(year_c):
-                return True
-            return False
-
         def _current_mentors_qs():
-            base_ids = set(
-                Mentor.objects.filter(
-                    Q(student__module=module)
-                    | Q(name__in=faculty_names)
-                    | Q(full_name__in=faculty_names)
-                ).values_list("id", flat=True)
-            )
-            if faculty_names:
-                faculty_compact = {_compact_staff_key(n) for n in faculty_names if n}
-                if faculty_compact:
-                    for m in Mentor.objects.all():
-                        if _compact_staff_key(m.name) in faculty_compact or _compact_staff_key(m.full_name) in faculty_compact:
-                            base_ids.add(m.id)
-            dept_ids = {m.id for m in Mentor.objects.all() if _mentor_matches_module(m)}
+            candidate_ids = _module_staff_candidate_ids(module, faculty_names)
             order_case = Case(
                 When(faculty_type__iexact="HoD", then=Value(1)),
                 When(faculty_type__icontains="Administrative", then=Value(2)),
@@ -803,7 +934,7 @@ def manage_mentors(request):
                 output_field=IntegerField(),
             )
             return (
-                Mentor.objects.filter(Q(id__in=base_ids) | Q(id__in=dept_ids))
+                Mentor.objects.filter(id__in=candidate_ids)
                 .distinct()
                 .annotate(student_count=Count("student", filter=Q(student__module=module)))
                 .annotate(type_rank=order_case)
@@ -946,7 +1077,7 @@ def manage_mentors(request):
             if request.GET.get("format") == "json":
                 return JsonResponse(debug)
 
-        return render(
+        response = render(
             request,
             "manage_mentors.html",
             {
@@ -956,17 +1087,21 @@ def manage_mentors(request):
                 "debug": debug,
             },
         )
+        _finish_perf(request, perf_state, extra=f"rows={len(rows)}")
+        return response
     except (OperationalError, ProgrammingError):
         module = _active_module(request)
         messages.error(
             request,
             "Database migration pending for mentor/staff fields. Please run migrations and reload.",
         )
-        return render(
+        response = render(
             request,
             "manage_mentors.html",
             {"rows": [], "module": module, "modules": [module]},
         )
+        _finish_perf(request, perf_state, extra="fallback=migration_error")
+        return response
 
 
 @login_required
@@ -5017,6 +5152,7 @@ def upload_timetable(request):
 
 
 def view_timetable(request):
+    perf_state = _start_perf(request, "view_timetable")
     mentor = _session_mentor_obj(request)
     if not mentor and not request.user.is_authenticated:
         return redirect("/")
@@ -5324,12 +5460,19 @@ def view_timetable(request):
 
     editor_date = _parse_date_param(request.GET.get("editor_date"), timezone.localdate())
     editor_faculty = (request.GET.get("editor_faculty") or "").strip()
-    rows, _ = _build_adjustment_rows(
-        module,
-        editor_date,
-        faculty_filter=editor_faculty,
-        allow_started_adjustments=True,
+    load_editor = bool(
+        request.method == "POST"
+        or request.GET.get("editor_date")
+        or request.GET.get("editor_faculty")
     )
+    rows = []
+    if load_editor:
+        rows, _ = _build_adjustment_rows(
+            module,
+            editor_date,
+            faculty_filter=editor_faculty,
+            allow_started_adjustments=True,
+        )
 
     recent_changes = []
     recent_mode = request.GET.get("recent") == "1"
@@ -5349,7 +5492,7 @@ def view_timetable(request):
                     "items": items,
                 }
             )
-    return render(
+    response = render(
         request,
         "view_timetable.html",
         {
@@ -5378,6 +5521,12 @@ def view_timetable(request):
             "recent_mode": recent_mode,
         },
     )
+    _finish_perf(
+        request,
+        perf_state,
+        extra=f"day_tables={len(day_tables)} editor_rows={len(rows)} recent={len(recent_changes)}",
+    )
+    return response
 
 
 def download_timetable_excel(request):
@@ -5997,6 +6146,7 @@ def coordinator_daily_weekly_report_pdf(request):
 
 
 def mentor_mark_attendance(request):
+    perf_state = _start_perf(request, "mentor_mark_attendance")
     mentor = _session_mentor_obj(request)
     if not mentor:
         return redirect("/")
@@ -6031,7 +6181,7 @@ def mentor_mark_attendance(request):
         batch_rows.extend(module_rows)
     batch_rows.sort(key=lambda row: (row.get("module_name", ""), row.get("batch", "")))
 
-    return render(
+    response = render(
         request,
         "mentor_mark_attendance.html",
         {
@@ -6044,6 +6194,8 @@ def mentor_mark_attendance(request):
             "attendance_block_reason": attendance_block_reason if not batch_rows else "",
         },
     )
+    _finish_perf(request, perf_state, extra=f"modules={len(allowed_modules)} batch_rows={len(batch_rows)}")
+    return response
 
 
 def _norm_batch_key(value):
@@ -6381,7 +6533,9 @@ def _build_adjustment_rows(
     day_of_week = selected_date.weekday()
     active_adjustments = _active_adjustments_for_date(module, selected_date)
     adjustment_map = {(a.batch, a.lecture_no): a for a in active_adjustments}
-    active_modules = AcademicModule.objects.filter(is_active=True)
+    active_modules = list(AcademicModule.objects.filter(is_active=True).only("id", "name", "variant", "year_level"))
+    active_module_ids = [item.id for item in active_modules]
+    dept_label_by_module_id = {item.id: _dept_label_from_module(item) for item in active_modules}
     faculty_choices = sorted(
         {
             (name or "").strip()
@@ -6393,7 +6547,8 @@ def _build_adjustment_rows(
     entries_qs = TimetableEntry.objects.filter(module=module, day_of_week=day_of_week, is_active=True)
     if faculty_filter:
         entries_qs = entries_qs.filter(faculty__iexact=faculty_filter)
-    entries = entries_qs.order_by("lecture_no", "batch", "faculty")
+    entries = list(entries_qs.order_by("lecture_no", "batch", "faculty"))
+    lecture_numbers = sorted({entry.lecture_no for entry in entries})
 
     rooms_base = set(
         list(Room.objects.filter(module=module, is_active=True).values_list("name", flat=True))
@@ -6402,35 +6557,67 @@ def _build_adjustment_rows(
         )
     )
 
+    module_day_entries = list(
+        TimetableEntry.objects.filter(
+            module=module,
+            day_of_week=day_of_week,
+            lecture_no__in=lecture_numbers,
+            is_active=True,
+        )
+        .exclude(faculty="")
+        .only("id", "batch", "lecture_no", "time_slot", "subject", "faculty", "room")
+        .order_by("lecture_no", "batch", "faculty")
+    )
+    module_entries_by_lecture = {}
+    module_room_by_batch_lecture = {}
+    slot_faculty_subjects_by_lecture = {}
+    for day_entry in module_day_entries:
+        module_entries_by_lecture.setdefault(day_entry.lecture_no, []).append(day_entry)
+        module_room_by_batch_lecture[(day_entry.lecture_no, day_entry.batch)] = day_entry.room
+        if day_entry.faculty:
+            slot_faculty_subjects_by_lecture.setdefault(day_entry.lecture_no, {}).setdefault(day_entry.faculty, set()).add(
+                day_entry.subject
+            )
+
+    conflict_entries_all = list(
+        TimetableEntry.objects.filter(
+            module_id__in=active_module_ids,
+            day_of_week=day_of_week,
+            lecture_no__in=lecture_numbers,
+            is_active=True,
+        )
+        .exclude(faculty="")
+        .select_related("module")
+        .only("module__id", "module__name", "module__variant", "module__year_level", "lecture_no", "faculty", "room")
+    )
+    conflict_entries_by_lecture = {}
+    for conflict_entry in conflict_entries_all:
+        conflict_entries_by_lecture.setdefault(conflict_entry.lecture_no, []).append(conflict_entry)
+
+    conflict_adjustments_all = list(
+        LectureAdjustment.objects.filter(
+            module_id__in=active_module_ids,
+            date=selected_date,
+            lecture_no__in=lecture_numbers,
+            status=LectureAdjustment.STATUS_ACTIVE,
+        )
+        .select_related("proxy_faculty", "module", "timetable_entry")
+    )
+    conflict_adjustments_by_lecture = {}
+    slot_adjustments_by_lecture = {}
+    for item in conflict_adjustments_all:
+        conflict_adjustments_by_lecture.setdefault(item.lecture_no, []).append(item)
+        if item.module_id == module.id:
+            slot_adjustments_by_lecture.setdefault(item.lecture_no, []).append(item)
+    active_adjustment_keys = {(item.batch, item.lecture_no) for item in active_adjustments}
+
     rows = []
     for entry in entries:
         adj = adjustment_map.get((entry.batch, entry.lecture_no))
         slot_started = _slot_has_started(selected_date, (adj.time_slot if adj and adj.time_slot else entry.time_slot))
-        slot_faculty_subjects = {}
-        slot_entries = TimetableEntry.objects.filter(
-            module=module, day_of_week=day_of_week, lecture_no=entry.lecture_no, is_active=True
-        ).exclude(faculty="")
-        for se in slot_entries:
-            slot_faculty_subjects.setdefault(se.faculty, set()).add(se.subject)
-
-        conflict_entries = list(
-            TimetableEntry.objects.filter(
-                module__in=active_modules,
-                day_of_week=day_of_week,
-                lecture_no=entry.lecture_no,
-                is_active=True,
-            )
-            .exclude(faculty="")
-        )
-        conflict_adjustments = [
-            item
-            for item in LectureAdjustment.objects.filter(
-                module__in=active_modules,
-                date=selected_date,
-                lecture_no=entry.lecture_no,
-                status=LectureAdjustment.STATUS_ACTIVE,
-            ).select_related("proxy_faculty")
-        ]
+        slot_faculty_subjects = slot_faculty_subjects_by_lecture.get(entry.lecture_no, {})
+        conflict_entries = conflict_entries_by_lecture.get(entry.lecture_no, [])
+        conflict_adjustments = conflict_adjustments_by_lecture.get(entry.lecture_no, [])
         conflict_faculties = set(e.faculty for e in conflict_entries if e.faculty)
         conflict_depts = {
             str(e.faculty).strip().lower(): _dept_label_from_module(e.module)
@@ -6472,35 +6659,17 @@ def _build_adjustment_rows(
         batch_faculties.sort(key=lambda x: x["name"])
 
         used_rooms = set(
-            TimetableEntry.objects.filter(
-                module=module, day_of_week=day_of_week, lecture_no=entry.lecture_no, is_active=True
-            )
-            .exclude(room="")
-            .values_list("room", flat=True)
+            item.room
+            for item in module_entries_by_lecture.get(entry.lecture_no, [])
+            if item.room
         )
-        slot_adjustments = [
-            item
-            for item in active_adjustments
-            if item.lecture_no == entry.lecture_no and item.status == LectureAdjustment.STATUS_ACTIVE
-        ]
+        slot_adjustments = slot_adjustments_by_lecture.get(entry.lecture_no, [])
         for item in slot_adjustments:
             old_room = ""
             if item.timetable_entry and item.timetable_entry.room:
                 old_room = item.timetable_entry.room
             elif item.batch:
-                old_room = (
-                    TimetableEntry.objects.filter(
-                        module=module,
-                        day_of_week=day_of_week,
-                        lecture_no=entry.lecture_no,
-                        batch=item.batch,
-                        is_active=True,
-                    )
-                    .exclude(room="")
-                    .values_list("room", flat=True)
-                    .first()
-                    or ""
-                )
+                old_room = module_room_by_batch_lecture.get((entry.lecture_no, item.batch), "") or ""
             if old_room:
                 used_rooms.discard(old_room)
             if item.room:
@@ -6545,13 +6714,26 @@ def _build_adjustment_rows(
                 "conflict_rooms": conflict_rooms,
                 "available_rooms_json": json.dumps(available_rooms),
                 "conflict_rooms_json": json.dumps(conflict_rooms),
-                "swap_choices": _swap_partner_choices(
-                    module,
-                    selected_date,
-                    entry,
-                    active_adjustments,
-                    allow_started=allow_started_adjustments,
-                ),
+                "swap_choices": [
+                    {
+                        "id": candidate.id,
+                        "label": f"L{candidate.lecture_no} · {candidate.time_slot} · {candidate.batch} · {candidate.faculty} · {candidate.subject}",
+                        "faculty": candidate.faculty,
+                        "room": candidate.room,
+                        "batch": candidate.batch,
+                        "lecture_no": candidate.lecture_no,
+                        "time_slot": candidate.time_slot,
+                        "subject": candidate.subject,
+                    }
+                    for candidate in module_day_entries
+                    if candidate.id != entry.id
+                    and candidate.faculty
+                    and candidate.id is not None
+                    and (entry.batch, entry.lecture_no) not in active_adjustment_keys
+                    and (candidate.batch, candidate.lecture_no) not in active_adjustment_keys
+                    and (candidate.faculty or "").strip().lower() != (entry.faculty or "").strip().lower()
+                    and (allow_started_adjustments or not _slot_has_started(selected_date, candidate.time_slot))
+                ],
             }
         )
     return rows, faculty_choices
@@ -6564,6 +6746,7 @@ def _build_attendance_batch_rows(module, selected_date, mentor=None, allow_overr
     if mentor:
         entries_qs = entries_qs.filter(faculty__iexact=mentor.name)
     entries_qs = entries_qs.order_by("batch", "lecture_no")
+    base_entries = list(entries_qs)
 
     alias_map = _subject_alias_map(module)
     adjustments = _active_adjustments_for_date(module, selected_date)
@@ -6575,7 +6758,7 @@ def _build_attendance_batch_rows(module, selected_date, mentor=None, allow_overr
     }
 
     batch_map = {}
-    for entry in entries_qs:
+    for entry in base_entries:
         batch_map.setdefault(entry.batch, []).append(
             {"entry": entry, "adjustment": adj_by_key.get((entry.batch, entry.lecture_no))}
         )
@@ -6606,6 +6789,35 @@ def _build_attendance_batch_rows(module, selected_date, mentor=None, allow_overr
             if key:
                 students_by_batch.setdefault(key, []).append(student)
 
+    session_keys = [
+        (batch, item["entry"].lecture_no)
+        for batch, items in batch_map.items()
+        for item in items
+    ]
+    session_batches = sorted({batch for batch, _ in session_keys})
+    session_lectures = sorted({lecture_no for _, lecture_no in session_keys})
+    session_map = {}
+    absent_rolls_by_session = {}
+    if session_batches and session_lectures:
+        sessions = list(
+            LectureSession.objects.filter(
+                module=module,
+                date=selected_date,
+                batch__in=session_batches,
+                lecture_no__in=session_lectures,
+            )
+        )
+        session_map = {(session.batch, session.lecture_no): session for session in sessions}
+        if prefill_absent and sessions:
+            absences = (
+                LectureAbsence.objects.filter(session__in=sessions)
+                .select_related("student")
+                .only("session_id", "student__roll_no")
+            )
+            for absence in absences:
+                if absence.student and absence.student.roll_no is not None:
+                    absent_rolls_by_session.setdefault(absence.session_id, set()).add(absence.student.roll_no)
+
     batch_rows = []
     for batch, batch_entries in batch_map.items():
         students = students_by_batch.get(_norm_batch_key(batch), [])
@@ -6632,13 +6844,8 @@ def _build_attendance_batch_rows(module, selected_date, mentor=None, allow_overr
                 merge_room = merge_room_by_proxy.get((selected_date, entry.lecture_no, mentor.name.lower()), "")
                 if merge_room and entry.faculty.lower() == mentor.name.lower():
                     entry.room = merge_room
-            session = LectureSession.objects.filter(
-                module=module, date=selected_date, lecture_no=entry.lecture_no, batch=batch
-            ).first()
-            absent_rolls = set()
-            if session and prefill_absent:
-                absences = LectureAbsence.objects.filter(session=session).select_related("student")
-                absent_rolls = {a.student.roll_no for a in absences if a.student.roll_no is not None}
+            session = session_map.get((batch, entry.lecture_no))
+            absent_rolls = absent_rolls_by_session.get(session.id, set()) if session and prefill_absent else set()
             slots.append(
                 {
                     "entry": entry,
@@ -6667,6 +6874,7 @@ def _build_attendance_batch_rows(module, selected_date, mentor=None, allow_overr
 
 @admin_or_mentor_admin_required
 def coordinator_mark_attendance(request):
+    perf_state = _start_perf(request, "coordinator_mark_attendance")
     if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
 
@@ -6683,7 +6891,7 @@ def coordinator_mark_attendance(request):
             module, selected_date, mentor=None, allow_override=True, prefill_absent=True
         )
 
-    return render(
+    response = render(
         request,
         "coordinator_mark_attendance.html",
         {
@@ -6695,9 +6903,12 @@ def coordinator_mark_attendance(request):
             "attendance_block_reason": attendance_block_reason,
         },
     )
+    _finish_perf(request, perf_state, extra=f"batch_rows={len(batch_rows)}")
+    return response
 
 
 def mentor_load_adjustment(request):
+    perf_state = _start_perf(request, "mentor_load_adjustment")
     mentor = _session_mentor_obj(request)
     if not mentor:
         return redirect("/")
@@ -6981,7 +7192,7 @@ def mentor_load_adjustment(request):
         exclude_proxy_name=mentor.name,
     )
 
-    return render(
+    response = render(
         request,
         "mentor_load_adjustment.html",
         {
@@ -6993,10 +7204,13 @@ def mentor_load_adjustment(request):
             "selected_faculty": "",
         },
     )
+    _finish_perf(request, perf_state, extra=f"rows={len(rows)}")
+    return response
 
 
 @admin_or_mentor_admin_required
 def coordinator_load_adjustment(request):
+    perf_state = _start_perf(request, "coordinator_load_adjustment")
     if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
 
@@ -7004,6 +7218,16 @@ def coordinator_load_adjustment(request):
     _ensure_active_timetable(module)
     selected_date = _parse_date_param(request.GET.get("date"), timezone.localdate())
     selected_faculty = (request.GET.get("faculty") or request.POST.get("faculty") or "").strip()
+    faculty_choices = sorted(
+        {
+            (name or "").strip()
+            for name in TimetableEntry.objects.filter(module=module, is_active=True)
+            .exclude(faculty="")
+            .values_list("faculty", flat=True)
+        }
+    )
+    if not selected_faculty and faculty_choices:
+        selected_faculty = faculty_choices[0]
     day_of_week = selected_date.weekday()
 
     if request.method == "POST":
@@ -7385,7 +7609,7 @@ def coordinator_load_adjustment(request):
         allow_started_adjustments=True,
     )
 
-    return render(
+    response = render(
         request,
         "mentor_load_adjustment.html",
         {
@@ -7397,6 +7621,8 @@ def coordinator_load_adjustment(request):
             "selected_faculty": selected_faculty,
         },
     )
+    _finish_perf(request, perf_state, extra=f"rows={len(rows)} faculty={selected_faculty or 'ALL'}")
+    return response
 
 
 @admin_or_mentor_admin_required
@@ -7846,6 +8072,7 @@ def save_lecture_attendance(request):
 
 
 def attendance_analytics(request):
+    perf_state = _start_perf(request, "attendance_analytics")
     mentor = _session_mentor_obj(request)
     if not mentor and not request.user.is_authenticated:
         return redirect("/")
@@ -7856,8 +8083,11 @@ def attendance_analytics(request):
     week_param = (request.GET.get("week") or "all").strip().lower()
     week_no = None if week_param in {"all", ""} else int(week_param) + 1
     batch_filter = (request.GET.get("batch") or "").strip()
-    batch_filter = (request.GET.get("batch") or "").strip()
     search = (request.GET.get("search") or "").strip()
+    try:
+        page_number = max(int((request.GET.get("page") or "1").strip()), 1)
+    except Exception:
+        page_number = 1
     batch_choices = sorted(
         {
             ((student.division or "").strip() or (student.batch or "").strip())
@@ -7868,7 +8098,7 @@ def attendance_analytics(request):
 
     start, end = phase_range(calendar, phase)
     if not start or not end:
-        return render(
+        response = render(
             request,
             "attendance_analytics.html",
             {
@@ -7885,6 +8115,8 @@ def attendance_analytics(request):
                 "message": "Set the academic calendar first.",
             },
         )
+        _finish_perf(request, perf_state, extra="state=no_calendar")
+        return response
 
     end_date = end_date_for_week(calendar, phase, week_no)
     if end_date and end_date > end:
@@ -7892,7 +8124,7 @@ def attendance_analytics(request):
     today = timezone.localdate()
     range_end = min(end_date or end, today)
     if range_end < start:
-        return render(
+        response = render(
             request,
             "attendance_analytics.html",
             {
@@ -7909,24 +8141,10 @@ def attendance_analytics(request):
                 "message": "Attendance analytics are available only up to today.",
             },
         )
+        _finish_perf(request, perf_state, extra="state=future_range")
+        return response
 
     batch_filter_key = _norm_batch_key(batch_filter)
-
-    sessions_qs = LectureSession.objects.filter(
-        module=module,
-        date__gte=start,
-        date__lte=range_end,
-    )
-    sessions = [
-        s
-        for s in sessions_qs
-        if _attendance_allowed_for_date(module, s.date)
-        and (not batch_filter_key or _norm_batch_key(s.batch) == batch_filter_key)
-    ]
-    alias_map = _subject_alias_map(module)
-
-    session_ids = [s.id for s in sessions]
-    absences = LectureAbsence.objects.filter(session_id__in=session_ids).select_related("session", "student")
 
     students_qs = Student.objects.filter(module=module)
     if search:
@@ -7936,51 +8154,31 @@ def attendance_analytics(request):
         students_qs = students_qs.filter(search_q)
     students = [
         student
-        for student in students_qs.order_by("roll_no", "name")
+        for student in students_qs.select_related("mentor").order_by("roll_no", "name")
         if not batch_filter_key or batch_filter_key in _student_batch_keys(student)
     ]
-
-    held_by_batch = {}
-    held_by_batch_subject = {}
-    held_by_batch_week = {}
-    subject_set = set()
-    week_set = set()
-
-    for s in sessions:
-        batch_key = _norm_batch_key(s.batch)
-        held_by_batch.setdefault(batch_key, 0)
-        held_by_batch[batch_key] += 1
-        subj = _canonical_subject_name(module, s.subject, alias_map)
-        subject_set.add(subj)
-        held_by_batch_subject.setdefault(batch_key, {}).setdefault(subj, 0)
-        held_by_batch_subject[batch_key][subj] += 1
-        _, week_idx = week_for_date(calendar, s.date)
-        if week_idx:
-            week_set.add(week_idx)
-            held_by_batch_week.setdefault(batch_key, {}).setdefault(week_idx, 0)
-            held_by_batch_week[batch_key][week_idx] += 1
-
-    absent_by_student = {}
-    absent_by_student_subject = {}
-    absent_by_student_week = {}
-    for a in absences:
-        sid = a.student_id
-        absent_by_student[sid] = absent_by_student.get(sid, 0) + 1
-        subj = _canonical_subject_name(module, a.session.subject, alias_map)
-        absent_by_student_subject.setdefault(sid, {}).setdefault(subj, 0)
-        absent_by_student_subject[sid][subj] += 1
-        _, week_idx = week_for_date(calendar, a.session.date)
-        if week_idx:
-            absent_by_student_week.setdefault(sid, {}).setdefault(week_idx, 0)
-            absent_by_student_week[sid][week_idx] += 1
-
-    subject_list = [s for s in sorted(subject_set) if s]
-    week_list = sorted(week_set)
+    stats = _attendance_stats_dataset(
+        module,
+        calendar,
+        start,
+        range_end,
+        batch_filter_key=batch_filter_key,
+        students=students,
+    )
+    subject_list = stats["subject_list"]
+    week_list = stats["week_list"]
+    held_by_batch = stats["held_by_batch"]
+    held_by_batch_subject = stats["held_by_batch_subject"]
+    held_by_batch_week = stats["held_by_batch_week"]
+    absent_by_student = stats["absent_by_student"]
+    absent_by_student_subject = stats["absent_by_student_subject"]
+    absent_by_student_week = stats["absent_by_student_week"]
+    student_batch_keys_map = stats["student_batch_keys_map"]
 
     rows = []
     for student in students:
         batch_label = (student.division or student.batch or "").strip()
-        batch_keys = _student_batch_keys(student)
+        batch_keys = student_batch_keys_map.get(student.id, set())
         held_total = sum(held_by_batch.get(key, 0) for key in batch_keys)
         absent_total = absent_by_student.get(student.id, 0)
         attended_total = max(held_total - absent_total, 0)
@@ -8028,7 +8226,10 @@ def attendance_analytics(request):
             }
         )
 
-    return render(
+    paginator = Paginator(rows, 50)
+    page_obj = paginator.get_page(page_number)
+
+    response = render(
         request,
         "attendance_analytics.html",
         {
@@ -8038,12 +8239,15 @@ def attendance_analytics(request):
             "week_param": week_param,
             "batch_filter": batch_filter,
             "search": search,
-            "rows": rows,
+            "rows": list(page_obj.object_list),
             "week_list": week_list,
             "subject_list": subject_list,
             "batch_choices": batch_choices,
+            "page_obj": page_obj,
         },
     )
+    _finish_perf(request, perf_state, extra=f"rows={len(rows)} subjects={len(subject_list)} weeks={len(week_list)}")
+    return response
 
 
 def daily_absent_excel(request):
@@ -8489,6 +8693,7 @@ def daily_absent_live_pdf(request):
 
 
 def weekly_attendance_live(request):
+    perf_state = _start_perf(request, "weekly_attendance_live")
     mentor = _session_mentor_obj(request)
     if not mentor and not request.user.is_authenticated:
         return redirect("/")
@@ -8507,10 +8712,16 @@ def weekly_attendance_live(request):
     phase = (request.GET.get("phase") or "T1").upper()
     week_param = (request.GET.get("week") or "all").strip().lower()
     week_no = None if week_param in {"all", ""} else int(week_param) + 1
+    batch_filter = (request.GET.get("batch") or "").strip()
+    batch_filter_key = _norm_batch_key(batch_filter)
+    try:
+        page_number = max(int((request.GET.get("page") or "1").strip()), 1)
+    except Exception:
+        page_number = 1
 
     start, end = phase_range(calendar, phase)
     if not start or not end:
-        return render(
+        response = render(
             request,
             "weekly_attendance_live.html",
             {
@@ -8523,6 +8734,8 @@ def weekly_attendance_live(request):
                 "message": "Academic calendar not configured.",
             },
         )
+        _finish_perf(request, perf_state, extra="state=no_calendar")
+        return response
 
     end_date = end_date_for_week(calendar, phase, week_no)
     if end_date and end_date > end:
@@ -8530,7 +8743,7 @@ def weekly_attendance_live(request):
     today = timezone.localdate()
     range_end = min(end_date or end, today)
     if range_end < start:
-        return render(
+        response = render(
             request,
             "weekly_attendance_live.html",
             {
@@ -8543,54 +8756,45 @@ def weekly_attendance_live(request):
                 "message": "Weekly attendance is available only up to today.",
             },
         )
+        _finish_perf(request, perf_state, extra="state=future_range")
+        return response
 
     attendance_pending = bool(is_coordinator and not _attendance_fully_marked_for_range(module, start, range_end))
-
-    sessions = list(
-        LectureSession.objects.filter(module=module, date__gte=start, date__lte=range_end)
-    )
-    sessions = [s for s in sessions if _attendance_allowed_for_date(module, s.date)]
-    session_ids = [s.id for s in sessions]
-    absences = LectureAbsence.objects.filter(session_id__in=session_ids).select_related("session", "student")
-
-    alias_map = _subject_alias_map(module)
-    subject_list = sorted(
-        {_canonical_subject_name(module, s.subject, alias_map) for s in sessions if (s.subject or "").strip()}
-    )
-    week_set = set()
-    for s in sessions:
-        _, week_idx = week_for_date(calendar, s.date)
-        if week_idx:
-            week_set.add(week_idx)
-    week_list = sorted(week_set)
-
-    held_by_batch_subject = {}
-    held_by_batch = {}
-    for s in sessions:
-        batch_key = _norm_batch_key(s.batch)
-        held_by_batch.setdefault(batch_key, 0)
-        held_by_batch[batch_key] += 1
-        subj = _canonical_subject_name(module, s.subject, alias_map)
-        held_by_batch_subject.setdefault(batch_key, {}).setdefault(subj, 0)
-        held_by_batch_subject[batch_key][subj] += 1
-
-    absent_by_student_subject = {}
-    absent_by_student = {}
-    for a in absences:
-        sid = a.student_id
-        absent_by_student[sid] = absent_by_student.get(sid, 0) + 1
-        subj = _canonical_subject_name(module, a.session.subject, alias_map)
-        absent_by_student_subject.setdefault(sid, {}).setdefault(subj, 0)
-        absent_by_student_subject[sid][subj] += 1
 
     student_qs = Student.objects.filter(module=module)
     if mentor:
         student_qs = student_qs.filter(mentor=mentor)
-    students = list(student_qs.order_by("roll_no", "name"))
+    batch_choices = sorted(
+        {
+            ((student.division or "").strip() or (student.batch or "").strip())
+            for student in student_qs.only("batch", "division")
+            if ((student.division or "").strip() or (student.batch or "").strip())
+        }
+    )
+    students = [
+        student
+        for student in student_qs.select_related("mentor").order_by("roll_no", "name")
+        if not batch_filter_key or batch_filter_key in _student_batch_keys(student)
+    ]
+    stats = _attendance_stats_dataset(
+        module,
+        calendar,
+        start,
+        range_end,
+        batch_filter_key=batch_filter_key,
+        students=students,
+    )
+    subject_list = stats["subject_list"]
+    week_list = stats["week_list"]
+    held_by_batch = stats["held_by_batch"]
+    held_by_batch_subject = stats["held_by_batch_subject"]
+    absent_by_student = stats["absent_by_student"]
+    absent_by_student_subject = stats["absent_by_student_subject"]
+    student_batch_keys_map = stats["student_batch_keys_map"]
 
     rows = []
     for student in students:
-        batch_keys = _student_batch_keys(student)
+        batch_keys = student_batch_keys_map.get(student.id, set())
         held_total = sum(held_by_batch.get(key, 0) for key in batch_keys)
         absent_total = absent_by_student.get(student.id, 0)
         attended_total = max(held_total - absent_total, 0)
@@ -8654,7 +8858,10 @@ def weekly_attendance_live(request):
         if pct_values:
             insights["avg_overall"] = round(sum(pct_values) / len(pct_values), 2)
 
-    return render(
+    paginator = Paginator(rows, 50)
+    page_obj = paginator.get_page(page_number)
+
+    response = render(
         request,
         "weekly_attendance_live.html",
         {
@@ -8664,13 +8871,22 @@ def weekly_attendance_live(request):
             "week_param": week_param,
             "week_list": week_list,
             "subject_list": subject_list,
-            "rows": rows,
+            "rows": list(page_obj.object_list),
+            "page_obj": page_obj,
+            "batch_filter": batch_filter,
+            "batch_choices": batch_choices,
             "range_start": start,
             "range_end": range_end,
             "insights": insights,
             "attendance_pending": attendance_pending,
         },
     )
+    _finish_perf(
+        request,
+        perf_state,
+        extra=f"rows={len(rows)} subjects={len(subject_list)} weeks={len(week_list)}",
+    )
+    return response
 
 
 def _safe_sheet_title(title):
