@@ -5731,7 +5731,7 @@ def academic_calendar(request):
     )
 
 
-def _schedule_entries_for_faculty(modules, selected_date, faculty_name):
+def _schedule_entries_for_faculty(modules, selected_date, faculty_name, merge_across_modules=False):
     day_of_week = selected_date.weekday()
     entries = []
     has_inactive_calendar = False
@@ -5916,8 +5916,56 @@ def _schedule_entries_for_faculty(modules, selected_date, faculty_name):
                 )
 
     has_proxy_alert = any(e.get("status") == "proxy" for e in entries)
-    entries.sort(key=lambda x: (_slot_sort_key(x.get("time_slot")), x["lecture_no"], x["module_name"], x["batch"]))
+    if merge_across_modules and len(modules) > 1:
+        entries = _merge_schedule_entries(entries)
+    entries.sort(key=lambda x: (_slot_sort_key(x.get("time_slot")), x["lecture_no"], x.get("module_name", ""), x.get("batch", "")))
     return entries, has_proxy_alert, has_inactive_calendar
+
+
+def _merge_schedule_entries(entries):
+    grouped = {}
+    for entry in entries:
+        grouped.setdefault(entry.get("lecture_no"), []).append(entry)
+
+    merged = []
+    for lecture_no, group in grouped.items():
+        real_rows = [row for row in group if not row.get("is_placeholder")]
+        if real_rows:
+            def _priority(row):
+                if row.get("status") == "proxy":
+                    return 0
+                if row.get("adjustment_type") == "swap":
+                    return 1
+                if row.get("row_highlight") == "proxy_created":
+                    return 2
+                if row.get("status") == "original":
+                    return 3
+                return 4
+            real_rows.sort(key=lambda r: (_priority(r), r.get("module_name", ""), r.get("batch", "")))
+            merged.append(real_rows[0])
+        else:
+            placeholder = dict(group[0])
+            placeholder.update(
+                {
+                    "module_name": "-",
+                    "dept_label": "-",
+                    "batch": "-",
+                    "subject": "-",
+                    "room": "-",
+                    "status": "empty",
+                    "proxy_faculty": "",
+                    "has_proxy": False,
+                    "adjustment_type": "",
+                    "swap_with": "",
+                    "total_count": "-",
+                    "absent_count": "-",
+                    "present_count": "-",
+                    "row_highlight": "",
+                    "is_placeholder": True,
+                }
+            )
+            merged.append(placeholder)
+    return merged
 
 
 def mentor_schedule(request):
@@ -5941,7 +5989,9 @@ def mentor_schedule(request):
             },
         )
     selected_date = _parse_date_param(request.GET.get("date"), timezone.localdate())
-    entries, has_proxy_alert, has_inactive_calendar = _schedule_entries_for_faculty(modules, selected_date, mentor.name)
+    entries, has_proxy_alert, has_inactive_calendar = _schedule_entries_for_faculty(
+        modules, selected_date, mentor.name, merge_across_modules=True
+    )
     return render(
         request,
         "mentor_schedule.html",
