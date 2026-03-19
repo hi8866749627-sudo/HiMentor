@@ -1200,6 +1200,37 @@ def superadmin_home(request):
                 request.user.save(update_fields=["password"])
                 update_session_auth_hash(request, request.user)
                 messages.success(request, "Password updated.")
+        elif action == "assign_faculty_admin":
+            mentor_id = request.POST.get("mentor_id")
+            module_ids = request.POST.getlist("module_ids")
+            mentor = Mentor.objects.filter(id=mentor_id).first()
+            if not mentor:
+                messages.error(request, "Select a valid faculty.")
+            else:
+                modules = list(AcademicModule.objects.filter(id__in=module_ids))
+                if not modules:
+                    messages.error(request, "Select at least one module.")
+                else:
+                    mentor.is_admin = True
+                    mentor.save(update_fields=["is_admin"])
+                    MentorAdminAccess.objects.bulk_create(
+                        [MentorAdminAccess(mentor=mentor, module=m) for m in modules],
+                        ignore_conflicts=True,
+                    )
+                    messages.success(request, f"Admin access assigned for {mentor.name}.")
+        elif action == "remove_faculty_admin":
+            mentor_id = request.POST.get("mentor_id")
+            module_id = request.POST.get("module_id")
+            mentor = Mentor.objects.filter(id=mentor_id).first()
+            module = AcademicModule.objects.filter(id=module_id).first()
+            if not mentor or not module:
+                messages.error(request, "Invalid admin access selection.")
+            else:
+                MentorAdminAccess.objects.filter(mentor=mentor, module=module).delete()
+                if not MentorAdminAccess.objects.filter(mentor=mentor).exists():
+                    mentor.is_admin = False
+                    mentor.save(update_fields=["is_admin"])
+                messages.success(request, f"Admin access removed for {mentor.name}.")
 
         return redirect("/home/")
 
@@ -1247,6 +1278,14 @@ def superadmin_home(request):
         .filter(total_students__gt=0)
         .order_by("name")
     )
+    all_mentors = list(Mentor.objects.all().order_by("name"))
+
+    admin_access_rows = []
+    admin_access_map = {}
+    for row in MentorAdminAccess.objects.select_related("mentor", "module").order_by("mentor__name", "module__name"):
+        admin_access_map.setdefault(row.mentor_id, []).append(row.module)
+    for mentor in Mentor.objects.filter(id__in=list(admin_access_map.keys())).order_by("name"):
+        admin_access_rows.append({"mentor": mentor, "modules": admin_access_map.get(mentor.id, [])})
 
     student_report_rows = []
     for m in modules:
@@ -1271,6 +1310,8 @@ def superadmin_home(request):
             "stats": stats,
             "module_summary": module_summary,
             "mentor_summary": mentor_summary,
+            "all_mentors": all_mentors,
+            "admin_access_rows": admin_access_rows,
             "student_report_rows": student_report_rows,
         },
     )

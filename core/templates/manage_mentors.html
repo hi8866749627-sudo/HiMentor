@@ -54,8 +54,8 @@
                     <select name="is_admin" class="form-select form-select-sm mentor-input mentor-edit"
                             form="mentor-form-{{ r.mentor.id }}"
                             data-original="{% if r.admin_for_module %}yes{% else %}no{% endif %}">
-                        <option value="yes">Yes</option>
-                        <option value="no">No</option>
+                        <option value="yes" {% if r.admin_for_module %}selected{% endif %}>Yes</option>
+                        <option value="no" {% if not r.admin_for_module %}selected{% endif %}>No</option>
                     </select>
                 </td>
                 <td>

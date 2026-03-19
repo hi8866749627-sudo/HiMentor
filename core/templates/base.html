@@ -221,6 +221,22 @@
             box-shadow: inset -1px 0 0 #c8dafc;
         }
 
+        body.role-admin .lj-sidebar {
+            background: linear-gradient(180deg, #fff6e5 0%, #ffedd1 100%);
+            border-right-color: #f7c98a;
+            box-shadow: inset -1px 0 0 #f3bd73;
+        }
+
+        body.role-admin .menu-group {
+            background: #ffe1b6;
+            color: #8a3b00;
+        }
+
+        body.role-admin .lj-sidebar a:hover {
+            background: #b45309;
+            color: #ffffff;
+        }
+
         .lj-main {
             min-width: 0;
         }
@@ -483,7 +499,7 @@
     </style>
 </head>
 
-<body>
+<body class="{% if request.session.mentor and not admin_mode %}role-mentor{% else %}role-admin{% endif %}">
 
     <nav class="lj-navbar d-flex align-items-center">
         <a href="{{ home_url }}"

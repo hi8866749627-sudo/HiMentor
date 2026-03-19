@@ -109,6 +109,76 @@ body.dark-mode .sa-orange .sa-num{ color:#ffedd5; }
     </div>
 
     <div class="card p-3 mb-3">
+        <h5>Assign Faculty as Module Admin</h5>
+        <form method="post" class="row g-2 align-items-end">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="assign_faculty_admin">
+            <div class="col-md-4">
+                <label class="form-label">Faculty</label>
+                <select name="mentor_id" class="form-select" required>
+                    <option value="">Select faculty</option>
+                    {% for m in all_mentors %}
+                    <option value="{{ m.id }}">{{ m.name }} - {{ m.full_name|default:"-" }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-5">
+                <label class="form-label">Modules</label>
+                <select name="module_ids" class="form-select" multiple required style="max-height:160px;">
+                    {% for m in modules %}
+                    <option value="{{ m.id }}">{{ m.name }}</option>
+                    {% endfor %}
+                </select>
+                <div class="form-text">Select one or more modules to grant admin access.</div>
+            </div>
+            <div class="col-md-3">
+                <button class="btn btn-outline-primary w-100">Assign Admin Access</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="card p-3 mb-3">
+        <h5>Faculty Admin Access List</h5>
+        {% if admin_access_rows %}
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm align-middle">
+                <thead>
+                    <tr>
+                        <th>Faculty</th>
+                        <th>Modules</th>
+                        <th style="width: 120px;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in admin_access_rows %}
+                    <tr>
+                        <td>{{ row.mentor.name }} - {{ row.mentor.full_name|default:"-" }}</td>
+                        <td>
+                            {% for m in row.modules %}
+                            <div class="d-flex align-items-center justify-content-between border rounded px-2 py-1 mb-1">
+                                <span>{{ m.name }}</span>
+                                <form method="post" class="ms-2">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="remove_faculty_admin">
+                                    <input type="hidden" name="mentor_id" value="{{ row.mentor.id }}">
+                                    <input type="hidden" name="module_id" value="{{ m.id }}">
+                                    <button class="btn btn-sm btn-outline-danger">Remove</button>
+                                </form>
+                            </div>
+                            {% endfor %}
+                        </td>
+                        <td class="text-muted small">Use Remove per module</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="alert alert-info mb-0">No faculty admin access assigned yet.</div>
+        {% endif %}
+    </div>
+
+    <div class="card p-3 mb-3">
         <h5>Update SuperAdmin Password</h5>
         <form method="post" class="row g-2">
             {% csrf_token %}
