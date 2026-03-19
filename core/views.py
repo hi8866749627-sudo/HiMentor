@@ -6714,6 +6714,43 @@ def _build_adjustment_rows(
             slot_adjustments_by_lecture.setdefault(item.lecture_no, []).append(item)
     active_adjustment_keys = {(item.batch, item.lecture_no) for item in active_adjustments}
 
+    def _format_adjustment_message(entry_obj, adj_obj, date_val):
+        if not adj_obj:
+            return ""
+        date_text = date_val.strftime("%d-%B-%Y")
+        day_text = date_val.strftime("%A")
+        lecture_text = str(adj_obj.lecture_no or entry_obj.lecture_no or "")
+        batch_text = (adj_obj.batch or entry_obj.batch or "").strip()
+        subject_text = (entry_obj.subject or "").strip()
+        faculty_text = (entry_obj.faculty or "").strip()
+        if adj_obj.adjustment_type == LectureAdjustment.TYPE_PROXY:
+            proxy_subject = (adj_obj.subject or subject_text).strip()
+            proxy_faculty = (adj_obj.proxy_faculty.name if adj_obj.proxy_faculty else "").strip()
+            subject_line = f"{subject_text} ({faculty_text})".strip()
+            proxy_line = f"{proxy_subject} ({proxy_faculty})".strip()
+            return (
+                "Lecture Adjustment Details:\n\n"
+                f"🔵 Batch: {batch_text}\n"
+                f"Date: {date_text}\n"
+                f"Day: {day_text}\n"
+                f"Lecture No: {lecture_text}\n"
+                f"Subject as per TT: {subject_line}\n"
+                f"Proxy Subject: {proxy_line}\n"
+                f"Room No: {adj_obj.room or entry_obj.room}"
+            )
+        if adj_obj.adjustment_type == LectureAdjustment.TYPE_ROOM:
+            subject_line = f"{subject_text}({faculty_text})".strip()
+            return (
+                "🚪 Room Change 🚪\n\n"
+                f"Date: {date_text}\n"
+                f"Day: {day_text.upper()}\n"
+                f"Lecture No: {lecture_text}\n"
+                f"Batch : {batch_text}\n"
+                f"Subject : {subject_line}\n"
+                f"New Room No: {adj_obj.room or entry_obj.room}"
+            )
+        return ""
+
     rows = []
     for entry in entries:
         adj = adjustment_map.get((entry.batch, entry.lecture_no))
@@ -6806,6 +6843,7 @@ def _build_adjustment_rows(
             {
                 "entry": entry,
                 "adjustment": adj,
+                "adjustment_message": _format_adjustment_message(entry, adj, selected_date) if adj else "",
                 "faculties": batch_faculties,
                 "edit_faculties": edit_faculties,
                 "selected_proxy_name": selected_proxy_name,

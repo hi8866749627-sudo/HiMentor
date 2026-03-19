@@ -82,6 +82,15 @@
                 </div>
                 <button class="btn btn-sm btn-outline-primary mb-2 adjustment-toggle" type="button" data-target="edit-proxy" onclick="toggleAdjustmentPanel(this)">Edit Proxy</button>
             {% endif %}
+            {% if row.adjustment_message %}
+                <div class="border rounded p-3 bg-light mb-2">
+                    <div class="d-flex justify-content-between align-items-start gap-2">
+                        <div class="fw-semibold">Share Message</div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary copy-adjustment-btn" data-message="{{ row.adjustment_message|escapejs }}">Copy</button>
+                    </div>
+                    <pre class="small mb-0 mt-2" style="white-space: pre-wrap;">{{ row.adjustment_message }}</pre>
+                </div>
+            {% endif %}
             <form method="post">
                 {% csrf_token %}
                 <input type="hidden" name="action" value="cancel">
@@ -412,6 +421,27 @@ function toggleAdjustmentPanel(button) {
         button.classList.add('btn-primary', 'text-white');
     }
 }
+
+document.querySelectorAll('.copy-adjustment-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+        const text = btn.getAttribute('data-message') || '';
+        if (!text) return;
+        try {
+            await navigator.clipboard.writeText(text);
+            btn.textContent = 'Copied';
+            setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+        } catch (err) {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            btn.textContent = 'Copied';
+            setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+        }
+    });
+});
 </script>
 
 {% endblock %}
