@@ -57,3 +57,31 @@ class ManageMentorsAndAccessTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, "/reports/")
+
+    def test_superadmin_home_shows_full_legacy_backup_button(self):
+        module = create_module()
+        superadmin = create_superadmin()
+        self.client.force_login(superadmin)
+        session = self.client.session
+        session["current_module_id"] = module.id
+        session.save()
+
+        response = self.client.get("/home/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Download Full Legacy Backup')
+        self.assertContains(response, '/live-followup-sheet/db-backup-json/', html=False)
+
+    def test_legacy_backup_download_uses_legacy_filename(self):
+        module = create_module()
+        superadmin = create_superadmin()
+        self.client.force_login(superadmin)
+        session = self.client.session
+        session["current_module_id"] = module.id
+        session.save()
+
+        response = self.client.get("/live-followup-sheet/db-backup-json/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/json")
+        self.assertIn('himentor_legacy_full_backup_', response["Content-Disposition"])

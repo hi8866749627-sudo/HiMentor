@@ -12,7 +12,7 @@
         <a class="btn btn-success btn-sm" href="/live-followup-sheet/excel/?{{ base_q }}">Export as Excel</a>
         <a class="btn btn-danger btn-sm" href="/live-followup-sheet/pdf/?{{ base_q }}">Export as PDF</a>
         {% if is_superadmin_view %}
-        <a class="btn btn-dark btn-sm" href="/live-followup-sheet/db-backup-json/">Download DB Backup (JSON)</a>
+        <a class="btn btn-dark btn-sm" href="/live-followup-sheet/db-backup-json/">Download Full Legacy Backup</a>
         {% endif %}
     </div>
 
@@ -136,3 +136,4 @@
 </div>
 
 {% endblock %}
+

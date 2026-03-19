@@ -3882,7 +3882,7 @@ def live_followup_sheet_db_backup_json(request):
     payload = buffer.getvalue()
     ts = timezone.now().astimezone(IST).strftime("%Y%m%d_%H%M%S")
     response = HttpResponse(payload, content_type="application/json")
-    response["Content-Disposition"] = f'attachment; filename="easymentor_db_backup_{ts}.json"'
+    response["Content-Disposition"] = f'attachment; filename="himentor_legacy_full_backup_{ts}.json"'
     return response
 
 
@@ -9592,3 +9592,4 @@ def manage_mentors_debug(request):
     resp = JsonResponse(payload)
     resp["Cache-Control"] = "no-store"
     return resp
+
