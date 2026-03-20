@@ -1213,11 +1213,14 @@ def superadmin_home(request):
                 else:
                     mentor.is_admin = True
                     mentor.save(update_fields=["is_admin"])
-                    MentorAdminAccess.objects.bulk_create(
-                        [MentorAdminAccess(mentor=mentor, module=m) for m in modules],
-                        ignore_conflicts=True,
-                    )
-                    messages.success(request, f"Admin access assigned for {mentor.name}.")
+                    try:
+                        MentorAdminAccess.objects.bulk_create(
+                            [MentorAdminAccess(mentor=mentor, module=m) for m in modules],
+                            ignore_conflicts=True,
+                        )
+                        messages.success(request, f"Admin access assigned for {mentor.name}.")
+                    except (OperationalError, ProgrammingError):
+                        messages.warning(request, "Admin access table is unavailable. Run migrations first.")
         elif action == "remove_faculty_admin":
             mentor_id = request.POST.get("mentor_id")
             module_id = request.POST.get("module_id")
@@ -1226,11 +1229,14 @@ def superadmin_home(request):
             if not mentor or not module:
                 messages.error(request, "Invalid admin access selection.")
             else:
-                MentorAdminAccess.objects.filter(mentor=mentor, module=module).delete()
-                if not MentorAdminAccess.objects.filter(mentor=mentor).exists():
-                    mentor.is_admin = False
-                    mentor.save(update_fields=["is_admin"])
-                messages.success(request, f"Admin access removed for {mentor.name}.")
+                try:
+                    MentorAdminAccess.objects.filter(mentor=mentor, module=module).delete()
+                    if not MentorAdminAccess.objects.filter(mentor=mentor).exists():
+                        mentor.is_admin = False
+                        mentor.save(update_fields=["is_admin"])
+                    messages.success(request, f"Admin access removed for {mentor.name}.")
+                except (OperationalError, ProgrammingError):
+                    messages.warning(request, "Admin access table is unavailable. Run migrations first.")
 
         return redirect("/home/")
 
@@ -1282,10 +1288,13 @@ def superadmin_home(request):
 
     admin_access_rows = []
     admin_access_map = {}
-    for row in MentorAdminAccess.objects.select_related("mentor", "module").order_by("mentor__name", "module__name"):
-        admin_access_map.setdefault(row.mentor_id, []).append(row.module)
-    for mentor in Mentor.objects.filter(id__in=list(admin_access_map.keys())).order_by("name"):
-        admin_access_rows.append({"mentor": mentor, "modules": admin_access_map.get(mentor.id, [])})
+    try:
+        for row in MentorAdminAccess.objects.select_related("mentor", "module").order_by("mentor__name", "module__name"):
+            admin_access_map.setdefault(row.mentor_id, []).append(row.module)
+        for mentor in Mentor.objects.filter(id__in=list(admin_access_map.keys())).order_by("name"):
+            admin_access_rows.append({"mentor": mentor, "modules": admin_access_map.get(mentor.id, [])})
+    except (OperationalError, ProgrammingError):
+        admin_access_rows = []
 
     student_report_rows = []
     for m in modules:
