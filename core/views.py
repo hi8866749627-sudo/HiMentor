@@ -13,12 +13,15 @@ import logging
 from types import SimpleNamespace
 from datetime import datetime, date, timedelta, time
 from zoneinfo import ZoneInfo
+from django.apps import apps
 from django.core.management import call_command
+from django.core.serializers.json import DjangoJSONEncoder
 
 from django.conf import settings
 from django.shortcuts import render, redirect
-from django.http import JsonResponse, HttpResponse
+from django.http import JsonResponse, HttpResponse, FileResponse
 from django.contrib.auth import authenticate, login
+from django.contrib.auth import get_user_model
 from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -3880,19 +3883,69 @@ def live_followup_sheet_db_backup_json(request):
     if not is_superadmin_user(request.user):
         return HttpResponse("Forbidden", status=403)
 
-    buffer = io.StringIO()
-    call_command(
-        "dumpdata",
-        "auth.user",
-        "core",
-        indent=2,
-        stdout=buffer,
-    )
-    payload = buffer.getvalue()
     ts = timezone.now().astimezone(IST).strftime("%Y%m%d_%H%M%S")
-    response = HttpResponse(payload, content_type="application/json")
-    response["Content-Disposition"] = f'attachment; filename="himentor_legacy_full_backup_{ts}.json"'
-    return response
+    filename = f"himentor_legacy_full_backup_{ts}.zip"
+
+    def export_models():
+        core_models = sorted(
+            [
+                model
+                for model in apps.get_app_config("core").get_models()
+                if not model._meta.auto_created
+            ],
+            key=lambda model: model._meta.label_lower,
+        )
+        return [get_user_model(), *core_models]
+
+    def serialize_instance(obj):
+        fields = {}
+        for field in obj._meta.concrete_fields:
+            if field.primary_key:
+                continue
+            if field.is_relation:
+                fields[field.name] = getattr(obj, field.attname)
+            else:
+                fields[field.name] = field.value_from_object(obj)
+        return {
+            "model": obj._meta.label_lower,
+            "pk": obj.pk,
+            "fields": fields,
+        }
+
+    temp_file = tempfile.SpooledTemporaryFile(max_size=1024 * 1024, mode="w+b")
+    models_to_export = export_models()
+    manifest = {
+        "backup_version": 2,
+        "export_type": "legacy-full-backup",
+        "source_app": "HiMentor",
+        "exported_at": timezone.now().astimezone(IST).isoformat(),
+        "files": [],
+    }
+
+    with zipfile.ZipFile(temp_file, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for model in models_to_export:
+            file_name = f"{model._meta.app_label}.{model._meta.model_name}.jsonl"
+            queryset = model.objects.order_by("pk")
+            manifest["files"].append(
+                {
+                    "file": file_name,
+                    "model": model._meta.label_lower,
+                    "count": queryset.count(),
+                }
+            )
+            with archive.open(file_name, "w") as handle:
+                for obj in queryset.iterator(chunk_size=500):
+                    row = json.dumps(serialize_instance(obj), cls=DjangoJSONEncoder).encode("utf-8")
+                    handle.write(row + b"\n")
+        archive.writestr("backup_manifest.json", json.dumps(manifest, indent=2, cls=DjangoJSONEncoder))
+
+    temp_file.seek(0)
+    return FileResponse(
+        temp_file,
+        as_attachment=True,
+        filename=filename,
+        content_type="application/zip",
+    )
 
 
 @admin_or_mentor_admin_required

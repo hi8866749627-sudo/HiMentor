@@ -83,5 +83,5 @@ class ManageMentorsAndAccessTests(TestCase):
         response = self.client.get("/live-followup-sheet/db-backup-json/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response["Content-Type"], "application/json")
+        self.assertEqual(response["Content-Type"], "application/zip")
         self.assertIn('himentor_legacy_full_backup_', response["Content-Disposition"])
