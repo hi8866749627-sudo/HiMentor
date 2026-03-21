@@ -3,6 +3,7 @@ from datetime import time
 from django.utils import timezone
 from django.contrib.auth.models import User
 from django.contrib.auth.hashers import make_password, check_password
+from django.core.exceptions import ValidationError
 
 
 class AcademicModule(models.Model):
@@ -36,6 +37,13 @@ class AcademicModule(models.Model):
     year_level = models.CharField(max_length=10, choices=YEAR_CHOICES, default="FY")
     variant = models.CharField(max_length=20, choices=VARIANT_CHOICES, default="FY2-CE")
     semester = models.CharField(max_length=10, choices=SEM_CHOICES, default="Sem-1")
+    year_scope = models.ForeignKey(
+        "YearScope",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="modules",
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -44,6 +52,72 @@ class AcademicModule(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class University(models.Model):
+    name = models.CharField(max_length=150, unique=True)
+    code = models.CharField(max_length=30, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["code"],
+                condition=~models.Q(code=""),
+                name="core_university_unique_code",
+            ),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class College(models.Model):
+    university = models.ForeignKey(University, on_delete=models.CASCADE, related_name="colleges")
+    name = models.CharField(max_length=150)
+    code = models.CharField(max_length=30, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(fields=["university", "name"], name="core_college_unique_university_name"),
+            models.UniqueConstraint(
+                fields=["university", "code"],
+                condition=~models.Q(code=""),
+                name="core_college_unique_university_code",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.university.name})"
+
+
+class YearScope(models.Model):
+    YEAR_CHOICES = [
+        ("FY", "FY"),
+        ("SY", "SY"),
+        ("TY", "TY"),
+        ("LY", "LY"),
+    ]
+
+    college = models.ForeignKey(College, on_delete=models.CASCADE, related_name="year_scopes")
+    year_code = models.CharField(max_length=10, choices=YEAR_CHOICES)
+    title = models.CharField(max_length=100, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["college__name", "year_code"]
+        constraints = [
+            models.UniqueConstraint(fields=["college", "year_code"], name="core_yearscope_unique_college_year"),
+        ]
+
+    def __str__(self):
+        return f"{self.college.name} - {self.year_code}"
 
 
 # ------------------ MENTOR ------------------
@@ -514,6 +588,106 @@ class CoordinatorModuleAccess(models.Model):
         return f"{self.coordinator.username} -> {self.module.name}"
 
 
+class RoleAssignment(models.Model):
+    ROLE_ERP_OWNER = "erp_owner"
+    ROLE_UNIVERSITY_HEAD = "university_head"
+    ROLE_COLLEGE_HEAD = "college_head"
+    ROLE_YEAR_HEAD = "year_head"
+    ROLE_COORDINATOR = "coordinator"
+    ROLE_CHOICES = [
+        (ROLE_ERP_OWNER, "ERP Owner"),
+        (ROLE_UNIVERSITY_HEAD, "University Head"),
+        (ROLE_COLLEGE_HEAD, "College Head"),
+        (ROLE_YEAR_HEAD, "Year Head"),
+        (ROLE_COORDINATOR, "Coordinator"),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="role_assignments")
+    role = models.CharField(max_length=40, choices=ROLE_CHOICES)
+    university = models.ForeignKey(
+        University,
+        on_delete=models.CASCADE,
+        related_name="role_assignments",
+        null=True,
+        blank=True,
+    )
+    college = models.ForeignKey(
+        College,
+        on_delete=models.CASCADE,
+        related_name="role_assignments",
+        null=True,
+        blank=True,
+    )
+    year_scope = models.ForeignKey(
+        YearScope,
+        on_delete=models.CASCADE,
+        related_name="role_assignments",
+        null=True,
+        blank=True,
+    )
+    module = models.ForeignKey(
+        AcademicModule,
+        on_delete=models.CASCADE,
+        related_name="role_assignments",
+        null=True,
+        blank=True,
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["user__username", "role", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "role", "university"],
+                name="core_roleassignment_unique_user_role_university",
+            ),
+            models.UniqueConstraint(
+                fields=["user", "role", "college"],
+                name="core_roleassignment_unique_user_role_college",
+            ),
+            models.UniqueConstraint(
+                fields=["user", "role", "year_scope"],
+                name="core_roleassignment_unique_user_role_yearscope",
+            ),
+            models.UniqueConstraint(
+                fields=["user", "role", "module"],
+                name="core_roleassignment_unique_user_role_module",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username} - {self.role}"
+
+    def clean(self):
+        scope_map = {
+            "university": bool(self.university_id),
+            "college": bool(self.college_id),
+            "year_scope": bool(self.year_scope_id),
+            "module": bool(self.module_id),
+        }
+        expected_scope = {
+            self.ROLE_ERP_OWNER: None,
+            self.ROLE_UNIVERSITY_HEAD: "university",
+            self.ROLE_COLLEGE_HEAD: "college",
+            self.ROLE_YEAR_HEAD: "year_scope",
+            self.ROLE_COORDINATOR: "module",
+        }[self.role]
+
+        if expected_scope is None:
+            if any(scope_map.values()):
+                raise ValidationError("ERP Owner must not be scoped to a university, college, year, or module.")
+            return
+
+        if not scope_map[expected_scope]:
+            raise ValidationError(f"{self.get_role_display()} requires a {expected_scope} scope.")
+
+        extra_scopes = [name for name, is_set in scope_map.items() if name != expected_scope and is_set]
+        if extra_scopes:
+            extras = ", ".join(extra_scopes)
+            raise ValidationError(f"{self.get_role_display()} cannot include extra scopes: {extras}.")
+
+
 class MentorModuleAccess(models.Model):
     mentor = models.ForeignKey(Mentor, on_delete=models.CASCADE, related_name="module_accesses")
     module = models.ForeignKey(AcademicModule, on_delete=models.CASCADE, related_name="mentor_module_accesses")
@@ -640,6 +814,173 @@ class ResultUpload(models.Model):
 
     def __str__(self):
         return f"{self.test_name} - {self.subject.name}"
+
+
+class ExamFacultyProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="exam_faculty_profile")
+    mentor = models.OneToOneField(
+        Mentor,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="exam_faculty_profile",
+    )
+    short_code = models.CharField(max_length=10, unique=True)
+    full_name = models.CharField(max_length=120, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["short_code"]
+
+    def __str__(self):
+        return self.short_code
+
+
+class ModuleExamManager(models.Model):
+    module = models.ForeignKey(AcademicModule, on_delete=models.CASCADE, related_name="exam_managers")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="managed_exam_modules")
+    assigned_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_exam_managers",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("module", "user")
+        ordering = ["module__name", "user__username"]
+
+    def __str__(self):
+        return f"{self.module.name} -> {self.user.username}"
+
+
+class ModuleExamSession(models.Model):
+    module = models.ForeignKey(AcademicModule, on_delete=models.CASCADE, related_name="exam_sessions")
+    test_name = models.CharField(max_length=20, choices=TEST_CHOICES)
+    title = models.CharField(max_length=120, blank=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_exam_sessions",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("module", "test_name")
+        ordering = ["module__name", "test_name"]
+
+    def __str__(self):
+        return f"{self.module.name} - {self.test_name}"
+
+
+class ExamTimetableEntry(models.Model):
+    session = models.ForeignKey(ModuleExamSession, on_delete=models.CASCADE, related_name="entries")
+    subject = models.ForeignKey(Subject, on_delete=models.PROTECT, related_name="exam_entries")
+    exam_date = models.DateField()
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    entry_deadline = models.DateTimeField()
+    max_marks = models.DecimalField(max_digits=5, decimal_places=1, default=25)
+    pass_marks = models.DecimalField(max_digits=5, decimal_places=1, default=9)
+    total_pass_marks = models.DecimalField(max_digits=5, decimal_places=1, default=9)
+    is_locked = models.BooleanField(default=False)
+    lock_message = models.CharField(max_length=255, blank=True)
+    locked_at = models.DateTimeField(null=True, blank=True)
+    locked_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="locked_exam_entries",
+    )
+    published_upload = models.ForeignKey(
+        "ResultUpload",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="published_exam_entries",
+    )
+    published_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("session", "subject")
+        ordering = ["exam_date", "start_time", "subject__name"]
+
+    def __str__(self):
+        return f"{self.session} - {self.subject.name}"
+
+
+class ExamBlock(models.Model):
+    TYPE_ENROLLMENT_RANGE = "range"
+    TYPE_BATCH = "batch"
+    TYPE_MANUAL = "manual"
+    TYPE_CHOICES = [
+        (TYPE_ENROLLMENT_RANGE, "Enrollment Range"),
+        (TYPE_BATCH, "Batch"),
+        (TYPE_MANUAL, "Manual"),
+    ]
+
+    timetable_entry = models.ForeignKey(ExamTimetableEntry, on_delete=models.CASCADE, related_name="blocks")
+    evaluator = models.ForeignKey(User, on_delete=models.CASCADE, related_name="exam_blocks")
+    block_type = models.CharField(max_length=12, choices=TYPE_CHOICES)
+    name = models.CharField(max_length=120)
+    batch = models.CharField(max_length=20, blank=True)
+    enrollment_start = models.CharField(max_length=20, blank=True)
+    enrollment_end = models.CharField(max_length=20, blank=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_exam_blocks",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["timetable_entry__exam_date", "name", "id"]
+
+    def __str__(self):
+        return f"{self.timetable_entry} - {self.name}"
+
+
+class ExamBlockStudent(models.Model):
+    block = models.ForeignKey(ExamBlock, on_delete=models.CASCADE, related_name="student_links")
+    student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name="exam_block_links")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("block", "student")
+        ordering = ["student__roll_no", "student__name"]
+
+    def __str__(self):
+        return f"{self.block.name} - {self.student.enrollment}"
+
+
+class ExamMarkEntry(models.Model):
+    timetable_entry = models.ForeignKey(ExamTimetableEntry, on_delete=models.CASCADE, related_name="mark_entries")
+    block = models.ForeignKey(ExamBlock, on_delete=models.CASCADE, related_name="mark_entries")
+    student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name="exam_mark_entries")
+    evaluator = models.ForeignKey(User, on_delete=models.CASCADE, related_name="exam_mark_entries")
+    raw_value = models.CharField(max_length=20, blank=True)
+    marks_obtained = models.DecimalField(max_digits=5, decimal_places=1, null=True, blank=True)
+    is_absent = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+    submitted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("timetable_entry", "student", "block")
+        ordering = ["student__roll_no", "student__name"]
+
+    def __str__(self):
+        return f"{self.timetable_entry} - {self.student.enrollment}"
 
 
 class StudentResult(models.Model):

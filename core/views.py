@@ -36,7 +36,7 @@ from django.views.decorators.http import require_http_methods
 from django.http import JsonResponse
 from django.db.models import Max, Case, When, IntegerField, Value 
 from django.db.models import Q
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from django.core.paginator import Paginator
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font, Alignment
@@ -66,6 +66,7 @@ from .models import (
     MentorHomeSetting,
     OtherCallRecord,
     PracticalMarkUpload,
+    RoleAssignment,
     SifMarksLock,
     ResultCallRecord,
     ResultUpload,
@@ -81,9 +82,12 @@ from .models import (
     TimetableChangeLog,
     LectureSession,
     LectureAbsence,
+    College,
     Room,
     LectureAdjustment,
+    University,
     WeekLock,
+    YearScope,
 )
 
 # ---------- LOCAL UTILITIES ----------
@@ -100,7 +104,28 @@ from .lecture_utils import (
 from .result_utils import import_compiled_bulk_all, import_compiled_result_sheet, import_result_sheet
 from .practical_utils import import_practical_marks, ordered_subjects
 from .pdf_report import generate_student_pdf, generate_student_prefilled_pdf
-from .module_utils import allowed_modules_for_user, get_current_module, is_superadmin_user, get_mentor_home_url
+from .module_utils import (
+    allowed_modules_for_user,
+    get_current_module,
+    get_mentor_home_url,
+    get_staff_home_url,
+    has_staff_panel_access,
+    is_legacy_admin_user,
+)
+from .access import (
+    can_manage_college,
+    can_manage_year_scope,
+    can_manage_university,
+    colleges_for_user,
+    is_college_head,
+    is_erp_owner,
+    is_year_head,
+    is_university_head,
+    is_scoped_admin_user,
+    modules_for_user,
+    universities_for_user,
+    year_scopes_for_user,
+)
 
 TEST_NAMES = ["T1", "T2", "T3", "T4", "REMEDIAL"]
 IST = ZoneInfo("Asia/Kolkata")
@@ -163,6 +188,58 @@ def _active_module(request):
     return get_current_module(request)
 
 
+def _selected_allowed_module(request, module_param="module_id", year_scope_param="year_scope_id", source=None):
+    params = request.GET
+    if source == "POST":
+        params = request.POST
+    allowed_qs = allowed_modules_for_user(request).filter(is_active=True)
+    allowed_modules = list(allowed_qs)
+    requested_year_scope_id = (params.get(year_scope_param) or "").strip()
+    requested_module_id = (params.get(module_param) or "").strip()
+    module_choices = allowed_modules
+
+    if requested_year_scope_id.isdigit():
+        scoped_modules = [m for m in allowed_modules if m.year_scope_id == int(requested_year_scope_id)]
+        if not scoped_modules:
+            return None, allowed_modules, True
+        module_choices = scoped_modules
+
+    if requested_module_id:
+        for candidate in module_choices:
+            if str(candidate.id) == requested_module_id:
+                return candidate, module_choices, False
+        return None, module_choices, True
+
+    current_module = _active_module(request)
+    if current_module:
+        for candidate in module_choices:
+            if candidate.id == current_module.id:
+                return candidate, module_choices, False
+
+    if module_choices:
+        return module_choices[0], module_choices, False
+
+    return current_module, allowed_modules, False
+
+
+def _module_scope_summary(module, **counts):
+    year_scope = getattr(module, "year_scope", None)
+    college = getattr(year_scope, "college", None) if year_scope else None
+    university = getattr(college, "university", None) if college else None
+    summary = {
+        "module_name": getattr(module, "name", ""),
+        "year_code": getattr(year_scope, "year_code", ""),
+        "college_name": getattr(college, "name", ""),
+        "university_name": getattr(university, "name", ""),
+    }
+    summary.update(counts)
+    return summary
+
+
+def _is_subject_library_admin(user):
+    return bool(is_erp_owner(user) or is_legacy_admin_user(user))
+
+
 def _latest_attendance_calls_map(module, week_no, mentor=None):
     qs = CallRecord.objects.filter(student__module=module, week_no=week_no).select_related("student", "student__mentor")
     if mentor:
@@ -199,11 +276,11 @@ def _upload_fail_student_ids(upload):
     )
 
 
-def _require_superadmin(request):
+def _require_admin_panel_access(request):
     if not request.user.is_authenticated or request.session.get("mentor"):
         return JsonResponse({"ok": False, "msg": "Unauthorized"}, status=401)
-    if not is_superadmin_user(request.user):
-        return JsonResponse({"ok": False, "msg": "SuperAdmin only"}, status=403)
+    if not has_staff_panel_access(request.user):
+        return JsonResponse({"ok": False, "msg": "Admin access required"}, status=403)
     return None
 
 
@@ -851,9 +928,7 @@ def login_page(request):
             login(request, user)
             request.session.pop("mentor", None)
             _active_module(request)
-            if is_superadmin_user(user):
-                return redirect("/home/")
-            return redirect("/reports/")
+            return redirect(get_staff_home_url(user))
 
         # mentor login supports both legacy and new scheme:
         # - legacy: mentor@LJ123
@@ -887,17 +962,20 @@ def manage_mentors(request):
             return redirect("/mentor-dashboard/")
 
         mentor_obj = _session_mentor_obj(request)
-        module = _active_module(request)
+        module, module_choices, invalid_module = _selected_allowed_module(request)
+        if invalid_module:
+            return HttpResponse("Unauthorized", status=403)
+        selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
         if not module or not AcademicModule.objects.filter(id=module.id).exists():
             module = AcademicModule.objects.filter(is_active=True).order_by("-id").first()
         if module:
             request.session["current_module_id"] = module.id
-        if request.user.is_authenticated and is_superadmin_user(request.user):
+        if request.user.is_authenticated and has_staff_panel_access(request.user):
             if request.GET.get("no_auto") != "1":
                 has_timetable = TimetableEntry.objects.filter(module=module, is_active=True).exists()
                 has_students = Student.objects.filter(module=module).exists()
                 if not has_timetable and not has_students:
-                    for candidate in allowed_modules_for_user(request):
+                    for candidate in module_choices:
                         if candidate.id == module.id:
                             continue
                         cand_has_timetable = TimetableEntry.objects.filter(
@@ -906,15 +984,14 @@ def manage_mentors(request):
                         cand_has_students = Student.objects.filter(module=candidate).exists()
                         if cand_has_timetable or cand_has_students:
                             request.session["current_module_id"] = candidate.id
-                            return redirect(f"/manage-mentors/?no_auto=1")
+                            redirect_url = f"/manage-mentors/?module_id={candidate.id}&no_auto=1"
+                            if selected_year_scope_id:
+                                redirect_url += f"&year_scope_id={selected_year_scope_id}"
+                            return redirect(redirect_url)
         _ensure_active_timetable(module)
         modules_in_scope = []
         if request.user.is_authenticated:
-            modules_in_scope = list(
-                AcademicModule.objects.filter(is_active=True, coordinator_accesses__coordinator=request.user)
-                .distinct()
-                .order_by("-id")
-            )
+            modules_in_scope = list(allowed_modules_for_user(request))
         elif mentor_obj and mentor_obj.is_admin:
             modules_in_scope = list(
                 AcademicModule.objects.filter(is_active=True, mentor_admins__mentor=mentor_obj)
@@ -947,13 +1024,14 @@ def manage_mentors(request):
             )
 
         if request.method == "POST":
+            redirect_response = _redirect_with_current_query(request, "/manage-mentors/", ["module_id", "year_scope_id", "debug", "format", "no_auto"])
             action = (request.POST.get("action") or "").strip()
             mentor_id = request.POST.get("mentor_id")
             mentor = Mentor.objects.filter(id=mentor_id).first() if mentor_id else None
             allowed_ids = set(_current_mentors_qs().values_list("id", flat=True))
             if not mentor or mentor.id not in allowed_ids:
                 messages.error(request, "Mentor not found for current module.")
-                return redirect("/manage-mentors/")
+                return redirect_response
 
             if action == "update_password":
                 new_password = (request.POST.get("new_password") or "").strip()
@@ -1025,7 +1103,7 @@ def manage_mentors(request):
                 messages.success(request, f"{mentor.name} removed from this department.")
             else:
                 messages.error(request, "Invalid action.")
-            return redirect("/manage-mentors/")
+            return redirect_response
 
         mentors = _current_mentors_qs()
         fallback_ids = set()
@@ -1088,7 +1166,14 @@ def manage_mentors(request):
             {
                 "rows": rows,
                 "module": module,
-                "modules": modules_in_scope or [module],
+                "module_choices": module_choices or modules_in_scope or [module],
+                "selected_module_id": str(module.id) if module else "",
+                "selected_year_scope_id": selected_year_scope_id,
+                "scope_summary": _module_scope_summary(
+                    module,
+                    mentors=len(rows),
+                    students=Student.objects.filter(module=module).count(),
+                ),
                 "debug": debug,
             },
         )
@@ -1103,20 +1188,34 @@ def manage_mentors(request):
         response = render(
             request,
             "manage_mentors.html",
-            {"rows": [], "module": module, "modules": [module]},
+            {
+                "rows": [],
+                "module": module,
+                "module_choices": [module] if module else [],
+                "selected_module_id": str(module.id) if module else "",
+                "selected_year_scope_id": (request.GET.get("year_scope_id") or "").strip(),
+                "scope_summary": _module_scope_summary(module, mentors=0, students=0) if module else {},
+            },
         )
         _finish_perf(request, perf_state, extra="fallback=migration_error")
         return response
 
 
 @login_required
-def superadmin_home(request):
+def admin_home(request):
     if request.session.get("mentor"):
         return redirect("/mentor-dashboard/")
-    if not is_superadmin_user(request.user):
+    if not has_staff_panel_access(request.user):
         return redirect("/reports/")
+    preferred_home_url = get_staff_home_url(request.user)
+    if preferred_home_url != "/home/":
+        return redirect(preferred_home_url)
+    modules = list(allowed_modules_for_user(request))
+    active_modules = [m for m in modules if m.is_active]
+    active_module_ids = [m.id for m in active_modules]
 
     if request.method == "POST":
+        redirect_response = _redirect_with_current_query(request, "/home/")
         action = (request.POST.get("action") or "").strip()
         if action == "create":
             coordinator_name = (request.POST.get("coordinator_name") or "").strip()
@@ -1160,15 +1259,15 @@ def superadmin_home(request):
             else:
                 if not username:
                     messages.error(request, "Username is required.")
-                    return redirect("/home/")
+                    return redirect_response
                 username_exists = User.objects.filter(username__iexact=username).exclude(id=coordinator.id).exists()
                 if username_exists:
                     messages.error(request, "Username already exists.")
-                    return redirect("/home/")
+                    return redirect_response
                 modules = list(AcademicModule.objects.filter(id__in=module_ids))
                 if not modules:
                     messages.error(request, "Select at least one module.")
-                    return redirect("/home/")
+                    return redirect_response
                 coordinator.username = username
                 coordinator.first_name = coordinator_name
                 coordinator.is_active = active_val
@@ -1191,7 +1290,7 @@ def superadmin_home(request):
                 CoordinatorModuleAccess.objects.filter(coordinator=coordinator).delete()
                 coordinator.delete()
                 messages.success(request, "Coordinator deleted.")
-        elif action == "change_super_password":
+        elif action in {"change_admin_password", "change_super_password"}:
             current_password = (request.POST.get("current_password") or "").strip()
             new_password = (request.POST.get("new_password") or "").strip()
             if not request.user.check_password(current_password):
@@ -1216,14 +1315,11 @@ def superadmin_home(request):
                 else:
                     mentor.is_admin = True
                     mentor.save(update_fields=["is_admin"])
-                    try:
-                        MentorAdminAccess.objects.bulk_create(
-                            [MentorAdminAccess(mentor=mentor, module=m) for m in modules],
-                            ignore_conflicts=True,
-                        )
-                        messages.success(request, f"Admin access assigned for {mentor.name}.")
-                    except (OperationalError, ProgrammingError):
-                        messages.warning(request, "Admin access table is unavailable. Run migrations first.")
+                    MentorAdminAccess.objects.bulk_create(
+                        [MentorAdminAccess(mentor=mentor, module=m) for m in modules],
+                        ignore_conflicts=True,
+                    )
+                    messages.success(request, f"Admin access assigned for {mentor.name}.")
         elif action == "remove_faculty_admin":
             mentor_id = request.POST.get("mentor_id")
             module_id = request.POST.get("module_id")
@@ -1232,21 +1328,41 @@ def superadmin_home(request):
             if not mentor or not module:
                 messages.error(request, "Invalid admin access selection.")
             else:
-                try:
-                    MentorAdminAccess.objects.filter(mentor=mentor, module=module).delete()
-                    if not MentorAdminAccess.objects.filter(mentor=mentor).exists():
-                        mentor.is_admin = False
-                        mentor.save(update_fields=["is_admin"])
-                    messages.success(request, f"Admin access removed for {mentor.name}.")
-                except (OperationalError, ProgrammingError):
-                    messages.warning(request, "Admin access table is unavailable. Run migrations first.")
+                MentorAdminAccess.objects.filter(mentor=mentor, module=module).delete()
+                if not MentorAdminAccess.objects.filter(mentor=mentor).exists():
+                    mentor.is_admin = False
+                    mentor.save(update_fields=["is_admin"])
+                messages.success(request, f"Admin access removed for {mentor.name}.")
+        elif action == "delete_scoped_coordinator":
+            coord_id = request.POST.get("coordinator_id")
+            coordinator = User.objects.filter(id=coord_id, is_superuser=False).first()
+            if not coordinator:
+                messages.error(request, "Coordinator not found.")
+            else:
+                assigned_module_ids = set(
+                    CoordinatorModuleAccess.objects.filter(coordinator=coordinator).values_list("module_id", flat=True)
+                )
+                if not assigned_module_ids or not assigned_module_ids.issubset(set(active_module_ids)):
+                    messages.error(request, "Coordinator is outside your year scope.")
+                else:
+                    CoordinatorModuleAccess.objects.filter(coordinator=coordinator).delete()
+                    coordinator.delete()
+                    messages.success(request, "Coordinator deleted.")
+        elif action == "delete_scoped_module":
+            module_id = request.POST.get("module_id")
+            module = AcademicModule.objects.filter(id=module_id, id__in=active_module_ids).first()
+            if not module:
+                messages.error(request, "Module not found in your year scope.")
+            else:
+                module.delete()
+                messages.success(request, "Module deleted.")
 
-        return redirect("/home/")
-
-    modules = list(AcademicModule.objects.all().order_by("-id"))
-    active_modules = [m for m in modules if m.is_active]
-    active_module_ids = [m.id for m in active_modules]
-    coordinators = User.objects.filter(is_superuser=False).order_by("username")
+        return redirect_response
+    coordinators = (
+        User.objects.filter(is_superuser=False, module_accesses__module__in=active_modules)
+        .distinct()
+        .order_by("username")
+    )
     coordinator_rows = []
     for c in coordinators:
         mapped = list(
@@ -1291,13 +1407,10 @@ def superadmin_home(request):
 
     admin_access_rows = []
     admin_access_map = {}
-    try:
-        for row in MentorAdminAccess.objects.select_related("mentor", "module").order_by("mentor__name", "module__name"):
-            admin_access_map.setdefault(row.mentor_id, []).append(row.module)
-        for mentor in Mentor.objects.filter(id__in=list(admin_access_map.keys())).order_by("name"):
-            admin_access_rows.append({"mentor": mentor, "modules": admin_access_map.get(mentor.id, [])})
-    except (OperationalError, ProgrammingError):
-        admin_access_rows = []
+    for row in MentorAdminAccess.objects.select_related("mentor", "module").order_by("mentor__name", "module__name"):
+        admin_access_map.setdefault(row.mentor_id, []).append(row.module)
+    for mentor in Mentor.objects.filter(id__in=list(admin_access_map.keys())).order_by("name"):
+        admin_access_rows.append({"mentor": mentor, "modules": admin_access_map.get(mentor.id, [])})
 
     student_report_rows = []
     for m in modules:
@@ -1312,6 +1425,33 @@ def superadmin_home(request):
                 "practical_uploads": PracticalMarkUpload.objects.filter(module=m).count(),
             }
         )
+    show_global_coordinator_management = bool(
+        is_erp_owner(request.user) or is_legacy_admin_user(request.user)
+    )
+    show_global_module_setup = show_global_coordinator_management
+    show_scoped_year_actions = bool(
+        is_year_head(request.user) and not is_legacy_admin_user(request.user)
+    )
+    year_scope_rows = []
+    if show_scoped_year_actions:
+        year_scopes = list(
+            year_scopes_for_user(request.user)
+            .select_related("college", "college__university")
+            .order_by("college__name", "year_code")
+        )
+        for year_scope in year_scopes:
+            scoped_module_ids = [m.id for m in active_modules if m.year_scope_id == year_scope.id]
+            year_scope_rows.append(
+                {
+                    "year_scope": year_scope,
+                    "module_count": len(scoped_module_ids),
+                    "primary_module_id": scoped_module_ids[0] if scoped_module_ids else "",
+                    "coordinator_count": User.objects.filter(
+                        is_superuser=False,
+                        module_accesses__module_id__in=scoped_module_ids,
+                    ).distinct().count(),
+                }
+            )
 
     return render(
         request,
@@ -1325,6 +1465,1431 @@ def superadmin_home(request):
             "all_mentors": all_mentors,
             "admin_access_rows": admin_access_rows,
             "student_report_rows": student_report_rows,
+            "show_org_setup_link": bool(is_scoped_admin_user(request.user)),
+            "show_global_coordinator_management": show_global_coordinator_management,
+            "show_global_module_setup": show_global_module_setup,
+            "show_scoped_year_actions": show_scoped_year_actions,
+            "year_scope_rows": year_scope_rows,
+            "is_owner_dashboard": bool(is_erp_owner(request.user)),
+            "is_year_head_dashboard": bool(is_year_head(request.user) and not is_legacy_admin_user(request.user)),
+            "is_legacy_admin_dashboard": bool(is_legacy_admin_user(request.user)),
+        },
+    )
+
+
+def _paginate_list(request, items, param_name, per_page=10):
+    paginator = Paginator(items, per_page)
+    return paginator.get_page(request.GET.get(param_name) or 1)
+
+
+def _redirect_with_current_query(request, base_path, allowed_keys=None):
+    allowed = set(allowed_keys or [])
+    query_items = []
+    for key in allowed:
+        values = request.GET.getlist(key)
+        for value in values:
+            if value:
+                query_items.append((key, value))
+    redirect_url = base_path
+    if query_items:
+        redirect_url = f"{base_path}?{urlencode(query_items, doseq=True)}"
+    return_anchor = (request.POST.get("return_anchor") or "").strip().lstrip("#")
+    if return_anchor and re.fullmatch(r"[A-Za-z0-9_-]+", return_anchor):
+        redirect_url = f"{redirect_url}#{return_anchor}"
+    return redirect(redirect_url)
+
+
+@login_required
+def org_setup(request):
+    if request.session.get("mentor"):
+        return redirect("/mentor-dashboard/")
+    if not (is_erp_owner(request.user) or is_university_head(request.user) or is_college_head(request.user) or is_year_head(request.user)):
+        return HttpResponse("Forbidden", status=403)
+
+    if request.method == "POST":
+        redirect_response = _redirect_with_current_query(
+            request,
+            "/org-setup/",
+            ["q", "university_id", "college_id", "year_scope_id", "universities_page", "colleges_page", "years_page", "coordinators_page"],
+        )
+        action = (request.POST.get("action") or "").strip()
+
+        if action == "create_university":
+            if not is_erp_owner(request.user):
+                messages.error(request, "Only ERP Owner can create universities.")
+                return redirect_response
+            name = (request.POST.get("name") or "").strip()
+            code = (request.POST.get("code") or "").strip().upper()
+            if not name:
+                messages.error(request, "University name is required.")
+            else:
+                university, created = University.objects.get_or_create(
+                    name=name,
+                    defaults={"code": code, "is_active": True},
+                )
+                if not created and code and university.code != code:
+                    university.code = code
+                    university.save(update_fields=["code"])
+                messages.success(request, "University saved.")
+            return redirect_response
+
+        if action == "create_college":
+            university_id = request.POST.get("university_id")
+            university = University.objects.filter(id=university_id, is_active=True).first()
+            if not university or not can_manage_university(request.user, university):
+                messages.error(request, "University not allowed.")
+                return redirect_response
+            name = (request.POST.get("name") or "").strip()
+            code = (request.POST.get("code") or "").strip().upper()
+            if not name:
+                messages.error(request, "College name is required.")
+            else:
+                College.objects.get_or_create(
+                    university=university,
+                    name=name,
+                    defaults={"code": code, "is_active": True},
+                )
+                messages.success(request, "College saved.")
+            return redirect_response
+
+        if action == "create_year_scope":
+            college_id = request.POST.get("college_id")
+            college = College.objects.filter(id=college_id, is_active=True).select_related("university").first()
+            if not college or not can_manage_college(request.user, college):
+                messages.error(request, "College not allowed.")
+                return redirect_response
+            year_code = (request.POST.get("year_code") or "").strip().upper()
+            title = (request.POST.get("title") or "").strip()
+            valid_years = {code for code, _ in YearScope.YEAR_CHOICES}
+            if year_code not in valid_years:
+                messages.error(request, "Valid year is required.")
+            else:
+                YearScope.objects.get_or_create(
+                    college=college,
+                    year_code=year_code,
+                    defaults={"title": title or year_code, "is_active": True},
+                )
+                messages.success(request, "Year scope saved.")
+            return redirect_response
+
+        if action == "assign_university_head":
+            if not is_erp_owner(request.user):
+                messages.error(request, "Only ERP Owner can assign University Heads.")
+                return redirect_response
+            user_id = request.POST.get("user_id")
+            university_id = request.POST.get("university_id")
+            target_user = User.objects.filter(id=user_id, is_active=True).first()
+            university = University.objects.filter(id=university_id, is_active=True).first()
+            if not target_user or not university:
+                messages.error(request, "Valid user and university are required.")
+            else:
+                RoleAssignment.objects.get_or_create(
+                    user=target_user,
+                    role=RoleAssignment.ROLE_UNIVERSITY_HEAD,
+                    university=university,
+                    defaults={"is_active": True},
+                )
+                messages.success(request, "University Head assigned.")
+            return redirect_response
+
+        if action == "assign_college_head":
+            if not is_erp_owner(request.user):
+                messages.error(request, "Only ERP Owner can assign College Heads.")
+                return redirect_response
+            user_id = request.POST.get("user_id")
+            college_id = request.POST.get("college_id")
+            target_user = User.objects.filter(id=user_id, is_active=True).first()
+            college = College.objects.filter(id=college_id, is_active=True).first()
+            if not target_user or not college:
+                messages.error(request, "Valid user and college are required.")
+            else:
+                RoleAssignment.objects.get_or_create(
+                    user=target_user,
+                    role=RoleAssignment.ROLE_COLLEGE_HEAD,
+                    college=college,
+                    defaults={"is_active": True},
+                )
+                messages.success(request, "College Head assigned.")
+            return redirect_response
+
+        if action == "assign_year_head":
+            user_id = request.POST.get("user_id")
+            year_scope_id = request.POST.get("year_scope_id")
+            target_user = User.objects.filter(id=user_id, is_active=True).first()
+            year_scope = YearScope.objects.filter(id=year_scope_id, is_active=True).select_related("college").first()
+            if not target_user or not year_scope:
+                messages.error(request, "Valid user and year are required.")
+                return redirect_response
+            if not (is_erp_owner(request.user) or can_manage_college(request.user, year_scope.college)):
+                messages.error(request, "Year scope not allowed.")
+                return redirect_response
+            RoleAssignment.objects.get_or_create(
+                user=target_user,
+                role=RoleAssignment.ROLE_YEAR_HEAD,
+                year_scope=year_scope,
+                defaults={"is_active": True},
+            )
+            messages.success(request, "Year Head assigned.")
+            return redirect_response
+
+        if action == "create_coordinator":
+            year_scope_ids = set(year_scopes_for_user(request.user).values_list("id", flat=True))
+            if not year_scope_ids:
+                messages.error(request, "No year scope available for coordinator assignment.")
+                return redirect_response
+            coordinator_name = (request.POST.get("coordinator_name") or "").strip()
+            username = (request.POST.get("username") or "").strip()
+            password = (request.POST.get("password") or "").strip()
+            module_ids = [x for x in request.POST.getlist("module_ids") if str(x).isdigit()]
+            modules = list(
+                AcademicModule.objects.filter(id__in=module_ids, is_active=True, year_scope_id__in=year_scope_ids)
+            )
+            if not coordinator_name or not username or not password:
+                messages.error(request, "Coordinator name, username and password are required.")
+            elif User.objects.filter(username__iexact=username).exists():
+                messages.error(request, "Coordinator username already exists.")
+            elif not modules:
+                messages.error(request, "Select at least one valid module.")
+            else:
+                coordinator = User.objects.create_user(
+                    username=username,
+                    password=password,
+                    first_name=coordinator_name,
+                    is_active=True,
+                    is_staff=False,
+                    is_superuser=False,
+                )
+                CoordinatorModuleAccess.objects.bulk_create(
+                    [CoordinatorModuleAccess(coordinator=coordinator, module=m) for m in modules],
+                    ignore_conflicts=True,
+                )
+                messages.success(request, "Coordinator created.")
+            return redirect_response
+
+        if action == "remap_coordinator":
+            year_scope_ids = set(year_scopes_for_user(request.user).values_list("id", flat=True))
+            coordinator_id = request.POST.get("coordinator_id")
+            module_ids = [x for x in request.POST.getlist("module_ids") if str(x).isdigit()]
+            coordinator = User.objects.filter(id=coordinator_id, is_active=True).first()
+            modules = list(
+                AcademicModule.objects.filter(id__in=module_ids, is_active=True, year_scope_id__in=year_scope_ids)
+            )
+            if not coordinator or has_staff_panel_access(coordinator):
+                messages.error(request, "Valid coordinator is required.")
+            elif not modules:
+                messages.error(request, "Select at least one valid module.")
+            else:
+                CoordinatorModuleAccess.objects.filter(coordinator=coordinator).delete()
+                CoordinatorModuleAccess.objects.bulk_create(
+                    [CoordinatorModuleAccess(coordinator=coordinator, module=m) for m in modules],
+                    ignore_conflicts=True,
+                )
+                messages.success(request, "Coordinator modules updated.")
+            return redirect_response
+
+        if action == "update_coordinator":
+            year_scope_ids = set(year_scopes_for_user(request.user).values_list("id", flat=True))
+            coordinator_id = request.POST.get("coordinator_id")
+            username = (request.POST.get("username") or "").strip()
+            coordinator_name = (request.POST.get("coordinator_name") or "").strip()
+            new_password = (request.POST.get("new_password") or "").strip()
+            active_val = (request.POST.get("is_active") or "").strip() == "1"
+            module_ids = [x for x in request.POST.getlist("module_ids") if str(x).isdigit()]
+            coordinator = User.objects.filter(id=coordinator_id).first()
+            modules = list(
+                AcademicModule.objects.filter(id__in=module_ids, is_active=True, year_scope_id__in=year_scope_ids)
+            )
+            scoped_coordinator_ids = set(
+                User.objects.filter(is_active=True, module_accesses__module__year_scope_id__in=year_scope_ids)
+                .distinct()
+                .values_list("id", flat=True)
+            )
+            if not coordinator or coordinator.id not in scoped_coordinator_ids or has_staff_panel_access(coordinator):
+                messages.error(request, "Valid coordinator is required.")
+            elif not username:
+                messages.error(request, "Username is required.")
+            elif User.objects.filter(username__iexact=username).exclude(id=coordinator.id).exists():
+                messages.error(request, "Username already exists.")
+            elif not modules:
+                messages.error(request, "Select at least one valid module.")
+            else:
+                coordinator.username = username
+                coordinator.first_name = coordinator_name
+                coordinator.is_active = active_val
+                if new_password:
+                    coordinator.set_password(new_password)
+                coordinator.save()
+                CoordinatorModuleAccess.objects.filter(coordinator=coordinator).delete()
+                CoordinatorModuleAccess.objects.bulk_create(
+                    [CoordinatorModuleAccess(coordinator=coordinator, module=m) for m in modules],
+                    ignore_conflicts=True,
+                )
+                messages.success(request, "Coordinator updated.")
+            return redirect_response
+
+        if action == "delete_coordinator":
+            year_scope_ids = set(year_scopes_for_user(request.user).values_list("id", flat=True))
+            coordinator_id = request.POST.get("coordinator_id")
+            coordinator = User.objects.filter(id=coordinator_id).first()
+            scoped_coordinator_ids = set(
+                User.objects.filter(is_active=True, module_accesses__module__year_scope_id__in=year_scope_ids)
+                .distinct()
+                .values_list("id", flat=True)
+            )
+            if not coordinator or coordinator.id not in scoped_coordinator_ids or has_staff_panel_access(coordinator):
+                messages.error(request, "Valid coordinator is required.")
+            else:
+                CoordinatorModuleAccess.objects.filter(coordinator=coordinator).delete()
+                coordinator.delete()
+                messages.success(request, "Coordinator deleted.")
+            return redirect_response
+
+    query = (request.GET.get("q") or "").strip()
+    selected_university_id = (request.GET.get("university_id") or "").strip()
+    selected_college_id = (request.GET.get("college_id") or "").strip()
+    selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
+
+    universities_qs = universities_for_user(request.user).order_by("name")
+    if selected_university_id.isdigit():
+        universities_qs = universities_qs.filter(id=selected_university_id)
+    if query:
+        universities_qs = universities_qs.filter(Q(name__icontains=query) | Q(code__icontains=query))
+
+    colleges_qs = colleges_for_user(request.user).select_related("university").order_by("university__name", "name")
+    if selected_university_id.isdigit():
+        colleges_qs = colleges_qs.filter(university_id=selected_university_id)
+    if selected_college_id.isdigit():
+        colleges_qs = colleges_qs.filter(id=selected_college_id)
+    if query:
+        colleges_qs = colleges_qs.filter(
+            Q(name__icontains=query)
+            | Q(code__icontains=query)
+            | Q(university__name__icontains=query)
+        )
+
+    year_scopes_qs = year_scopes_for_user(request.user).select_related("college", "college__university").order_by("college__name", "year_code")
+    if selected_university_id.isdigit():
+        year_scopes_qs = year_scopes_qs.filter(college__university_id=selected_university_id)
+    if selected_college_id.isdigit():
+        year_scopes_qs = year_scopes_qs.filter(college_id=selected_college_id)
+    if selected_year_scope_id.isdigit():
+        year_scopes_qs = year_scopes_qs.filter(id=selected_year_scope_id)
+    if query:
+        year_scopes_qs = year_scopes_qs.filter(
+            Q(year_code__icontains=query)
+            | Q(title__icontains=query)
+            | Q(college__name__icontains=query)
+            | Q(college__university__name__icontains=query)
+        )
+
+    scoped_modules_qs = modules_for_user(request.user).select_related("year_scope").order_by("name")
+    if selected_university_id.isdigit():
+        scoped_modules_qs = scoped_modules_qs.filter(year_scope__college__university_id=selected_university_id)
+    if selected_college_id.isdigit():
+        scoped_modules_qs = scoped_modules_qs.filter(year_scope__college_id=selected_college_id)
+    if selected_year_scope_id.isdigit():
+        scoped_modules_qs = scoped_modules_qs.filter(year_scope_id=selected_year_scope_id)
+    if query:
+        scoped_modules_qs = scoped_modules_qs.filter(
+            Q(name__icontains=query)
+            | Q(academic_batch__icontains=query)
+            | Q(year_scope__college__name__icontains=query)
+        )
+
+    universities = list(universities_qs)
+    colleges = list(colleges_qs)
+    year_scopes = list(year_scopes_qs)
+    scoped_modules = list(scoped_modules_qs)
+    assignable_users = list(User.objects.filter(is_active=True).order_by("username"))
+    coordinators = (
+        User.objects.filter(is_active=True, module_accesses__module__in=scoped_modules)
+        .distinct()
+        .order_by("username")
+    )
+    coordinator_rows = []
+    for coordinator in coordinators:
+        module_ids = set(
+            CoordinatorModuleAccess.objects.filter(coordinator=coordinator, module__in=scoped_modules)
+            .values_list("module_id", flat=True)
+        )
+        coordinator_rows.append({"user": coordinator, "module_ids": module_ids})
+    org_summary = {
+        "universities": len(universities),
+        "colleges": len(colleges),
+        "year_scopes": len(year_scopes),
+        "modules": len(scoped_modules),
+        "coordinators": coordinators.count(),
+    }
+    universities_page = _paginate_list(request, universities, "universities_page")
+    colleges_page = _paginate_list(request, colleges, "colleges_page")
+    year_scopes_page = _paginate_list(request, year_scopes, "years_page")
+    coordinator_rows_page = _paginate_list(request, coordinator_rows, "coordinators_page")
+    return render(
+        request,
+        "org_setup.html",
+        {
+            "universities": universities,
+            "colleges": colleges,
+            "year_scopes": year_scopes,
+            "scoped_modules": scoped_modules,
+            "assignable_users": assignable_users,
+            "coordinators": coordinators,
+            "coordinator_rows": coordinator_rows,
+            "universities_page": universities_page,
+            "colleges_page": colleges_page,
+            "year_scopes_page": year_scopes_page,
+            "coordinator_rows_page": coordinator_rows_page,
+            "can_create_university": is_erp_owner(request.user),
+            "can_create_college": bool(universities),
+            "can_create_year_scope": bool(colleges),
+            "can_assign_roles": is_erp_owner(request.user),
+            "can_assign_year_heads": bool(is_erp_owner(request.user) or is_college_head(request.user)),
+            "can_manage_coordinators": bool(year_scopes),
+            "year_choices": YearScope.YEAR_CHOICES,
+            "org_summary": org_summary,
+            "filters": {
+                "q": query,
+                "university_id": selected_university_id,
+                "college_id": selected_college_id,
+                "year_scope_id": selected_year_scope_id,
+            },
+            "filter_universities": list(universities_for_user(request.user).order_by("name")),
+            "filter_colleges": list(
+                colleges_for_user(request.user).select_related("university").order_by("university__name", "name")
+            ),
+            "filter_year_scopes": list(
+                year_scopes_for_user(request.user).select_related("college", "college__university").order_by("college__name", "year_code")
+            ),
+        },
+    )
+
+
+@login_required
+def year_coordinators(request):
+    if request.session.get("mentor"):
+        return redirect("/mentor-dashboard/")
+    if not (is_erp_owner(request.user) or is_university_head(request.user) or is_college_head(request.user) or is_year_head(request.user)):
+        return HttpResponse("Forbidden", status=403)
+
+    selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
+    selected_year_scope = None
+    if selected_year_scope_id.isdigit():
+        selected_year_scope = (
+            year_scopes_for_user(request.user)
+            .select_related("college", "college__university")
+            .filter(id=selected_year_scope_id)
+            .first()
+        )
+        if not selected_year_scope:
+            return HttpResponse("Forbidden", status=403)
+
+    available_year_scopes = list(
+        year_scopes_for_user(request.user)
+        .select_related("college", "college__university")
+        .order_by("college__name", "year_code")
+    )
+    if selected_year_scope:
+        year_scopes = [selected_year_scope]
+    else:
+        year_scopes = available_year_scopes
+    year_scope_ids = [year_scope.id for year_scope in year_scopes]
+
+    if request.method == "POST":
+        redirect_response = _redirect_with_current_query(request, "/year-coordinators/", ["year_scope_id"])
+        action = (request.POST.get("action") or "").strip()
+
+        if action == "create_coordinator":
+            if not year_scope_ids:
+                messages.error(request, "No year scope available for coordinator assignment.")
+                return redirect_response
+            coordinator_name = (request.POST.get("coordinator_name") or "").strip()
+            username = (request.POST.get("username") or "").strip()
+            password = (request.POST.get("password") or "").strip()
+            module_ids = [x for x in request.POST.getlist("module_ids") if str(x).isdigit()]
+            modules = list(
+                AcademicModule.objects.filter(id__in=module_ids, is_active=True, year_scope_id__in=year_scope_ids)
+            )
+            if not coordinator_name or not username or not password:
+                messages.error(request, "Coordinator name, username and password are required.")
+            elif User.objects.filter(username__iexact=username).exists():
+                messages.error(request, "Coordinator username already exists.")
+            elif not modules:
+                messages.error(request, "Select at least one valid module.")
+            else:
+                coordinator = User.objects.create_user(
+                    username=username,
+                    password=password,
+                    first_name=coordinator_name,
+                    is_active=True,
+                    is_staff=False,
+                    is_superuser=False,
+                )
+                CoordinatorModuleAccess.objects.bulk_create(
+                    [CoordinatorModuleAccess(coordinator=coordinator, module=m) for m in modules],
+                    ignore_conflicts=True,
+                )
+                messages.success(request, "Coordinator created.")
+            return redirect_response
+
+        if action == "remap_coordinator":
+            coordinator_id = request.POST.get("coordinator_id")
+            module_ids = [x for x in request.POST.getlist("module_ids") if str(x).isdigit()]
+            coordinator = User.objects.filter(id=coordinator_id, is_active=True).first()
+            modules = list(
+                AcademicModule.objects.filter(id__in=module_ids, is_active=True, year_scope_id__in=year_scope_ids)
+            )
+            if not coordinator or has_staff_panel_access(coordinator):
+                messages.error(request, "Valid coordinator is required.")
+            elif not modules:
+                messages.error(request, "Select at least one valid module.")
+            else:
+                CoordinatorModuleAccess.objects.filter(coordinator=coordinator).delete()
+                CoordinatorModuleAccess.objects.bulk_create(
+                    [CoordinatorModuleAccess(coordinator=coordinator, module=m) for m in modules],
+                    ignore_conflicts=True,
+                )
+                messages.success(request, "Coordinator modules updated.")
+            return redirect_response
+
+        if action == "update_coordinator":
+            coordinator_id = request.POST.get("coordinator_id")
+            username = (request.POST.get("username") or "").strip()
+            coordinator_name = (request.POST.get("coordinator_name") or "").strip()
+            new_password = (request.POST.get("new_password") or "").strip()
+            active_val = (request.POST.get("is_active") or "").strip() == "1"
+            module_ids = [x for x in request.POST.getlist("module_ids") if str(x).isdigit()]
+            coordinator = User.objects.filter(id=coordinator_id).first()
+            modules = list(
+                AcademicModule.objects.filter(id__in=module_ids, is_active=True, year_scope_id__in=year_scope_ids)
+            )
+            scoped_coordinator_ids = set(
+                User.objects.filter(is_active=True, module_accesses__module__year_scope_id__in=year_scope_ids)
+                .distinct()
+                .values_list("id", flat=True)
+            )
+            if not coordinator or coordinator.id not in scoped_coordinator_ids or has_staff_panel_access(coordinator):
+                messages.error(request, "Valid coordinator is required.")
+            elif not username:
+                messages.error(request, "Username is required.")
+            elif User.objects.filter(username__iexact=username).exclude(id=coordinator.id).exists():
+                messages.error(request, "Username already exists.")
+            elif not modules:
+                messages.error(request, "Select at least one valid module.")
+            else:
+                coordinator.username = username
+                coordinator.first_name = coordinator_name
+                coordinator.is_active = active_val
+                if new_password:
+                    coordinator.set_password(new_password)
+                coordinator.save()
+                CoordinatorModuleAccess.objects.filter(coordinator=coordinator).delete()
+                CoordinatorModuleAccess.objects.bulk_create(
+                    [CoordinatorModuleAccess(coordinator=coordinator, module=m) for m in modules],
+                    ignore_conflicts=True,
+                )
+                messages.success(request, "Coordinator updated.")
+            return redirect_response
+
+        if action == "delete_coordinator":
+            coordinator_id = request.POST.get("coordinator_id")
+            coordinator = User.objects.filter(id=coordinator_id).first()
+            scoped_coordinator_ids = set(
+                User.objects.filter(is_active=True, module_accesses__module__year_scope_id__in=year_scope_ids)
+                .distinct()
+                .values_list("id", flat=True)
+            )
+            if not coordinator or coordinator.id not in scoped_coordinator_ids or has_staff_panel_access(coordinator):
+                messages.error(request, "Valid coordinator is required.")
+            else:
+                CoordinatorModuleAccess.objects.filter(coordinator=coordinator).delete()
+                coordinator.delete()
+                messages.success(request, "Coordinator deleted.")
+            return redirect_response
+
+    scoped_modules = list(
+        modules_for_user(request.user)
+        .filter(year_scope_id__in=year_scope_ids)
+        .select_related("year_scope", "year_scope__college", "year_scope__college__university")
+        .order_by("name")
+    )
+    coordinators = (
+        User.objects.filter(is_active=True, module_accesses__module__in=scoped_modules)
+        .distinct()
+        .order_by("username")
+    )
+    coordinator_rows = []
+    for coordinator in coordinators:
+        module_ids = set(
+            CoordinatorModuleAccess.objects.filter(coordinator=coordinator, module__in=scoped_modules)
+            .values_list("module_id", flat=True)
+        )
+        module_names = list(
+            AcademicModule.objects.filter(id__in=module_ids).order_by("name").values_list("name", flat=True)
+        )
+        coordinator_rows.append({"user": coordinator, "module_ids": module_ids, "module_names": module_names})
+
+    scope_summary = {
+        "university": selected_year_scope.college.university.name if selected_year_scope else ", ".join(
+            sorted({year_scope.college.university.name for year_scope in year_scopes[:3]})
+        ),
+        "college": selected_year_scope.college.name if selected_year_scope else ", ".join(
+            sorted({year_scope.college.name for year_scope in year_scopes[:3]})
+        ),
+        "year": selected_year_scope.year_code if selected_year_scope else ", ".join(
+            [year_scope.year_code for year_scope in year_scopes[:3]]
+        ),
+    }
+
+    return render(
+        request,
+        "year_coordinators.html",
+        {
+            "year_scopes": year_scopes,
+            "available_year_scopes": available_year_scopes,
+            "selected_year_scope": selected_year_scope,
+            "scoped_modules": scoped_modules,
+            "coordinators": coordinators,
+            "coordinator_rows": coordinator_rows,
+            "summary": {
+                "year_scopes": len(year_scopes),
+                "modules": len(scoped_modules),
+                "coordinators": coordinators.count(),
+            },
+            "scope_summary": scope_summary,
+            "filters": {
+                "year_scope_id": selected_year_scope_id,
+            },
+        },
+    )
+
+
+@login_required
+def university_home(request):
+    if request.session.get("mentor"):
+        return redirect("/mentor-dashboard/")
+    if not (is_erp_owner(request.user) or is_university_head(request.user)):
+        return HttpResponse("Forbidden", status=403)
+
+    if request.method == "POST":
+        redirect_response = _redirect_with_current_query(
+            request,
+            "/university-home/",
+            ["q", "university_id", "universities_page", "colleges_page"],
+        )
+        action = (request.POST.get("action") or "").strip()
+        if action == "create_college":
+            university_id = request.POST.get("university_id")
+            university = University.objects.filter(id=university_id, is_active=True).first()
+            if not university or not can_manage_university(request.user, university):
+                messages.error(request, "University not allowed.")
+                return redirect_response
+            name = (request.POST.get("name") or "").strip()
+            code = (request.POST.get("code") or "").strip().upper()
+            if not name:
+                messages.error(request, "College name is required.")
+            else:
+                College.objects.get_or_create(
+                    university=university,
+                    name=name,
+                    defaults={"code": code, "is_active": True},
+                )
+                messages.success(request, "College saved.")
+            return redirect_response
+        if action == "assign_college_head":
+            user_id = request.POST.get("user_id")
+            college_id = request.POST.get("college_id")
+            target_user = User.objects.filter(id=user_id, is_active=True).first()
+            college = College.objects.filter(id=college_id, is_active=True).select_related("university").first()
+            if not target_user or not college:
+                messages.error(request, "Valid user and college are required.")
+            elif not can_manage_university(request.user, college.university):
+                messages.error(request, "College not allowed.")
+            else:
+                RoleAssignment.objects.get_or_create(
+                    user=target_user,
+                    role=RoleAssignment.ROLE_COLLEGE_HEAD,
+                    college=college,
+                    defaults={"is_active": True},
+                )
+                messages.success(request, "College Head assigned.")
+            return redirect_response
+        if action == "remove_university_head":
+            assignment_id = request.POST.get("assignment_id")
+            assignment = RoleAssignment.objects.filter(
+                id=assignment_id,
+                role=RoleAssignment.ROLE_UNIVERSITY_HEAD,
+                is_active=True,
+            ).select_related("university").first()
+            if not is_erp_owner(request.user):
+                messages.error(request, "Only ERP Owner can remove University Heads.")
+            elif not assignment or not can_manage_university(request.user, assignment.university):
+                messages.error(request, "University Head assignment not allowed.")
+            else:
+                assignment.delete()
+                messages.success(request, "University Head removed.")
+            return redirect_response
+        if action == "remove_college_head":
+            assignment_id = request.POST.get("assignment_id")
+            assignment = RoleAssignment.objects.filter(
+                id=assignment_id,
+                role=RoleAssignment.ROLE_COLLEGE_HEAD,
+                is_active=True,
+            ).select_related("college", "college__university").first()
+            if not assignment or not can_manage_university(request.user, assignment.college.university):
+                messages.error(request, "College Head assignment not allowed.")
+            else:
+                assignment.delete()
+                messages.success(request, "College Head removed.")
+            return redirect_response
+
+    query = (request.GET.get("q") or "").strip()
+    selected_university_id = (request.GET.get("university_id") or "").strip()
+
+    universities_qs = universities_for_user(request.user).order_by("name")
+    if selected_university_id.isdigit():
+        universities_qs = universities_qs.filter(id=selected_university_id)
+    if query:
+        universities_qs = universities_qs.filter(Q(name__icontains=query) | Q(code__icontains=query))
+
+    colleges_qs = colleges_for_user(request.user).select_related("university").order_by("university__name", "name")
+    if selected_university_id.isdigit():
+        colleges_qs = colleges_qs.filter(university_id=selected_university_id)
+    if query:
+        colleges_qs = colleges_qs.filter(
+            Q(name__icontains=query)
+            | Q(code__icontains=query)
+            | Q(university__name__icontains=query)
+            | Q(role_assignments__user__username__icontains=query)
+        ).distinct()
+
+    universities = list(universities_qs)
+    colleges = list(colleges_qs)
+    university_head_map = {}
+    for assignment in (
+        RoleAssignment.objects.filter(
+            role=RoleAssignment.ROLE_UNIVERSITY_HEAD,
+            is_active=True,
+            university__in=universities,
+            user__is_active=True,
+        )
+        .select_related("user", "university")
+        .order_by("user__username")
+    ):
+        university_head_map.setdefault(assignment.university_id, []).append(
+            {"id": assignment.id, "username": assignment.user.username}
+        )
+    college_head_map = {}
+    for assignment in (
+        RoleAssignment.objects.filter(
+            role=RoleAssignment.ROLE_COLLEGE_HEAD,
+            is_active=True,
+            college__in=colleges,
+            user__is_active=True,
+        )
+        .select_related("user", "college")
+        .order_by("user__username")
+    ):
+        college_head_map.setdefault(assignment.college_id, []).append(
+            {"id": assignment.id, "username": assignment.user.username}
+        )
+    year_scope_count_map = {
+        row["college_id"]: row["count"]
+        for row in YearScope.objects.filter(college__in=colleges, is_active=True)
+        .values("college_id")
+        .annotate(count=Count("id"))
+    }
+    module_count_map = {
+        row["year_scope__college_id"]: row["count"]
+        for row in AcademicModule.objects.filter(year_scope__college__in=colleges, is_active=True)
+        .values("year_scope__college_id")
+        .annotate(count=Count("id"))
+    }
+    student_count_map = {
+        row["module__year_scope__college_id"]: row["count"]
+        for row in Student.objects.filter(module__year_scope__college__in=colleges)
+        .values("module__year_scope__college_id")
+        .annotate(count=Count("id"))
+    }
+    coordinator_count_map = {
+        row["module__year_scope__college_id"]: row["count"]
+        for row in CoordinatorModuleAccess.objects.filter(
+            module__year_scope__college__in=colleges,
+            module__is_active=True,
+        )
+        .values("module__year_scope__college_id")
+        .annotate(count=Count("coordinator_id", distinct=True))
+    }
+    subject_count_map = {
+        row["module__year_scope__college_id"]: row["count"]
+        for row in Subject.objects.filter(
+            module__year_scope__college__in=colleges,
+            is_active=True,
+        )
+        .values("module__year_scope__college_id")
+        .annotate(count=Count("id"))
+    }
+    timetable_count_map = {
+        row["module__year_scope__college_id"]: row["count"]
+        for row in TimetableEntry.objects.filter(
+            module__year_scope__college__in=colleges,
+            is_active=True,
+        )
+        .values("module__year_scope__college_id")
+        .annotate(count=Count("id"))
+    }
+    active_calendar_count_map = {
+        row["module__year_scope__college_id"]: row["count"]
+        for row in AcademicCalendar.objects.filter(
+            module__year_scope__college__in=colleges,
+            is_active=True,
+        )
+        .values("module__year_scope__college_id")
+        .annotate(count=Count("id"))
+    }
+    university_rows = [{"university": university, "heads": university_head_map.get(university.id, [])} for university in universities]
+    college_rows = [
+        {
+            "college": college,
+            "heads": college_head_map.get(college.id, []),
+            "year_scope_count": year_scope_count_map.get(college.id, 0),
+            "module_count": module_count_map.get(college.id, 0),
+            "coordinator_count": coordinator_count_map.get(college.id, 0),
+            "student_count": student_count_map.get(college.id, 0),
+            "subject_count": subject_count_map.get(college.id, 0),
+            "timetable_count": timetable_count_map.get(college.id, 0),
+            "active_calendar_count": active_calendar_count_map.get(college.id, 0),
+        }
+        for college in colleges
+    ]
+    year_head_count = YearScope.objects.filter(
+        college__in=colleges,
+        is_active=True,
+        role_assignments__role=RoleAssignment.ROLE_YEAR_HEAD,
+        role_assignments__is_active=True,
+    ).distinct().count()
+    owner_exception_summary = {
+        "universities_without_head": sum(1 for row in university_rows if not row["heads"]),
+        "colleges_without_head": sum(1 for row in college_rows if not row["heads"]),
+        "years_without_head": YearScope.objects.filter(
+            college__in=colleges,
+            is_active=True,
+        ).exclude(
+            role_assignments__role=RoleAssignment.ROLE_YEAR_HEAD,
+            role_assignments__is_active=True,
+        ).distinct().count(),
+        "years_without_modules": YearScope.objects.filter(
+            college__in=colleges,
+            is_active=True,
+        ).exclude(
+            modules__is_active=True,
+        ).distinct().count(),
+        "modules_without_coordinator": AcademicModule.objects.filter(
+            year_scope__college__in=colleges,
+            is_active=True,
+        ).exclude(
+            Q(coordinator_accesses__isnull=False) | Q(role_assignments__role=RoleAssignment.ROLE_COORDINATOR, role_assignments__is_active=True)
+        ).distinct().count(),
+    }
+    structure_total = len(universities) + len(colleges) + YearScope.objects.filter(college__in=colleges, is_active=True).count()
+    assigned_total = (
+        sum(len(row["heads"]) for row in university_rows)
+        + sum(len(row["heads"]) for row in college_rows)
+        + year_head_count
+    )
+    owner_exception_summary["ownership_completion_pct"] = int((assigned_total / structure_total) * 100) if structure_total else 100
+
+    college_gap_rows = []
+    for row in college_rows:
+        missing = []
+        if not row["heads"]:
+            missing.append("No head")
+        if row["year_scope_count"] == 0:
+            missing.append("No years")
+        if row["module_count"] == 0:
+            missing.append("No modules")
+        if row["coordinator_count"] == 0:
+            missing.append("No coordinators")
+        progress_state = "Healthy"
+        if missing:
+            progress_state = "Needs setup" if len(missing) >= 2 else "Partial"
+        college_gap_rows.append(
+            {
+                **row,
+                "missing": missing,
+                "progress_state": progress_state,
+            }
+        )
+    summary = {
+        "universities": len(universities),
+        "colleges": len(colleges),
+        "university_heads": sum(len(row["heads"]) for row in university_rows),
+        "college_heads": sum(len(row["heads"]) for row in college_rows),
+        "year_scopes": sum(row["year_scope_count"] for row in college_rows),
+        "modules": sum(row["module_count"] for row in college_rows),
+        "coordinators": sum(row["coordinator_count"] for row in college_rows),
+        "students": sum(row["student_count"] for row in college_rows),
+        "subjects": sum(row["subject_count"] for row in college_rows),
+        "timetable_entries": sum(row["timetable_count"] for row in college_rows),
+        "active_calendars": sum(row["active_calendar_count"] for row in college_rows),
+    }
+    scope_summary = {
+        "universities": ", ".join(university.name for university in universities[:3]),
+        "extra_universities": max(len(universities) - 3, 0),
+        "colleges": len(colleges),
+    }
+    university_rows_page = _paginate_list(request, university_rows, "universities_page")
+    college_rows_page = _paginate_list(request, college_rows, "colleges_page")
+    return render(
+        request,
+        "university_home.html",
+        {
+            "universities": universities,
+            "colleges": colleges,
+            "assignable_users": list(User.objects.filter(is_active=True).order_by("username")),
+            "university_rows": university_rows,
+            "college_rows": college_rows,
+            "university_rows_page": university_rows_page,
+            "college_rows_page": college_rows_page,
+            "can_remove_university_heads": is_erp_owner(request.user),
+            "can_remove_college_heads": True,
+            "summary": summary,
+            "scope_summary": scope_summary,
+            "owner_exception_summary": owner_exception_summary,
+            "college_gap_rows": college_gap_rows,
+            "filters": {
+                "q": query,
+                "university_id": selected_university_id,
+            },
+            "filter_universities": list(universities_for_user(request.user).order_by("name")),
+        },
+    )
+
+
+@login_required
+def college_home(request):
+    if request.session.get("mentor"):
+        return redirect("/mentor-dashboard/")
+    if not (is_erp_owner(request.user) or is_university_head(request.user) or is_college_head(request.user)):
+        return HttpResponse("Forbidden", status=403)
+
+    if request.method == "POST":
+        redirect_response = _redirect_with_current_query(
+            request,
+            "/college-home/",
+            ["q", "college_id", "colleges_page", "years_page"],
+        )
+        action = (request.POST.get("action") or "").strip()
+        if action == "create_year_scope":
+            college_id = request.POST.get("college_id")
+            college = College.objects.filter(id=college_id, is_active=True).select_related("university").first()
+            if not college or not can_manage_college(request.user, college):
+                messages.error(request, "College not allowed.")
+                return redirect_response
+            year_code = (request.POST.get("year_code") or "").strip().upper()
+            title = (request.POST.get("title") or "").strip()
+            valid_years = {code for code, _ in YearScope.YEAR_CHOICES}
+            if year_code not in valid_years:
+                messages.error(request, "Valid year is required.")
+            else:
+                YearScope.objects.get_or_create(
+                    college=college,
+                    year_code=year_code,
+                    defaults={"title": title or year_code, "is_active": True},
+                )
+                messages.success(request, "Year scope saved.")
+            return redirect_response
+        if action == "assign_year_head":
+            user_id = request.POST.get("user_id")
+            year_scope_id = request.POST.get("year_scope_id")
+            target_user = User.objects.filter(id=user_id, is_active=True).first()
+            year_scope = YearScope.objects.filter(id=year_scope_id, is_active=True).select_related("college").first()
+            if not target_user or not year_scope:
+                messages.error(request, "Valid user and year are required.")
+            elif not can_manage_college(request.user, year_scope.college):
+                messages.error(request, "Year scope not allowed.")
+            else:
+                RoleAssignment.objects.get_or_create(
+                    user=target_user,
+                    role=RoleAssignment.ROLE_YEAR_HEAD,
+                    year_scope=year_scope,
+                    defaults={"is_active": True},
+                )
+                messages.success(request, "Year Head assigned.")
+            return redirect_response
+        if action == "remove_college_head":
+            assignment_id = request.POST.get("assignment_id")
+            assignment = RoleAssignment.objects.filter(
+                id=assignment_id,
+                role=RoleAssignment.ROLE_COLLEGE_HEAD,
+                is_active=True,
+            ).select_related("college", "college__university").first()
+            if not assignment or not can_manage_college(request.user, assignment.college):
+                messages.error(request, "College Head assignment not allowed.")
+            else:
+                assignment.delete()
+                messages.success(request, "College Head removed.")
+            return redirect_response
+        if action == "remove_year_head":
+            assignment_id = request.POST.get("assignment_id")
+            assignment = RoleAssignment.objects.filter(
+                id=assignment_id,
+                role=RoleAssignment.ROLE_YEAR_HEAD,
+                is_active=True,
+            ).select_related("year_scope", "year_scope__college").first()
+            if not assignment or not can_manage_college(request.user, assignment.year_scope.college):
+                messages.error(request, "Year Head assignment not allowed.")
+            else:
+                assignment.delete()
+                messages.success(request, "Year Head removed.")
+            return redirect_response
+
+    query = (request.GET.get("q") or "").strip()
+    selected_college_id = (request.GET.get("college_id") or "").strip()
+
+    colleges_qs = colleges_for_user(request.user).select_related("university").order_by("university__name", "name")
+    if selected_college_id.isdigit():
+        colleges_qs = colleges_qs.filter(id=selected_college_id)
+    if query:
+        colleges_qs = colleges_qs.filter(
+            Q(name__icontains=query)
+            | Q(code__icontains=query)
+            | Q(university__name__icontains=query)
+            | Q(role_assignments__user__username__icontains=query)
+        ).distinct()
+
+    year_scopes_qs = year_scopes_for_user(request.user).select_related("college", "college__university").order_by("college__name", "year_code")
+    if selected_college_id.isdigit():
+        year_scopes_qs = year_scopes_qs.filter(college_id=selected_college_id)
+    if query:
+        year_scopes_qs = year_scopes_qs.filter(
+            Q(year_code__icontains=query)
+            | Q(title__icontains=query)
+            | Q(college__name__icontains=query)
+            | Q(role_assignments__user__username__icontains=query)
+        ).distinct()
+
+    colleges = list(colleges_qs)
+    year_scopes = list(year_scopes_qs)
+    college_head_map = {}
+    for assignment in (
+        RoleAssignment.objects.filter(
+            role=RoleAssignment.ROLE_COLLEGE_HEAD,
+            is_active=True,
+            college__in=colleges,
+            user__is_active=True,
+        )
+        .select_related("user", "college")
+        .order_by("user__username")
+    ):
+        college_head_map.setdefault(assignment.college_id, []).append(
+            {"id": assignment.id, "username": assignment.user.username}
+        )
+    year_head_map = {}
+    for assignment in (
+        RoleAssignment.objects.filter(
+            role=RoleAssignment.ROLE_YEAR_HEAD,
+            is_active=True,
+            year_scope__in=year_scopes,
+            user__is_active=True,
+        )
+        .select_related("user", "year_scope")
+        .order_by("user__username")
+    ):
+        year_head_map.setdefault(assignment.year_scope_id, []).append(
+            {"id": assignment.id, "username": assignment.user.username}
+        )
+    module_count_map = {
+        row["year_scope_id"]: row["count"]
+        for row in AcademicModule.objects.filter(year_scope__in=year_scopes, is_active=True)
+        .values("year_scope_id")
+        .annotate(count=Count("id"))
+    }
+    student_count_map = {
+        row["module__year_scope_id"]: row["count"]
+        for row in Student.objects.filter(module__year_scope__in=year_scopes)
+        .values("module__year_scope_id")
+        .annotate(count=Count("id"))
+    }
+    coordinator_count_map = {
+        row["module__year_scope_id"]: row["count"]
+        for row in CoordinatorModuleAccess.objects.filter(module__year_scope__in=year_scopes, module__is_active=True)
+        .values("module__year_scope_id")
+        .annotate(count=Count("coordinator_id", distinct=True))
+    }
+    subject_count_map = {
+        row["module__year_scope_id"]: row["count"]
+        for row in Subject.objects.filter(module__year_scope__in=year_scopes, is_active=True)
+        .values("module__year_scope_id")
+        .annotate(count=Count("id"))
+    }
+    timetable_count_map = {
+        row["module__year_scope_id"]: row["count"]
+        for row in TimetableEntry.objects.filter(module__year_scope__in=year_scopes, is_active=True)
+        .values("module__year_scope_id")
+        .annotate(count=Count("id"))
+    }
+    active_calendar_count_map = {
+        row["module__year_scope_id"]: row["count"]
+        for row in AcademicCalendar.objects.filter(module__year_scope__in=year_scopes, is_active=True)
+        .values("module__year_scope_id")
+        .annotate(count=Count("id"))
+    }
+    primary_module_map = {}
+    for module in (
+        AcademicModule.objects.filter(year_scope__in=year_scopes, is_active=True)
+        .select_related("year_scope")
+        .order_by("year_scope_id", "name")
+    ):
+        primary_module_map.setdefault(module.year_scope_id, module.id)
+    college_rows = [{"college": college, "heads": college_head_map.get(college.id, [])} for college in colleges]
+    year_scope_rows = [
+        {
+            "year_scope": year_scope,
+            "heads": year_head_map.get(year_scope.id, []),
+            "module_count": module_count_map.get(year_scope.id, 0),
+            "student_count": student_count_map.get(year_scope.id, 0),
+            "coordinator_count": coordinator_count_map.get(year_scope.id, 0),
+            "subject_count": subject_count_map.get(year_scope.id, 0),
+            "timetable_count": timetable_count_map.get(year_scope.id, 0),
+            "active_calendar_count": active_calendar_count_map.get(year_scope.id, 0),
+            "primary_module_id": primary_module_map.get(year_scope.id, ""),
+        }
+        for year_scope in year_scopes
+    ]
+    for row in year_scope_rows:
+        missing = []
+        if not row["heads"]:
+            missing.append("No head")
+        if row["module_count"] == 0:
+            missing.append("No modules")
+        if row["coordinator_count"] == 0:
+            missing.append("No coordinators")
+        if row["student_count"] == 0:
+            missing.append("No students")
+        if row["subject_count"] == 0:
+            missing.append("No subjects")
+        if row["timetable_count"] == 0:
+            missing.append("No timetable")
+        if row["active_calendar_count"] == 0:
+            missing.append("No calendar")
+        checks_total = 7
+        checks_done = checks_total - len(missing)
+        row["readiness_score"] = int((checks_done / checks_total) * 100)
+        row["missing"] = missing
+        if len(missing) == 0:
+            row["readiness_status"] = "Ready"
+        elif len(missing) <= 2:
+            row["readiness_status"] = "In Progress"
+        else:
+            row["readiness_status"] = "Needs Attention"
+
+    year_gap_summary = {
+        "without_heads": sum(1 for row in year_scope_rows if "No head" in row["missing"]),
+        "without_modules": sum(1 for row in year_scope_rows if "No modules" in row["missing"]),
+        "without_coordinators": sum(1 for row in year_scope_rows if "No coordinators" in row["missing"]),
+        "without_students": sum(1 for row in year_scope_rows if "No students" in row["missing"]),
+        "without_subjects": sum(1 for row in year_scope_rows if "No subjects" in row["missing"]),
+        "without_timetable": sum(1 for row in year_scope_rows if "No timetable" in row["missing"]),
+    }
+    summary = {
+        "colleges": len(colleges),
+        "year_scopes": len(year_scopes),
+        "college_heads": sum(len(row["heads"]) for row in college_rows),
+        "year_heads": sum(len(row["heads"]) for row in year_scope_rows),
+        "modules": sum(row["module_count"] for row in year_scope_rows),
+        "students": sum(row["student_count"] for row in year_scope_rows),
+        "coordinators": sum(row["coordinator_count"] for row in year_scope_rows),
+        "subjects": sum(row["subject_count"] for row in year_scope_rows),
+        "timetable_entries": sum(row["timetable_count"] for row in year_scope_rows),
+        "active_calendars": sum(row["active_calendar_count"] for row in year_scope_rows),
+    }
+    scope_summary = {
+        "universities": ", ".join(sorted({college.university.name for college in colleges[:3]})),
+        "colleges": ", ".join(college.name for college in colleges[:3]),
+        "extra_colleges": max(len(colleges) - 3, 0),
+    }
+    college_rows_page = _paginate_list(request, college_rows, "colleges_page")
+    year_scope_rows_page = _paginate_list(request, year_scope_rows, "years_page")
+    return render(
+        request,
+        "college_home.html",
+        {
+            "colleges": colleges,
+            "year_scopes": year_scopes,
+            "year_choices": YearScope.YEAR_CHOICES,
+            "assignable_users": list(User.objects.filter(is_active=True).order_by("username")),
+            "college_rows": college_rows,
+            "year_scope_rows": year_scope_rows,
+            "college_rows_page": college_rows_page,
+            "year_scope_rows_page": year_scope_rows_page,
+            "summary": summary,
+            "scope_summary": scope_summary,
+            "year_gap_summary": year_gap_summary,
+            "filters": {
+                "q": query,
+                "college_id": selected_college_id,
+            },
+            "filter_colleges": list(
+                colleges_for_user(request.user).select_related("university").order_by("university__name", "name")
+            ),
+        },
+    )
+
+
+@login_required
+def year_home(request):
+    if request.session.get("mentor"):
+        return redirect("/mentor-dashboard/")
+    if not (is_erp_owner(request.user) or is_university_head(request.user) or is_college_head(request.user) or is_year_head(request.user)):
+        return HttpResponse("Forbidden", status=403)
+
+    query = (request.GET.get("q") or "").strip()
+    selected_college_id = (request.GET.get("college_id") or "").strip()
+    selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
+
+    year_scopes_qs = year_scopes_for_user(request.user).select_related("college", "college__university").order_by(
+        "college__name", "year_code"
+    )
+    if selected_college_id.isdigit():
+        year_scopes_qs = year_scopes_qs.filter(college_id=selected_college_id)
+    if selected_year_scope_id.isdigit():
+        year_scopes_qs = year_scopes_qs.filter(id=selected_year_scope_id)
+    if query:
+        year_scopes_qs = year_scopes_qs.filter(
+            Q(year_code__icontains=query)
+            | Q(title__icontains=query)
+            | Q(college__name__icontains=query)
+            | Q(college__university__name__icontains=query)
+            | Q(role_assignments__user__username__icontains=query)
+        ).distinct()
+
+    year_scopes = list(year_scopes_qs)
+    scoped_modules = list(
+        modules_for_user(request.user)
+        .filter(year_scope__in=year_scopes)
+        .select_related("year_scope", "year_scope__college", "year_scope__college__university")
+        .order_by("name")
+    )
+    scoped_module_ids = [module.id for module in scoped_modules]
+
+    year_head_map = {}
+    for assignment in (
+        RoleAssignment.objects.filter(
+            role=RoleAssignment.ROLE_YEAR_HEAD,
+            is_active=True,
+            year_scope__in=year_scopes,
+            user__is_active=True,
+        )
+        .select_related("user", "year_scope")
+        .order_by("user__username")
+    ):
+        year_head_map.setdefault(assignment.year_scope_id, []).append(
+            {"id": assignment.id, "username": assignment.user.username}
+        )
+
+    coordinator_map = {}
+    for row in (
+        CoordinatorModuleAccess.objects.filter(module_id__in=scoped_module_ids)
+        .values("module_id")
+        .annotate(count=Count("coordinator_id", distinct=True))
+    ):
+        coordinator_map[row["module_id"]] = row["count"]
+
+    student_map = {}
+    for row in (
+        Student.objects.filter(module_id__in=scoped_module_ids)
+        .values("module_id")
+        .annotate(count=Count("id"))
+    ):
+        student_map[row["module_id"]] = row["count"]
+
+    subject_map = {}
+    for row in (
+        Subject.objects.filter(module_id__in=scoped_module_ids, is_active=True)
+        .values("module_id")
+        .annotate(count=Count("id"))
+    ):
+        subject_map[row["module_id"]] = row["count"]
+
+    timetable_map = {}
+    for row in (
+        TimetableEntry.objects.filter(module_id__in=scoped_module_ids, is_active=True)
+        .values("module_id")
+        .annotate(count=Count("id"))
+    ):
+        timetable_map[row["module_id"]] = row["count"]
+
+    active_calendar_module_ids = set(
+        AcademicCalendar.objects.filter(module_id__in=scoped_module_ids, is_active=True).values_list("module_id", flat=True)
+    )
+    result_upload_map = {}
+    for row in (
+        ResultUpload.objects.filter(module_id__in=scoped_module_ids)
+        .values("module_id")
+        .annotate(count=Count("id"))
+    ):
+        result_upload_map[row["module_id"]] = row["count"]
+
+    module_rows = []
+    for module in scoped_modules:
+        student_count = student_map.get(module.id, 0)
+        coordinator_count = coordinator_map.get(module.id, 0)
+        subject_count = subject_map.get(module.id, 0)
+        timetable_count = timetable_map.get(module.id, 0)
+        has_active_calendar = module.id in active_calendar_module_ids
+        result_upload_count = result_upload_map.get(module.id, 0)
+        missing = []
+        if coordinator_count == 0:
+            missing.append("Coordinator")
+        if student_count == 0:
+            missing.append("Students")
+        if subject_count == 0:
+            missing.append("Subjects")
+        if timetable_count == 0:
+            missing.append("Timetable")
+        if not has_active_calendar:
+            missing.append("Calendar")
+        if result_upload_count == 0:
+            missing.append("Results")
+        if "Subjects" in missing:
+            next_action = {
+                "label": "Open Subjects",
+                "url": f"/subjects/?module_id={module.id}&year_scope_id={module.year_scope_id}",
+            }
+        elif "Timetable" in missing:
+            next_action = {
+                "label": "Open Timetable",
+                "url": f"/view-timetable/?module_id={module.id}&year_scope_id={module.year_scope_id}",
+            }
+        elif "Students" in missing:
+            next_action = {
+                "label": "Open Students",
+                "url": f"/upload-students/?module_id={module.id}&year_scope_id={module.year_scope_id}",
+            }
+        elif "Coordinator" in missing:
+            next_action = {
+                "label": "Open Coordinators",
+                "url": f"/year-coordinators/?year_scope_id={module.year_scope_id}",
+            }
+        elif "Calendar" in missing:
+            next_action = {
+                "label": "Open Calendar",
+                "url": f"/academic-calendar/?module_id={module.id}&year_scope_id={module.year_scope_id}",
+            }
+        elif "Results" in missing:
+            next_action = {
+                "label": "Open Results",
+                "url": f"/upload-results/?module_id={module.id}&year_scope_id={module.year_scope_id}",
+            }
+        else:
+            next_action = {
+                "label": "Open Analytics",
+                "url": f"/attendance-analytics/?module_id={module.id}&year_scope_id={module.year_scope_id}",
+            }
+        checks_total = 6
+        checks_done = checks_total - len(missing)
+        readiness_score = int((checks_done / checks_total) * 100)
+        if len(missing) == 0:
+            health = "Healthy"
+        elif len(missing) <= 2:
+            health = "In Progress"
+        else:
+            health = "Blocked"
+        module_rows.append(
+            {
+                "module": module,
+                "student_count": student_count,
+                "coordinator_count": coordinator_count,
+                "subject_count": subject_count,
+                "timetable_count": timetable_count,
+                "has_active_calendar": has_active_calendar,
+                "result_upload_count": result_upload_count,
+                "missing": missing,
+                "readiness_score": readiness_score,
+                "health": health,
+                "next_action": next_action,
+            }
+        )
+
+    year_scope_rows = []
+    for year_scope in year_scopes:
+        year_modules = [row for row in module_rows if row["module"].year_scope_id == year_scope.id]
+        year_scope_rows.append(
+            {
+                "year_scope": year_scope,
+                "heads": year_head_map.get(year_scope.id, []),
+                "module_count": len(year_modules),
+                "coordinator_count": sum(row["coordinator_count"] for row in year_modules),
+                "student_count": sum(row["student_count"] for row in year_modules),
+                "subject_count": sum(row["subject_count"] for row in year_modules),
+                "timetable_count": sum(row["timetable_count"] for row in year_modules),
+                "active_calendar_count": sum(1 for row in year_modules if row["has_active_calendar"]),
+                "result_upload_count": sum(row["result_upload_count"] for row in year_modules),
+                "primary_module_id": year_modules[0]["module"].id if year_modules else "",
+            }
+        )
+
+    coordinators = (
+        User.objects.filter(is_active=True, module_accesses__module_id__in=scoped_module_ids)
+        .distinct()
+        .order_by("username")
+    )
+    coordinator_rows = []
+    for coordinator in coordinators:
+        names = list(
+            AcademicModule.objects.filter(coordinator_accesses__coordinator=coordinator, id__in=scoped_module_ids)
+            .order_by("name")
+            .values_list("name", flat=True)
+        )
+        coordinator_rows.append({"user": coordinator, "module_names": names})
+
+    summary = {
+        "year_scopes": len(year_scopes),
+        "modules": len(module_rows),
+        "coordinators": coordinators.count(),
+        "students": sum(row["student_count"] for row in module_rows),
+        "year_heads": sum(len(row["heads"]) for row in year_scope_rows),
+        "subjects": sum(row["subject_count"] for row in module_rows),
+        "timetable_entries": sum(row["timetable_count"] for row in module_rows),
+        "active_calendars": sum(1 for row in module_rows if row["has_active_calendar"]),
+        "result_uploads": sum(row["result_upload_count"] for row in module_rows),
+    }
+    scope_summary = {
+        "universities": ", ".join(sorted({row["year_scope"].college.university.name for row in year_scope_rows[:3]})),
+        "colleges": ", ".join(sorted({row["year_scope"].college.name for row in year_scope_rows[:3]})),
+        "years": ", ".join(row["year_scope"].year_code for row in year_scope_rows[:3]),
+        "extra_years": max(len(year_scope_rows) - 3, 0),
+    }
+    focus_module = scoped_modules[0] if scoped_modules else None
+    module_gap_summary = {
+        "without_coordinator": sum(1 for row in module_rows if "Coordinator" in row["missing"]),
+        "without_subjects": sum(1 for row in module_rows if "Subjects" in row["missing"]),
+        "without_timetable": sum(1 for row in module_rows if "Timetable" in row["missing"]),
+        "without_calendar": sum(1 for row in module_rows if "Calendar" in row["missing"]),
+        "without_students": sum(1 for row in module_rows if "Students" in row["missing"]),
+        "without_results": sum(1 for row in module_rows if "Results" in row["missing"]),
+    }
+
+    return render(
+        request,
+        "year_home.html",
+        {
+            "year_scopes": year_scopes,
+            "year_scope_rows": year_scope_rows,
+            "module_rows": module_rows,
+            "coordinator_rows": coordinator_rows,
+            "summary": summary,
+            "scope_summary": scope_summary,
+            "filters": {
+                "q": query,
+                "college_id": selected_college_id,
+                "year_scope_id": selected_year_scope_id,
+            },
+            "filter_colleges": list(
+                colleges_for_user(request.user).select_related("university").order_by("university__name", "name")
+            ),
+            "focus_module": focus_module,
+            "module_gap_summary": module_gap_summary,
         },
     )
 
@@ -1332,7 +2897,10 @@ def superadmin_home(request):
 # ---------------- STUDENT MASTER ----------------
 @admin_or_mentor_admin_required
 def upload_students(request):
-    module = _active_module(request)
+    module, module_choices, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
+    selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
 
     message = ""
     skipped_rows = []
@@ -1357,12 +2925,22 @@ def upload_students(request):
         form = UploadFileForm()
 
     students = Student.objects.select_related("mentor").filter(module=module).order_by("roll_no")
+    scope_summary = _module_scope_summary(
+        module,
+        students=students.count(),
+        mentors=Mentor.objects.filter(student__module=module).distinct().count(),
+        skipped=len(skipped_rows),
+    )
 
     return render(request, 'upload.html', {
         'form': form,
         'message': message,
         'students': students,
         'module': module,
+        'module_choices': module_choices,
+        'selected_module_id': str(module.id) if module else "",
+        'selected_year_scope_id': selected_year_scope_id,
+        'scope_summary': scope_summary,
         'skipped_rows': skipped_rows[:200],
     })
 
@@ -1371,8 +2949,12 @@ def upload_students(request):
 def upload_faculty(request):
     if request.session.get("mentor"):
         return redirect("/mentor-dashboard/")
-    if not is_superadmin_user(request.user):
+    if not has_staff_panel_access(request.user):
         return redirect("/reports/")
+    module, module_choices, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
+    selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
 
     message = ""
     skipped_rows = []
@@ -1380,10 +2962,12 @@ def upload_faculty(request):
     form = UploadFileForm()
 
     if request.method == "POST" and (request.POST.get("action") or "").strip() == "update_faculty":
+        redirect_response = _redirect_with_current_query(request, "/upload-faculty/")
         mentor_id = request.POST.get("mentor_id")
         mentor = Mentor.objects.filter(id=mentor_id).first()
         if not mentor:
-            message = "Faculty record not found."
+            messages.error(request, "Faculty record not found.")
+            return redirect_response
         else:
             full_name = (request.POST.get("full_name") or "").strip()
             department = (request.POST.get("department") or "").strip().upper()
@@ -1405,7 +2989,8 @@ def upload_faculty(request):
                 except Exception:
                     pass
             mentor.save()
-            message = f"Faculty record updated for {mentor.name}."
+            messages.success(request, f"Faculty record updated for {mentor.name}.")
+            return redirect_response
     elif request.method == "POST":
         form = UploadFileForm(request.POST, request.FILES)
         if form.is_valid():
@@ -1428,12 +3013,22 @@ def upload_faculty(request):
     )
     mentors = Mentor.objects.all().annotate(type_rank=order_case).order_by("type_rank", "name")
     last_update = Mentor.objects.aggregate(last=Max("updated_at")).get("last")
+    scope_summary = _module_scope_summary(
+        module,
+        faculty_records=mentors.count(),
+        students=Student.objects.filter(module=module).count(),
+    )
     return render(
         request,
         "faculty_upload.html",
         {
             "form": form,
             "message": message,
+            "module": module,
+            "module_choices": module_choices,
+            "selected_module_id": str(module.id) if module else "",
+            "selected_year_scope_id": selected_year_scope_id,
+            "scope_summary": scope_summary,
             "mentors": mentors,
             "skipped_rows": skipped_rows[:200],
             "debug_info": debug_info if request.method == "POST" else None,
@@ -1446,7 +3041,7 @@ def upload_faculty(request):
 def download_faculty_sample(request):
     if request.session.get("mentor"):
         return redirect("/mentor-dashboard/")
-    if not is_superadmin_user(request.user):
+    if not has_staff_panel_access(request.user):
         return redirect("/reports/")
 
     wb = Workbook()
@@ -2057,7 +3652,10 @@ def view_results(request):
 def view_practical_marks(request):
     if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
-    module = _active_module(request)
+    module, module_choices, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
+    selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
     msg = ""
     if request.method == "POST":
         try:
@@ -2092,6 +3690,16 @@ def view_practical_marks(request):
         "view_practical_marks.html",
         {
             "message": msg,
+            "module": module,
+            "module_choices": module_choices,
+            "selected_module_id": str(module.id) if module else "",
+            "selected_year_scope_id": selected_year_scope_id,
+            "scope_summary": _module_scope_summary(
+                module,
+                students=len(students),
+                subjects=len(subjects),
+                rows=len(rows),
+            ),
             "subjects": subjects,
             "rows": rows,
             "latest_upload": latest_upload,
@@ -2104,7 +3712,10 @@ def view_practical_marks(request):
 def sif_marks_template(request):
     if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
-    module = _active_module(request)
+    module, module_choices, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
+    selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
     _ensure_subject_display_order(module)
     students = list(Student.objects.filter(module=module).select_related("mentor").order_by("roll_no", "name"))
     selected_enrollment = request.GET.get("enrollment") or (students[0].enrollment if students else "")
@@ -2112,6 +3723,7 @@ def sif_marks_template(request):
 
     lock_obj, _ = SifMarksLock.objects.get_or_create(module=module)
     if request.method == "POST":
+        redirect_response = _redirect_with_current_query(request, "/sif-marks-template/", ["module_id", "year_scope_id", "enrollment"])
         action = (request.POST.get("action") or "").strip()
         if action == "lock":
             lock_obj.locked = True
@@ -2144,13 +3756,17 @@ def sif_marks_template(request):
                             a.display_order, b.display_order = b.display_order, a.display_order
                             a.save(update_fields=["display_order"])
                             b.save(update_fields=["display_order"])
-        return redirect(f"/sif-marks-template/?enrollment={selected_enrollment}")
+        return redirect_response
 
     marks_rows = _sif_marks_rows_for_student(selected_student, module) if selected_student else []
     return render(
         request,
         "sif_marks_template.html",
         {
+            "module": module,
+            "module_choices": module_choices,
+            "selected_module_id": str(module.id) if module else "",
+            "selected_year_scope_id": selected_year_scope_id,
             "students": students,
             "selected_student": selected_student,
             "selected_enrollment": selected_enrollment,
@@ -2165,7 +3781,10 @@ def sif_marks_template(request):
 def subjects_page(request):
     if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
-    module = _active_module(request)
+    module, module_choices, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
+    selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
     subjects = list(Subject.objects.filter(module=module).order_by("name"))
     subject_choices = []
     subject_key_map = {}
@@ -2176,8 +3795,8 @@ def subjects_page(request):
             subject_choices.append(val)
             subject_key_map[_norm_subject_key(val)] = val
     subject_choices = sorted({v for v in subject_choices if v})
-    is_superadmin = is_superadmin_user(getattr(request, "user", None))
-    if is_superadmin:
+    is_library_admin = _is_subject_library_admin(getattr(request, "user", None))
+    if is_library_admin:
         for s in subjects:
             template, _ = SubjectTemplate.objects.update_or_create(
                 name=s.name,
@@ -2232,10 +3851,20 @@ def subjects_page(request):
         request,
         "subjects.html",
         {
+            "module": module,
+            "module_choices": module_choices,
+            "selected_module_id": str(module.id) if module else "",
+            "selected_year_scope_id": selected_year_scope_id,
+            "scope_summary": _module_scope_summary(
+                module,
+                subjects=len(subjects),
+                aliases=len(alias_rows),
+                templates=len(templates),
+            ),
             "subjects": subjects,
             "available_templates": templates,
             "selected_template_ids": selected_template_ids,
-            "is_superadmin": is_superadmin,
+            "is_library_admin": is_library_admin,
             "format_full": Subject.FORMAT_FULL,
             "format_t4_only": Subject.FORMAT_T4_ONLY,
             "aliases": SubjectAlias.objects.filter(module=module).order_by("alias"),
@@ -2251,15 +3880,17 @@ def subjects_page(request):
 def add_subject_alias(request):
     if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
+    redirect_response = _redirect_with_current_query(request, "/subjects/", ["module_id", "year_scope_id"])
     module = _active_module(request)
+    is_library_admin = _is_subject_library_admin(getattr(request, "user", None))
     alias = (request.POST.get("alias") or "").strip()
     canonical = (request.POST.get("canonical") or "").strip()
     apply_all = bool(request.POST.get("apply_all"))
     if not alias or not canonical:
         messages.error(request, "Alias and canonical subject are required.")
-        return redirect("/subjects/")
+        return redirect_response
     targets = [module]
-    if is_superadmin_user(getattr(request, "user", None)) and apply_all:
+    if is_library_admin and apply_all:
         targets = list(AcademicModule.objects.filter(is_active=True))
     for target in targets:
         existing = SubjectAlias.objects.filter(module=target, alias__iexact=alias).first()
@@ -2271,7 +3902,7 @@ def add_subject_alias(request):
         else:
             SubjectAlias.objects.create(module=target, alias=alias, canonical=canonical, is_active=True)
     messages.success(request, "Subject alias saved.")
-    return redirect("/subjects/")
+    return redirect_response
 
 
 @admin_or_mentor_admin_required
@@ -2279,30 +3910,32 @@ def add_subject_alias(request):
 def update_subject_alias(request, alias_id):
     if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
+    redirect_response = _redirect_with_current_query(request, "/subjects/", ["module_id", "year_scope_id"])
     module = _active_module(request)
+    is_library_admin = _is_subject_library_admin(getattr(request, "user", None))
     alias_obj = SubjectAlias.objects.filter(id=alias_id).first()
     if not alias_obj:
         messages.error(request, "Alias not found.")
-        return redirect("/subjects/")
-    if not is_superadmin_user(getattr(request, "user", None)) and alias_obj.module_id != module.id:
+        return redirect_response
+    if not is_library_admin and alias_obj.module_id != module.id:
         messages.error(request, "Alias not allowed for this module.")
-        return redirect("/subjects/")
+        return redirect_response
     alias = (request.POST.get("alias") or "").strip()
     canonical = (request.POST.get("canonical") or "").strip()
     is_active = bool(request.POST.get("is_active"))
     if not alias or not canonical:
         messages.error(request, "Alias and canonical subject are required.")
-        return redirect("/subjects/")
+        return redirect_response
     conflict = SubjectAlias.objects.filter(module=alias_obj.module, alias__iexact=alias).exclude(id=alias_obj.id).exists()
     if conflict:
         messages.error(request, "Another alias already exists with this name.")
-        return redirect("/subjects/")
+        return redirect_response
     alias_obj.alias = alias
     alias_obj.canonical = canonical
     alias_obj.is_active = is_active
     alias_obj.save(update_fields=["alias", "canonical", "is_active"])
     messages.success(request, "Subject alias updated.")
-    return redirect("/subjects/")
+    return redirect_response
 
 
 @admin_or_mentor_admin_required
@@ -2310,17 +3943,19 @@ def update_subject_alias(request, alias_id):
 def delete_subject_alias(request, alias_id):
     if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
+    redirect_response = _redirect_with_current_query(request, "/subjects/", ["module_id", "year_scope_id"])
     module = _active_module(request)
+    is_library_admin = _is_subject_library_admin(getattr(request, "user", None))
     alias_obj = SubjectAlias.objects.filter(id=alias_id).first()
     if not alias_obj:
         messages.error(request, "Alias not found.")
-        return redirect("/subjects/")
-    if not is_superadmin_user(getattr(request, "user", None)) and alias_obj.module_id != module.id:
+        return redirect_response
+    if not is_library_admin and alias_obj.module_id != module.id:
         messages.error(request, "Alias not allowed for this module.")
-        return redirect("/subjects/")
+        return redirect_response
     alias_obj.delete()
     messages.info(request, "Subject alias removed.")
-    return redirect("/subjects/")
+    return redirect_response
 
 
 @admin_or_mentor_admin_required
@@ -2328,6 +3963,7 @@ def delete_subject_alias(request, alias_id):
 def add_subject(request):
     if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
+    redirect_response = _redirect_with_current_query(request, "/subjects/", ["module_id", "year_scope_id"])
     module = _active_module(request)
     name = (request.POST.get("name") or "").strip()
     short_name = (request.POST.get("short_name") or "").strip()
@@ -2336,7 +3972,7 @@ def add_subject(request):
     has_practical = bool(request.POST.get("has_practical"))
     if not name:
         messages.error(request, "Subject name is required.")
-        return redirect("/subjects/")
+        return redirect_response
     if not short_name:
         short_name = name
     if not has_theory:
@@ -2366,7 +4002,7 @@ def add_subject(request):
         subject.has_practical = has_practical
         subject.is_active = True
         subject.save(update_fields=["name", "short_name", "result_format", "has_theory", "has_practical", "is_active"])
-    if is_superadmin_user(getattr(request, "user", None)):
+    if _is_subject_library_admin(getattr(request, "user", None)):
         template, _ = SubjectTemplate.objects.update_or_create(
             name=name,
             defaults={
@@ -2381,7 +4017,7 @@ def add_subject(request):
             subject.source_template = template
             subject.save(update_fields=["source_template"])
     messages.success(request, "Subject saved.")
-    return redirect("/subjects/")
+    return redirect_response
 
 
 @admin_or_mentor_admin_required
@@ -2389,6 +4025,7 @@ def add_subject(request):
 def edit_subject(request, subject_id):
     if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
+    redirect_response = _redirect_with_current_query(request, "/subjects/", ["module_id", "year_scope_id"])
     module = _active_module(request)
     name = (request.POST.get("name") or "").strip()
     short_name = (request.POST.get("short_name") or "").strip()
@@ -2397,13 +4034,13 @@ def edit_subject(request, subject_id):
     has_practical = bool(request.POST.get("has_practical"))
     if not name:
         messages.error(request, "Subject name is required.")
-        return redirect("/subjects/")
+        return redirect_response
     subject = Subject.objects.filter(id=subject_id, module=module).first()
     if subject:
         duplicate = Subject.objects.filter(module=module, name__iexact=name).exclude(id=subject.id).first()
         if duplicate:
             messages.error(request, "A subject with this name already exists in the module.")
-            return redirect("/subjects/")
+            return redirect_response
         subject.name = name
         subject.short_name = short_name or name
         if not has_theory:
@@ -2414,7 +4051,7 @@ def edit_subject(request, subject_id):
         subject.has_theory = has_theory
         subject.has_practical = has_practical
         subject.save(update_fields=["name", "short_name", "result_format", "has_theory", "has_practical"])
-        if is_superadmin_user(getattr(request, "user", None)):
+        if _is_subject_library_admin(getattr(request, "user", None)):
             template = subject.source_template
             if not template:
                 template, _ = SubjectTemplate.objects.get_or_create(name=name)
@@ -2429,7 +4066,7 @@ def edit_subject(request, subject_id):
                 subject.source_template = template
                 subject.save(update_fields=["source_template"])
         messages.success(request, "Subject updated.")
-    return redirect("/subjects/")
+    return redirect_response
 
 
 @admin_or_mentor_admin_required
@@ -2437,6 +4074,7 @@ def edit_subject(request, subject_id):
 def apply_subject_templates(request):
     if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
+    redirect_response = _redirect_with_current_query(request, "/subjects/", ["module_id", "year_scope_id"])
     module = _active_module(request)
     selected_ids = {
         int(x)
@@ -2483,7 +4121,7 @@ def apply_subject_templates(request):
             existing_by_name.save(update_fields=["source_template"])
 
     messages.success(request, "Subject selection updated for this module.")
-    return redirect("/subjects/")
+    return redirect_response
 
 
 @admin_or_mentor_admin_required
@@ -2491,13 +4129,14 @@ def apply_subject_templates(request):
 def delete_subject(request, subject_id):
     if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
+    redirect_response = _redirect_with_current_query(request, "/subjects/")
     module = _active_module(request)
     subject = Subject.objects.filter(id=subject_id, module=module).first()
     if subject:
         subject.is_active = False
         subject.save(update_fields=["is_active"])
         messages.success(request, "Subject archived.")
-    return redirect("/subjects/")
+    return redirect_response
 
 def next_dir(current_sort, current_dir, column):
     if current_sort == column and current_dir == "asc":
@@ -3006,11 +4645,23 @@ def mentor_report(request):
     mentor_obj = _session_mentor_obj(request)
     if not mentor_obj:
         return redirect("/")
-    module = _active_module(request)
+    module, module_choices, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
+    selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
 
     week = request.GET.get("week")
     if not week:
-        return render(request,"mentor_report.html")
+        return render(
+            request,
+            "mentor_report.html",
+            {
+                "module": module,
+                "module_choices": module_choices,
+                "selected_module_id": str(module.id) if module else "",
+                "selected_year_scope_id": selected_year_scope_id,
+            },
+        )
 
     week = int(week)
 
@@ -3041,14 +4692,28 @@ No. Of message done when call not received: {message_done}
 Call not done: {not_done}
 """
 
-    return render(request,"mentor_report.html",{"report":report,"week":week})
+    return render(
+        request,
+        "mentor_report.html",
+        {
+            "report": report,
+            "week": week,
+            "module": module,
+            "module_choices": module_choices,
+            "selected_module_id": str(module.id) if module else "",
+            "selected_year_scope_id": selected_year_scope_id,
+        },
+    )
 
 
 def mentor_result_calls(request):
     mentor = _session_mentor_obj(request)
     if not mentor:
         return redirect("/")
-    module = _active_module(request)
+    module, _, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
+    selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
     uploads = list(
         ResultUpload.objects.filter(module=module, calls__student__mentor=mentor, calls__student__module=module)
         .distinct()
@@ -3088,6 +4753,8 @@ def mentor_result_calls(request):
         "mentor_result_calls.html",
         {
             "mentor": mentor,
+            "module": module,
+            "selected_year_scope_id": selected_year_scope_id,
             "uploads": uploads,
             "selected_upload": selected_upload,
             "records": records,
@@ -3221,10 +4888,14 @@ def mark_result_message(request):
 
 
 def mentor_result_report(request):
-    mentor = _session_mentor_obj(request)
-    if not mentor:
+    mentor_mode = bool(request.session.get("mentor"))
+    if not mentor_mode and not request.user.is_authenticated:
         return redirect("/")
-    module = _active_module(request)
+    mentor = _session_mentor_obj(request)
+    module, module_choices, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
+    selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
 
     uploads = list(
         ResultUpload.objects.filter(module=module, calls__student__mentor=mentor, calls__student__module=module)
@@ -3266,6 +4937,10 @@ def mentor_result_report(request):
         request,
         "mentor_result_report.html",
         {
+            "module": module,
+            "module_choices": module_choices,
+            "selected_module_id": str(module.id) if module else "",
+            "selected_year_scope_id": selected_year_scope_id,
             "uploads": uploads,
             "selected_upload": selected_upload,
             "report": report,
@@ -3278,7 +4953,9 @@ def print_student(request, enrollment):
     if not request.user.is_authenticated and "mentor" not in request.session:
         return redirect("/")
 
-    module = _active_module(request)
+    module, _, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
     student = Student.objects.select_related("mentor").get(module=module, enrollment=enrollment)
     mentor = _session_mentor_obj(request)
     if mentor and student.mentor_id != mentor.id:
@@ -3301,7 +4978,9 @@ def mentor_prefilled_sif_pdf(request, enrollment):
     mentor = _session_mentor_obj(request)
     if not mentor:
         return redirect("/")
-    module = _active_module(request)
+    module, _, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
     student = Student.objects.select_related("mentor").filter(module=module, enrollment=enrollment, mentor=mentor).first()
     if not student:
         return HttpResponse("Unauthorized", status=403)
@@ -3318,7 +4997,9 @@ def mentor_prefilled_sif_zip(request):
     mentor = _session_mentor_obj(request)
     if not mentor:
         return redirect("/")
-    module = _active_module(request)
+    module, _, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
 
     students = list(
         Student.objects.select_related("mentor")
@@ -3636,7 +5317,10 @@ def live_followup_sheet(request):
     if not mentor_mode and not request.user.is_authenticated:
         return redirect("/")
 
-    module = _active_module(request)
+    module, module_choices, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
+    selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
     selected_mentor = (request.GET.get("mentor") or "").strip()
     if mentor_mode:
         selected_mentor = (request.session.get("mentor") or "").strip()
@@ -3718,8 +5402,11 @@ def live_followup_sheet(request):
             "selected_sort": selected_sort,
             "selected_dir": selected_dir,
             "module": module,
+            "module_choices": module_choices,
+            "selected_module_id": str(module.id) if module else "",
+            "selected_year_scope_id": selected_year_scope_id,
             "mentor_mode": mentor_mode,
-            "is_superadmin_view": (not mentor_mode and bool(request.user.is_authenticated and is_superadmin_user(request.user))),
+            "is_admin_view": (not mentor_mode and bool(request.user.is_authenticated and has_staff_panel_access(request.user))),
         },
     )
 
@@ -3729,7 +5416,9 @@ def live_followup_sheet_excel(request):
     if not mentor_mode and not request.user.is_authenticated:
         return redirect("/")
 
-    module = _active_module(request)
+    module, _, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
     selected_mentor = (request.GET.get("mentor") or "").strip()
     if mentor_mode:
         selected_mentor = (request.session.get("mentor") or "").strip()
@@ -3790,7 +5479,9 @@ def live_followup_sheet_pdf(request):
     if not mentor_mode and not request.user.is_authenticated:
         return redirect("/")
 
-    module = _active_module(request)
+    module, _, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
     selected_mentor = (request.GET.get("mentor") or "").strip()
     if mentor_mode:
         selected_mentor = (request.session.get("mentor") or "").strip()
@@ -3880,11 +5571,8 @@ def live_followup_sheet_pdf(request):
 def live_followup_sheet_db_backup_json(request):
     if _block_mentor_only(request):
         return HttpResponse("Forbidden", status=403)
-    if not is_superadmin_user(request.user):
+    if not has_staff_panel_access(request.user):
         return HttpResponse("Forbidden", status=403)
-
-    ts = timezone.now().astimezone(IST).strftime("%Y%m%d_%H%M%S")
-    filename = f"himentor_legacy_full_backup_{ts}.zip"
 
     def export_models():
         core_models = sorted(
@@ -3912,6 +5600,8 @@ def live_followup_sheet_db_backup_json(request):
             "fields": fields,
         }
 
+    ts = timezone.now().astimezone(IST).strftime("%Y%m%d_%H%M%S")
+    filename = f"himentor_legacy_full_backup_{ts}.zip"
     temp_file = tempfile.SpooledTemporaryFile(max_size=1024 * 1024, mode="w+b")
     models_to_export = export_models()
     manifest = {
@@ -3952,7 +5642,10 @@ def live_followup_sheet_db_backup_json(request):
 def coordinator_result_report(request):
     if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
-    module = _active_module(request)
+    module, module_choices, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
+    selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
 
     uploads = ResultUpload.objects.filter(module=module).order_by("-uploaded_at")
     selected_upload = None
@@ -4001,6 +5694,10 @@ def coordinator_result_report(request):
         request,
         "coordinator_result_report.html",
         {
+            "module": module,
+            "module_choices": module_choices,
+            "selected_module_id": str(module.id) if module else "",
+            "selected_year_scope_id": selected_year_scope_id,
             "uploads": uploads,
             "selected_upload": selected_upload,
             "data": data,
@@ -4056,6 +5753,7 @@ def control_panel(request):
     }
 
     if request.method == "POST":
+        redirect_response = _redirect_with_current_query(request, "/control-panel/")
         action = (request.POST.get("action") or "").strip()
         if action == "mentor_home":
             setting, _ = MentorHomeSetting.objects.get_or_create(module=module)
@@ -4086,7 +5784,7 @@ def control_panel(request):
             setting.manual_page = manual_page
             setting.save()
             messages.success(request, "Mentor homepage settings updated.")
-            return redirect("/control-panel/")
+            return redirect_response
 
     return render(
         request,
@@ -4105,7 +5803,10 @@ def mentor_print_sif(request):
     mentor = _session_mentor_obj(request)
     if not mentor:
         return redirect("/")
-    module = _active_module(request)
+    module, module_choices, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
+    selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
 
     students = Student.objects.select_related("mentor").filter(module=module, mentor=mentor).order_by("roll_no", "name")
     return render(
@@ -4113,6 +5814,10 @@ def mentor_print_sif(request):
         "mentor_print_sif.html",
         {
             "mentor": mentor,
+            "module": module,
+            "module_choices": module_choices,
+            "selected_module_id": str(module.id) if module else "",
+            "selected_year_scope_id": selected_year_scope_id,
             "students": students,
         },
     )
@@ -4123,7 +5828,10 @@ def mentor_view_sif(request):
     if not mentor:
         return redirect("/")
 
-    module = _active_module(request)
+    module, module_choices, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
+    selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
     students = list(
         Student.objects.select_related("mentor")
         .filter(module=module, mentor=mentor)
@@ -4291,6 +5999,10 @@ def mentor_view_sif(request):
         "mentor_view_sif.html",
         {
             "mentor": mentor,
+            "module": module,
+            "module_choices": module_choices,
+            "selected_module_id": str(module.id) if module else "",
+            "selected_year_scope_id": selected_year_scope_id,
             "students": students,
             "selected_student": selected_student,
             "attendance_rows": attendance_rows,
@@ -4473,10 +6185,24 @@ def mentor_sif_marks(request):
     mentor = _session_mentor_obj(request)
     if not mentor:
         return redirect("/")
-    module = _active_module(request)
+    module, module_choices, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
+    selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
     lock_obj = SifMarksLock.objects.filter(module=module).first()
     if not lock_obj or not lock_obj.locked:
-        return render(request, "mentor_sif_marks.html", {"locked": False})
+        return render(
+            request,
+            "mentor_sif_marks.html",
+            {
+                "locked": False,
+                "module": module,
+                "module_choices": module_choices,
+                "selected_module_id": str(module.id) if module else "",
+                "selected_year_scope_id": selected_year_scope_id,
+                "scope_summary": _module_scope_summary(module, students=0, subjects=0, locked=False),
+            },
+        )
 
     students = list(
         Student.objects.select_related("mentor")
@@ -4491,6 +6217,16 @@ def mentor_sif_marks(request):
         "mentor_sif_marks.html",
         {
             "locked": True,
+            "module": module,
+            "module_choices": module_choices,
+            "selected_module_id": str(module.id) if module else "",
+            "selected_year_scope_id": selected_year_scope_id,
+            "scope_summary": _module_scope_summary(
+                module,
+                students=len(students),
+                subjects=len(marks_rows),
+                locked=True,
+            ),
             "students": students,
             "selected_student": selected_student,
             "selected_enrollment": selected_enrollment,
@@ -4503,7 +6239,9 @@ def mentor_sif_marks_pdf(request, enrollment):
     mentor = _session_mentor_obj(request)
     if not mentor:
         return redirect("/")
-    module = _active_module(request)
+    module, _, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
     lock_obj = SifMarksLock.objects.filter(module=module).first()
     if not lock_obj or not lock_obj.locked:
         return HttpResponse("Marks not yet locked.", status=403)
@@ -4520,7 +6258,9 @@ def mentor_sif_marks_pdf_all(request):
     mentor = _session_mentor_obj(request)
     if not mentor:
         return redirect("/")
-    module = _active_module(request)
+    module, _, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
     lock_obj = SifMarksLock.objects.filter(module=module).first()
     if not lock_obj or not lock_obj.locked:
         return HttpResponse("Marks not yet locked.", status=403)
@@ -4550,7 +6290,7 @@ def healthz(request):
 @login_required
 @require_http_methods(["POST"])
 def rbac_create_coordinator(request):
-    guard = _require_superadmin(request)
+    guard = _require_admin_panel_access(request)
     if guard:
         return guard
 
@@ -4564,7 +6304,12 @@ def rbac_create_coordinator(request):
         return JsonResponse({"ok": False, "msg": "username already exists"}, status=400)
 
     module_ids = [x.strip() for x in module_ids_raw.split(",") if x.strip().isdigit()]
-    modules = list(AcademicModule.objects.filter(id__in=module_ids, is_active=True)) if module_ids else []
+    allowed_module_ids = set(allowed_modules_for_user(request).values_list("id", flat=True))
+    modules = (
+        list(AcademicModule.objects.filter(id__in=module_ids, is_active=True).filter(id__in=allowed_module_ids))
+        if module_ids
+        else []
+    )
     if not modules:
         return JsonResponse({"ok": False, "msg": "at least one valid module is required"}, status=400)
 
@@ -4579,7 +6324,7 @@ def rbac_create_coordinator(request):
 @login_required
 @require_http_methods(["POST"])
 def rbac_update_coordinator_modules(request):
-    guard = _require_superadmin(request)
+    guard = _require_admin_panel_access(request)
     if guard:
         return guard
 
@@ -4591,11 +6336,16 @@ def rbac_update_coordinator_modules(request):
     coordinator = User.objects.filter(id=int(coordinator_id)).first()
     if not coordinator:
         return JsonResponse({"ok": False, "msg": "coordinator not found"}, status=404)
-    if is_superadmin_user(coordinator):
-        return JsonResponse({"ok": False, "msg": "cannot remap superadmin"}, status=400)
+    if has_staff_panel_access(coordinator):
+        return JsonResponse({"ok": False, "msg": "cannot remap admin user"}, status=400)
 
     module_ids = [x.strip() for x in module_ids_raw.split(",") if x.strip().isdigit()]
-    modules = list(AcademicModule.objects.filter(id__in=module_ids, is_active=True)) if module_ids else []
+    allowed_module_ids = set(allowed_modules_for_user(request).values_list("id", flat=True))
+    modules = (
+        list(AcademicModule.objects.filter(id__in=module_ids, is_active=True).filter(id__in=allowed_module_ids))
+        if module_ids
+        else []
+    )
     if not modules:
         return JsonResponse({"ok": False, "msg": "at least one valid module is required"}, status=400)
 
@@ -4609,8 +6359,8 @@ def rbac_update_coordinator_modules(request):
 
 @login_required
 @require_http_methods(["POST"])
-def superadmin_change_password(request):
-    guard = _require_superadmin(request)
+def admin_change_password(request):
+    guard = _require_admin_panel_access(request)
     if guard:
         return guard
 
@@ -4655,20 +6405,40 @@ def switch_admin_mode(request):
 def manage_modules(request):
     if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
-    if not is_superadmin_user(request.user):
+    if not has_staff_panel_access(request.user):
         return HttpResponse("Forbidden", status=403)
 
+    is_global_module_admin = bool(
+        is_erp_owner(request.user) or is_legacy_admin_user(request.user)
+    )
+    modules_in_scope = list(allowed_modules_for_user(request))
+    selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
+    if selected_year_scope_id.isdigit():
+        modules_in_scope = [m for m in modules_in_scope if m.year_scope_id == int(selected_year_scope_id)]
+    allowed_module_ids = {module.id for module in modules_in_scope}
+    current_module = _active_module(request)
+    default_year_scope = None
+    if selected_year_scope_id.isdigit():
+        default_year_scope = YearScope.objects.filter(id=selected_year_scope_id).first()
+        if default_year_scope and not can_manage_year_scope(request.user, default_year_scope):
+            return HttpResponse("Forbidden", status=403)
+    if default_year_scope is None:
+        default_year_scope = getattr(current_module, "year_scope", None)
+
     if request.method == "POST":
+        redirect_response = _redirect_with_current_query(request, "/modules/", ["year_scope_id"])
         action = (request.POST.get("action") or "create").strip()
         if action == "delete":
             module_id = request.POST.get("module_id")
             module = AcademicModule.objects.filter(id=module_id).first()
             if not module:
                 messages.error(request, "Module not found.")
+            elif module.id not in allowed_module_ids:
+                messages.error(request, "You do not have access to delete this module.")
             else:
                 module.delete()
                 messages.success(request, "Module deleted.")
-            return redirect("/modules/")
+            return redirect_response
 
         module_id = request.POST.get("module_id")
         batch = (request.POST.get("academic_batch") or "").strip()
@@ -4679,7 +6449,9 @@ def manage_modules(request):
 
         if not batch:
             messages.error(request, "Batch is required.")
-            return redirect("/modules/")
+            return redirect_response
+        if default_year_scope and not is_global_module_admin:
+            year_level = default_year_scope.year_code
         if year_level not in {x[0] for x in AcademicModule.YEAR_CHOICES}:
             year_level = "FY"
         if variant not in {x[0] for x in AcademicModule.VARIANT_CHOICES}:
@@ -4693,17 +6465,22 @@ def manage_modules(request):
             module = AcademicModule.objects.filter(id=module_id).first()
             if not module:
                 messages.error(request, "Module not found.")
-                return redirect("/modules/")
+                return redirect_response
+            if module.id not in allowed_module_ids:
+                messages.error(request, "You do not have access to update this module.")
+                return redirect_response
             conflict = AcademicModule.objects.filter(name=name).exclude(id=module.id).exists()
             if conflict:
                 messages.error(request, "Another module already exists with same name.")
-                return redirect("/modules/")
+                return redirect_response
             module.name = name
             module.academic_batch = batch
             module.year_level = year_level
             module.variant = variant
             module.semester = semester
             module.is_active = is_active
+            if default_year_scope and not is_global_module_admin:
+                module.year_scope = default_year_scope
             module.save(
                 update_fields=[
                     "name",
@@ -4711,12 +6488,13 @@ def manage_modules(request):
                     "year_level",
                     "variant",
                     "semester",
+                    "year_scope",
                     "is_active",
                 ]
             )
             request.session["current_module_id"] = module.id
             messages.success(request, f"Module updated: {module.name}")
-            return redirect("/modules/")
+            return redirect_response
 
         module, created = AcademicModule.objects.get_or_create(
             name=name,
@@ -4725,31 +6503,41 @@ def manage_modules(request):
                 "year_level": year_level,
                 "variant": variant,
                 "semester": semester,
+                "year_scope": None if is_global_module_admin else default_year_scope,
                 "is_active": is_active,
             },
         )
         if not created and action == "create":
+            if module.id not in allowed_module_ids:
+                messages.error(request, "A module with this name exists outside your access scope.")
+                return redirect_response
             module.academic_batch = batch
             module.year_level = year_level
             module.variant = variant
             module.semester = semester
+            if default_year_scope and not is_global_module_admin:
+                module.year_scope = default_year_scope
             module.is_active = is_active
-            module.save(update_fields=["academic_batch", "year_level", "variant", "semester", "is_active"])
+            module.save(update_fields=["academic_batch", "year_level", "variant", "semester", "year_scope", "is_active"])
         request.session["current_module_id"] = module.id
         if created:
             messages.success(request, f"Module created: {module.name}")
         else:
             messages.info(request, f"Module already exists and updated: {module.name}")
-        return redirect("/modules/")
+        return redirect_response
 
     return render(
         request,
         "modules.html",
         {
-            "modules": AcademicModule.objects.all().order_by("-id"),
+            "modules": modules_in_scope,
             "year_choices": AcademicModule.YEAR_CHOICES,
             "variant_choices": AcademicModule.VARIANT_CHOICES,
             "sem_choices": AcademicModule.SEM_CHOICES,
+            "filters": {
+                "year_scope_id": selected_year_scope_id,
+            },
+            "default_year_scope": default_year_scope,
         },
     )
 
@@ -5192,18 +6980,23 @@ def upload_timetable(request):
     if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
 
-    module = _active_module(request)
+    module, module_choices, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
+    selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
     _ensure_active_timetable(module)
     form = UploadFileForm(request.POST or None, request.FILES or None)
     uploads = TimetableUpload.objects.filter(module=module).order_by("-uploaded_at")[:5]
 
     if request.method == "POST" and request.POST.get("action") == "delete_all":
+        redirect_response = _redirect_with_current_query(request, "/upload-timetable/", ["module_id", "year_scope_id"])
         TimetableEntry.objects.filter(module=module).delete()
         TimetableUpload.objects.filter(module=module).delete()
         messages.success(request, "All timetable entries deleted.")
-        return redirect("/upload-timetable/")
+        return redirect_response
 
     if request.method == "POST" and form.is_valid():
+        redirect_response = _redirect_with_current_query(request, "/upload-timetable/", ["module_id", "year_scope_id"])
         file = form.cleaned_data["file"]
         try:
             entries, sheet_name = parse_timetable_excel(file)
@@ -5212,7 +7005,14 @@ def upload_timetable(request):
             return render(
                 request,
                 "upload_timetable.html",
-                {"form": form, "uploads": uploads, "module": module},
+                {
+                    "form": form,
+                    "uploads": uploads,
+                    "module": module,
+                    "module_choices": module_choices,
+                    "selected_module_id": str(module.id) if module else "",
+                    "selected_year_scope_id": selected_year_scope_id,
+                },
             )
 
         activate_mode = (request.POST.get("activate_mode") or "now").strip().lower()
@@ -5222,14 +7022,14 @@ def upload_timetable(request):
         if activate_mode == "later":
             if not schedule_date:
                 messages.error(request, "Select a schedule date to activate later.")
-                return redirect("/upload-timetable/")
+                return redirect_response
             try:
                 date_val = _parse_date_param(schedule_date)
                 hour, minute = [int(x) for x in schedule_time.split(":")]
                 effective_from = timezone.make_aware(datetime.combine(date_val, time(hour, minute)))
             except Exception:
                 messages.error(request, "Invalid schedule date/time.")
-                return redirect("/upload-timetable/")
+                return redirect_response
 
         created = 0
         skipped = 0
@@ -5298,12 +7098,26 @@ def upload_timetable(request):
                 request,
                 f"Timetable uploaded ({sheet_name}). Entries created: {created}, skipped: {skipped}. Scheduled from {effective_from:%d %b %Y %H:%M}.",
             )
-        return redirect("/upload-timetable/")
+        return redirect_response
 
     return render(
         request,
         "upload_timetable.html",
-        {"form": form, "uploads": uploads, "module": module, "now": timezone.now()},
+        {
+            "form": form,
+            "uploads": uploads,
+            "module": module,
+            "module_choices": module_choices,
+            "selected_module_id": str(module.id) if module else "",
+            "selected_year_scope_id": selected_year_scope_id,
+            "scope_summary": _module_scope_summary(
+                module,
+                uploads=TimetableUpload.objects.filter(module=module).count(),
+                active_entries=TimetableEntry.objects.filter(module=module, is_active=True).count(),
+                subjects=Subject.objects.filter(module=module, is_active=True).count(),
+            ),
+            "now": timezone.now(),
+        },
     )
 
 
@@ -5312,7 +7126,10 @@ def view_timetable(request):
     mentor = _session_mentor_obj(request)
     if not mentor and not request.user.is_authenticated:
         return redirect("/")
-    module = _active_module(request)
+    module, module_choices, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
+    selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
     _ensure_active_timetable(module)
     choice_lists = _timetable_choice_lists(module)
     today = timezone.localdate()
@@ -5330,6 +7147,11 @@ def view_timetable(request):
     adj_map = {(a.date, a.batch, a.lecture_no): a for a in adjustments}
     selected_date = week_start
     if request.method == "POST":
+        redirect_response = _redirect_with_current_query(
+            request,
+            "/view-timetable/",
+            ["module_id", "year_scope_id", "day", "lecture_no", "batch", "subject", "faculty", "room", "editor_date", "editor_faculty", "recent"],
+        )
         action = (request.POST.get("action") or "").strip()
         if action == "perm_proxy":
             entry_id = request.POST.get("entry_id")
@@ -5341,11 +7163,11 @@ def view_timetable(request):
             entry = TimetableEntry.objects.filter(id=entry_id, module=module, is_active=True).first()
             if not entry:
                 messages.error(request, "Lecture not found.")
-                return redirect("/view-timetable/?updated=1")
+                return redirect_response
             proxy = Mentor.objects.filter(name__iexact=proxy_name).first()
             if not proxy:
                 messages.error(request, "Select a valid proxy faculty.")
-                return redirect("/view-timetable/?updated=1")
+                return redirect_response
             room = room_custom or room_select or entry.room
             subject_val = _resolve_proxy_subject(
                 module,
@@ -5388,8 +7210,14 @@ def view_timetable(request):
             )
             _sync_subjects_from_timetable(module)
             messages.success(request, "Timetable updated permanently.")
-            return redirect(
-                f"/view-timetable/?updated=1&highlight=1&last_key={entry.day_of_week}:{entry.lecture_no}:{entry.batch}"
+            request.GET = request.GET.copy()
+            request.GET["updated"] = "1"
+            request.GET["highlight"] = "1"
+            request.GET["last_key"] = f"{entry.day_of_week}:{entry.lecture_no}:{entry.batch}"
+            return _redirect_with_current_query(
+                request,
+                "/view-timetable/",
+                ["module_id", "year_scope_id", "day", "lecture_no", "batch", "subject", "faculty", "room", "editor_date", "editor_faculty", "recent", "updated", "highlight", "last_key"],
             )
         if action == "perm_swap":
             entry_id = request.POST.get("entry_id")
@@ -5408,7 +7236,7 @@ def view_timetable(request):
             ).exclude(id=entry_id).first()
             if not entry or not partner:
                 messages.error(request, "Select valid lectures to swap.")
-                return redirect("/view-timetable/?updated=1")
+                return redirect_response
             room_a = swap_room or partner.room
             room_b = current_room or entry.room
             time_a = _fixed_time_for_lecture(entry.lecture_no, entry.time_slot)
@@ -5479,8 +7307,14 @@ def view_timetable(request):
                 time_slot=time_b,
             )
             messages.success(request, "Timetable updated permanently (swap).")
-            return redirect(
-                f"/view-timetable/?updated=1&highlight=1&last_key={entry.day_of_week}:{entry.lecture_no}:{entry.batch}"
+            request.GET = request.GET.copy()
+            request.GET["updated"] = "1"
+            request.GET["highlight"] = "1"
+            request.GET["last_key"] = f"{entry.day_of_week}:{entry.lecture_no}:{entry.batch}"
+            return _redirect_with_current_query(
+                request,
+                "/view-timetable/",
+                ["module_id", "year_scope_id", "day", "lecture_no", "batch", "subject", "faculty", "room", "editor_date", "editor_faculty", "recent", "updated", "highlight", "last_key"],
             )
         if action == "undo_change":
             change_group = (request.POST.get("change_group") or "").strip()
@@ -5491,7 +7325,7 @@ def view_timetable(request):
             )
             if not changes:
                 messages.error(request, "Change not found or already undone.")
-                return redirect("/view-timetable/?recent=1")
+                return redirect_response
             for change in changes:
                 fixed_time = _fixed_time_for_lecture(change.lecture_no, change.prev_time_slot)
                 TimetableEntry.objects.filter(
@@ -5535,7 +7369,7 @@ def view_timetable(request):
             )
             _sync_subjects_from_timetable(module)
             messages.success(request, "Change undone.")
-            return redirect("/view-timetable/?recent=1")
+            return redirect_response
     day_filter = request.GET.get("day")
     lecture_filter = (request.GET.get("lecture_no") or "").strip()
     batch_filter = (request.GET.get("batch") or "").strip()
@@ -5667,6 +7501,15 @@ def view_timetable(request):
             "rooms": choice_lists["room_choices"],
             "day_tables": day_tables,
             "module": module,
+            "module_choices": module_choices,
+            "selected_module_id": str(module.id) if module else "",
+            "selected_year_scope_id": selected_year_scope_id,
+            "scope_summary": _module_scope_summary(
+                module,
+                active_entries=TimetableEntry.objects.filter(module=module, is_active=True).count(),
+                uploads=TimetableUpload.objects.filter(module=module).count(),
+                recent_changes=len(recent_changes),
+            ),
             "highlight_key": highlight_key,
             "now": timezone.now(),
             "selected_date": selected_date,
@@ -5690,7 +7533,9 @@ def download_timetable_excel(request):
     if not mentor and not request.user.is_authenticated:
         return redirect("/")
 
-    module = _active_module(request)
+    module, _, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
     _ensure_active_timetable(module)
     entries = list(
         TimetableEntry.objects.filter(module=module, is_active=True).order_by("day_of_week", "lecture_no", "batch")
@@ -5748,8 +7593,9 @@ def academic_calendar(request):
     if _block_mentor_only(request):
         return redirect("/mentor-dashboard/")
 
-    is_superadmin = is_superadmin_user(request.user)
+    is_admin = has_staff_panel_access(request.user)
     module = _active_module(request)
+    modules_in_scope = allowed_modules_for_user(request).filter(is_active=True)
     calendar, _ = AcademicCalendar.objects.get_or_create(module=module)
     holidays = AcademicHoliday.objects.filter(module=module).order_by("-date")
     selected_year = (request.GET.get("year") or request.POST.get("year") or module.year_level or "FY").strip().upper()
@@ -5757,10 +7603,11 @@ def academic_calendar(request):
     if selected_year not in year_choices:
         selected_year = "FY"
     year_modules = list(
-        AcademicModule.objects.filter(is_active=True, year_level=selected_year).order_by("variant", "semester", "name")
+        modules_in_scope.filter(year_level=selected_year).order_by("variant", "semester", "name")
     )
 
     if request.method == "POST":
+        redirect_response = _redirect_with_current_query(request, "/academic-calendar/", ["year"])
         action = (request.POST.get("action") or "").strip()
         if action == "calendar":
             calendar.is_active = bool(request.POST.get("is_active"))
@@ -5774,9 +7621,9 @@ def academic_calendar(request):
             calendar.t4_end = _parse_date_param(request.POST.get("t4_end"))
             calendar.save()
             messages.success(request, "Academic calendar updated.")
-            return redirect("/academic-calendar/")
+            return redirect_response
 
-        if action == "bulk_apply" and is_superadmin:
+        if action == "bulk_apply" and is_admin:
             module_ids = request.POST.getlist("module_ids")
             apply_is_active = bool(request.POST.get("is_active"))
             payload = {
@@ -5793,7 +7640,7 @@ def academic_calendar(request):
             if not module_ids:
                 messages.error(request, "Select at least one module.")
             else:
-                target_modules = AcademicModule.objects.filter(id__in=module_ids, is_active=True)
+                target_modules = modules_in_scope.filter(id__in=module_ids)
                 applied = []
                 skipped = []
                 for target in target_modules:
@@ -5818,22 +7665,22 @@ def academic_calendar(request):
                     messages.success(request, f"Applied calendar to {len(applied)} module(s).")
                 if skipped:
                     messages.info(request, f"Skipped existing module calendars: {', '.join(skipped[:6])}{' ...' if len(skipped) > 6 else ''}")
-            return redirect(f"/academic-calendar/?year={selected_year}")
+            return redirect_response
 
         if action == "holiday_add":
             holiday_date = _parse_date_param(request.POST.get("holiday_date"))
             label = (request.POST.get("holiday_label") or "").strip()
             if holiday_date:
                 target_modules = [module]
-                if is_superadmin:
+                if is_admin:
                     dept_keys = [d.strip().upper() for d in request.POST.getlist("holiday_depts") if d.strip()]
                     if dept_keys:
                         target_modules = [
-                            m for m in AcademicModule.objects.filter(is_active=True)
+                            m for m in modules_in_scope
                             if any(_dept_matches_module(m, key) for key in dept_keys)
                         ]
                     else:
-                        target_modules = list(AcademicModule.objects.filter(is_active=True))
+                        target_modules = list(modules_in_scope)
                 for target in target_modules:
                     AcademicHoliday.objects.update_or_create(
                         module=target,
@@ -5843,7 +7690,7 @@ def academic_calendar(request):
                 messages.success(request, "Holiday added.")
             else:
                 messages.error(request, "Select a valid holiday date.")
-            return redirect("/academic-calendar/")
+            return redirect_response
 
         if action == "holiday_update":
             holiday_id = request.POST.get("holiday_id")
@@ -5864,13 +7711,13 @@ def academic_calendar(request):
                     holiday.is_active = True
                     holiday.save(update_fields=["date", "label", "is_active"])
                     messages.success(request, "Holiday updated.")
-            return redirect("/academic-calendar/")
+            return redirect_response
 
         if action == "holiday_delete":
             holiday_id = request.POST.get("holiday_id")
             AcademicHoliday.objects.filter(id=holiday_id, module=module).delete()
             messages.info(request, "Holiday removed.")
-            return redirect("/academic-calendar/")
+            return redirect_response
 
     return render(
         request,
@@ -5879,7 +7726,7 @@ def academic_calendar(request):
             "calendar": calendar,
             "holidays": holidays,
             "module": module,
-            "is_superadmin": is_superadmin,
+            "is_admin": is_admin,
             "selected_year": selected_year,
             "year_choices": year_choices,
             "year_modules": year_modules,
@@ -6167,7 +8014,10 @@ def coordinator_daily_weekly_report(request):
     if request.session.get("mentor"):
         return redirect("/mentor-dashboard/")
 
-    module = _active_module(request)
+    module, module_choices, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
+    selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
     selected_date = _parse_date_param(request.GET.get("date"), timezone.localdate())
     mode = (request.GET.get("mode") or "daily").strip().lower()
     if mode not in {"daily", "weekly"}:
@@ -6248,6 +8098,9 @@ def coordinator_daily_weekly_report(request):
         "coordinator_daily_weekly_report.html",
         {
             "module": module,
+            "module_choices": module_choices,
+            "selected_module_id": str(module.id) if module else "",
+            "selected_year_scope_id": selected_year_scope_id,
             "selected_date": selected_date,
             "mode": mode,
             "faculty_cards": faculty_cards,
@@ -6267,7 +8120,9 @@ def coordinator_daily_weekly_report_pdf(request):
     if request.session.get("mentor"):
         return HttpResponse("Forbidden", status=403)
 
-    module = _active_module(request)
+    module, _, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
     selected_date = _parse_date_param(request.GET.get("date"), timezone.localdate())
     faculty_names = sorted(
         {
@@ -7163,6 +9018,7 @@ def mentor_load_adjustment(request):
     day_of_week = selected_date.weekday()
 
     if request.method == "POST":
+        redirect_response = _redirect_with_current_query(request, "/mentor-load-adjustment/", ["date"])
         action = (request.POST.get("action") or "").strip()
         if action == "create_proxy":
             entry_id = request.POST.get("entry_id")
@@ -7175,16 +9031,16 @@ def mentor_load_adjustment(request):
             entry = TimetableEntry.objects.filter(id=entry_id, module=module, is_active=True).first()
             if not entry:
                 messages.error(request, "Lecture not found.")
-                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+                return redirect_response
 
             if _slot_has_started(selected_date, entry.time_slot):
                 messages.error(request, "Lecture already started. Adjustment not allowed.")
-                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+                return redirect_response
 
             proxy = Mentor.objects.filter(name__iexact=proxy_name).first()
             if not proxy:
                 messages.error(request, "Select a valid proxy faculty.")
-                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+                return redirect_response
 
             room = merge_room or room_custom or room_select or entry.room
             active_modules = AcademicModule.objects.filter(is_active=True)
@@ -7197,7 +9053,7 @@ def mentor_load_adjustment(request):
             ).exists()
             if conflict and not merge_room:
                 messages.error(request, "Proxy faculty already has a lecture. Merge room required.")
-                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+                return redirect_response
             proxy_slot_subject = (
                 _resolve_proxy_subject(
                     module,
@@ -7242,7 +9098,7 @@ def mentor_load_adjustment(request):
                 },
             )
             messages.success(request, "Adjustment saved.")
-            return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+            return redirect_response
         if action == "update_proxy":
             adj_id = request.POST.get("adjustment_id")
             proxy_name = (request.POST.get("proxy_faculty") or "").strip()
@@ -7259,17 +9115,17 @@ def mentor_load_adjustment(request):
             ).select_related("timetable_entry").first()
             if not adj:
                 messages.error(request, "Proxy adjustment not found.")
-                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+                return redirect_response
             if adj.original_faculty and adj.original_faculty.strip().lower() != mentor.name.strip().lower():
                 messages.error(request, "You cannot edit this proxy.")
-                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+                return redirect_response
             if _slot_has_started(adj.date, adj.time_slot):
                 messages.error(request, "Lecture already started. Edit not allowed.")
-                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+                return redirect_response
             proxy = Mentor.objects.filter(name__iexact=proxy_name).first()
             if not proxy:
                 messages.error(request, "Select a valid proxy faculty.")
-                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+                return redirect_response
             entry = adj.timetable_entry or TimetableEntry.objects.filter(
                 module=module,
                 day_of_week=adj.date.weekday(),
@@ -7309,7 +9165,7 @@ def mentor_load_adjustment(request):
             )
             _trigger_weekly_recompute_for_date(module, adj.date)
             messages.success(request, "Proxy updated.")
-            return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+            return redirect_response
 
         if action == "create_swap":
             entry_id = request.POST.get("entry_id")
@@ -7332,17 +9188,17 @@ def mentor_load_adjustment(request):
             ).exclude(id=entry_id).first()
             if not entry or not partner:
                 messages.error(request, "Select valid lectures to swap.")
-                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+                return redirect_response
             if _slot_has_started(selected_date, entry.time_slot) or _slot_has_started(selected_date, partner.time_slot):
                 messages.error(request, "Lecture already started. Swap not allowed.")
-                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+                return redirect_response
             active_keys = {
                 (a.batch, a.lecture_no)
                 for a in _active_adjustments_for_date(module, selected_date)
             }
             if (entry.batch, entry.lecture_no) in active_keys or (partner.batch, partner.lecture_no) in active_keys:
                 messages.error(request, "One of the selected lectures already has an active adjustment.")
-                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+                return redirect_response
             _create_swap_adjustments(
                 module,
                 selected_date,
@@ -7354,7 +9210,7 @@ def mentor_load_adjustment(request):
                 room_override_b=current_room,
             )
             messages.success(request, "Lecture swap saved.")
-            return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+            return redirect_response
 
         if action == "room_change":
             entry_id = request.POST.get("entry_id")
@@ -7370,10 +9226,10 @@ def mentor_load_adjustment(request):
             ).first()
             if not entry:
                 messages.error(request, "Lecture not found.")
-                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+                return redirect_response
             if _slot_has_started(selected_date, entry.time_slot):
                 messages.error(request, "Lecture already started. Room change not allowed.")
-                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+                return redirect_response
             existing = LectureAdjustment.objects.filter(
                 module=module,
                 date=selected_date,
@@ -7383,7 +9239,7 @@ def mentor_load_adjustment(request):
             ).first()
             if existing:
                 messages.error(request, "This lecture already has an active adjustment.")
-                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+                return redirect_response
             room_val = room_custom or room_select or entry.room
             adjustment = LectureAdjustment.objects.create(
                 module=module,
@@ -7414,20 +9270,20 @@ def mentor_load_adjustment(request):
             )
             _trigger_weekly_recompute_for_date(module, selected_date)
             messages.success(request, "Room change saved.")
-            return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+            return redirect_response
 
         if action == "cancel":
             adj_id = request.POST.get("adjustment_id")
             adj = LectureAdjustment.objects.filter(id=adj_id, created_by=mentor, status=LectureAdjustment.STATUS_ACTIVE).first()
             if not adj:
                 messages.error(request, "Adjustment not found or not allowed.")
-                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+                return redirect_response
             if _slot_has_started(adj.date, adj.time_slot):
                 messages.error(request, "Lecture already started. Cancellation not allowed.")
-                return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+                return redirect_response
             _cancel_adjustment_with_pair(adj, mentor.name)
             messages.success(request, "Adjustment cancelled.")
-            return redirect(f"/mentor-load-adjustment/?date={selected_date:%Y-%m-%d}")
+            return redirect_response
 
     rows, _ = _build_adjustment_rows(
         module,
@@ -7881,6 +9737,7 @@ def coordinator_adjustments(request):
     week_end = week_start + timedelta(days=6)
 
     if request.method == "POST":
+        redirect_response = _redirect_with_current_query(request, "/coordinator-adjustments/", ["start_date"])
         action = (request.POST.get("action") or "").strip()
         if action == "cancel":
             adj_id = request.POST.get("adjustment_id")
@@ -7895,7 +9752,7 @@ def coordinator_adjustments(request):
                 adj.cancelled_at = timezone.now()
                 adj.save(update_fields=["status", "cancelled_by", "cancelled_at"])
                 messages.success(request, "Adjustment cancelled.")
-            return redirect(f"/coordinator-adjustments/?start_date={week_start:%Y-%m-%d}")
+            return redirect_response
 
     adjustments = LectureAdjustment.objects.filter(
         module=module,
@@ -7981,6 +9838,7 @@ def manage_rooms(request):
     for name in timetable_rooms:
         Room.objects.update_or_create(module=module, name=name, defaults={"is_active": True})
     if request.method == "POST":
+        redirect_response = _redirect_with_current_query(request, "/manage-rooms/")
         action = (request.POST.get("action") or "").strip()
         if action == "add":
             name = (request.POST.get("name") or "").strip()
@@ -8001,7 +9859,7 @@ def manage_rooms(request):
             room_id = request.POST.get("room_id")
             Room.objects.filter(id=room_id, module=module).delete()
             messages.success(request, "Room deleted.")
-        return redirect("/manage-rooms/")
+        return redirect_response
 
     rooms = Room.objects.filter(module=module).order_by("name")
     return render(
@@ -8321,7 +10179,10 @@ def attendance_analytics(request):
     if not mentor and not request.user.is_authenticated:
         return redirect("/")
 
-    module = _active_module(request)
+    module, module_choices, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
+    selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
     calendar = _calendar_for_module(module)
     phase = (request.GET.get("phase") or "T1").upper()
     week_param = (request.GET.get("week") or "all").strip().lower()
@@ -8347,6 +10208,9 @@ def attendance_analytics(request):
             "attendance_analytics.html",
             {
                 "module": module,
+                "module_choices": module_choices,
+                "selected_module_id": str(module.id) if module else "",
+                "selected_year_scope_id": selected_year_scope_id,
                 "calendar": calendar,
                 "phase": phase,
                 "week_param": week_param,
@@ -8373,6 +10237,9 @@ def attendance_analytics(request):
             "attendance_analytics.html",
             {
                 "module": module,
+                "module_choices": module_choices,
+                "selected_module_id": str(module.id) if module else "",
+                "selected_year_scope_id": selected_year_scope_id,
                 "calendar": calendar,
                 "phase": phase,
                 "week_param": week_param,
@@ -8478,6 +10345,9 @@ def attendance_analytics(request):
         "attendance_analytics.html",
         {
             "module": module,
+            "module_choices": module_choices,
+            "selected_module_id": str(module.id) if module else "",
+            "selected_year_scope_id": selected_year_scope_id,
             "calendar": calendar,
             "phase": phase,
             "week_param": week_param,
@@ -8499,22 +10369,21 @@ def daily_absent_excel(request):
     if not mentor and not request.user.is_authenticated:
         return redirect("/")
 
-    is_coordinator = bool(request.user.is_authenticated and not request.session.get("mentor") and not is_superadmin_user(request.user))
-    module = None
-    module_id = (request.GET.get("module_id") or "").strip()
-    if mentor and module_id:
-        module = allowed_modules_for_user(request).filter(id=module_id, is_active=True).first()
-        if not module:
-            return HttpResponse("Unauthorized", status=403)
-    if not module:
-        module = _active_module(request)
+    is_admin = bool(
+        request.user.is_authenticated
+        and not request.session.get("mentor")
+        and has_staff_panel_access(request.user)
+    )
+    module, _, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
     date_val = _parse_date_param(request.GET.get("date"), timezone.localdate())
     batch_filter = (request.GET.get("batch") or "").strip()
 
     if not _attendance_allowed_for_date(module, date_val):
         return HttpResponse("Attendance is not allowed for this date.", status=400)
 
-    attendance_pending = bool(is_coordinator and not _attendance_fully_marked_for_date(module, date_val))
+    attendance_pending = bool(not is_admin and not _attendance_fully_marked_for_date(module, date_val))
 
     sessions_qs = LectureSession.objects.filter(module=module, date=date_val)
     if batch_filter:
@@ -8774,15 +10643,15 @@ def daily_absent_live(request):
     if not mentor and not request.user.is_authenticated:
         return redirect("/")
 
-    is_coordinator = bool(request.user.is_authenticated and not request.session.get("mentor") and not is_superadmin_user(request.user))
-    module = None
-    module_id = (request.GET.get("module_id") or "").strip()
-    if mentor and module_id:
-        module = allowed_modules_for_user(request).filter(id=module_id, is_active=True).first()
-        if not module:
-            return HttpResponse("Unauthorized", status=403)
-    if not module:
-        module = _active_module(request)
+    is_admin = bool(
+        request.user.is_authenticated
+        and not request.session.get("mentor")
+        and has_staff_panel_access(request.user)
+    )
+    module, module_choices, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
+    selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
 
     date_val = _parse_date_param(request.GET.get("date"), timezone.localdate())
     batch_filter = (request.GET.get("batch") or "").strip()
@@ -8794,6 +10663,9 @@ def daily_absent_live(request):
             "daily_absent_live.html",
             {
                 "module": module,
+                "module_choices": module_choices,
+                "selected_module_id": str(module.id) if module else "",
+                "selected_year_scope_id": selected_year_scope_id,
                 "selected_date": date_val,
                 "batch_filter": batch_filter,
                 "batch_cards": [],
@@ -8804,7 +10676,7 @@ def daily_absent_live(request):
             },
         )
 
-    attendance_pending = bool(is_coordinator and not _attendance_fully_marked_for_date(module, date_val))
+    attendance_pending = bool(not is_admin and not _attendance_fully_marked_for_date(module, date_val))
 
     batch_cards, batches = _daily_absent_cards(module, date_val, batch_filter)
     return render(
@@ -8812,6 +10684,9 @@ def daily_absent_live(request):
         "daily_absent_live.html",
         {
             "module": module,
+            "module_choices": module_choices,
+            "selected_module_id": str(module.id) if module else "",
+            "selected_year_scope_id": selected_year_scope_id,
             "selected_date": date_val,
             "batch_filter": batch_filter,
             "batch_cards": batch_cards,
@@ -8828,17 +10703,14 @@ def daily_absent_live_pdf(request):
     if not mentor and not request.user.is_authenticated:
         return redirect("/")
 
-    is_coordinator = bool(
-        request.user.is_authenticated and not request.session.get("mentor") and not is_superadmin_user(request.user)
+    is_admin = bool(
+        request.user.is_authenticated
+        and not request.session.get("mentor")
+        and has_staff_panel_access(request.user)
     )
-    module = None
-    module_id = (request.GET.get("module_id") or "").strip()
-    if mentor and module_id:
-        module = allowed_modules_for_user(request).filter(id=module_id, is_active=True).first()
-        if not module:
-            return HttpResponse("Unauthorized", status=403)
-    if not module:
-        module = _active_module(request)
+    module, _, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
 
     date_val = _parse_date_param(request.GET.get("date"), timezone.localdate())
     batch_filter = (request.GET.get("batch") or "").strip()
@@ -8846,7 +10718,7 @@ def daily_absent_live_pdf(request):
     if not _attendance_allowed_for_date(module, date_val):
         return HttpResponse("Attendance is not allowed for this date.", status=400)
 
-    attendance_pending = bool(is_coordinator and not _attendance_fully_marked_for_date(module, date_val))
+    attendance_pending = bool(not is_admin and not _attendance_fully_marked_for_date(module, date_val))
 
     batch_cards, _ = _daily_absent_cards_for_pdf(module, date_val, batch_filter)
     response = HttpResponse(content_type="application/pdf")
@@ -8958,15 +10830,15 @@ def weekly_attendance_live(request):
     if not mentor and not request.user.is_authenticated:
         return redirect("/")
 
-    is_coordinator = bool(request.user.is_authenticated and not request.session.get("mentor") and not is_superadmin_user(request.user))
-    module = None
-    module_id = (request.GET.get("module_id") or "").strip()
-    if mentor and module_id:
-        module = allowed_modules_for_user(request).filter(id=module_id, is_active=True).first()
-        if not module:
-            return HttpResponse("Unauthorized", status=403)
-    if not module:
-        module = _active_module(request)
+    is_admin = bool(
+        request.user.is_authenticated
+        and not request.session.get("mentor")
+        and has_staff_panel_access(request.user)
+    )
+    module, module_choices, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
+    selected_year_scope_id = (request.GET.get("year_scope_id") or "").strip()
 
     calendar = _calendar_for_module(module)
     phase = (request.GET.get("phase") or "T1").upper()
@@ -8988,6 +10860,9 @@ def weekly_attendance_live(request):
             "weekly_attendance_live.html",
             {
                 "module": module,
+                "module_choices": module_choices,
+                "selected_module_id": str(module.id) if module else "",
+                "selected_year_scope_id": selected_year_scope_id,
                 "calendar": calendar,
                 "phase": phase,
                 "week_param": week_param,
@@ -9010,6 +10885,9 @@ def weekly_attendance_live(request):
             "weekly_attendance_live.html",
             {
                 "module": module,
+                "module_choices": module_choices,
+                "selected_module_id": str(module.id) if module else "",
+                "selected_year_scope_id": selected_year_scope_id,
                 "calendar": calendar,
                 "phase": phase,
                 "week_param": week_param,
@@ -9021,7 +10899,7 @@ def weekly_attendance_live(request):
         _finish_perf(request, perf_state, extra="state=future_range")
         return response
 
-    attendance_pending = bool(is_coordinator and not _attendance_fully_marked_for_range(module, start, range_end))
+    attendance_pending = bool(not is_admin and not _attendance_fully_marked_for_range(module, start, range_end))
 
     student_qs = Student.objects.filter(module=module)
     if mentor:
@@ -9128,6 +11006,9 @@ def weekly_attendance_live(request):
         "weekly_attendance_live.html",
         {
             "module": module,
+            "module_choices": module_choices,
+            "selected_module_id": str(module.id) if module else "",
+            "selected_year_scope_id": selected_year_scope_id,
             "calendar": calendar,
             "phase": phase,
             "week_param": week_param,
@@ -9546,8 +11427,14 @@ def weekly_attendance_excel(request):
     if not request.user.is_authenticated:
         return redirect("/")
 
-    module = _active_module(request)
-    is_coordinator = bool(request.user.is_authenticated and not request.session.get("mentor") and not is_superadmin_user(request.user))
+    module, _, invalid_module = _selected_allowed_module(request)
+    if invalid_module:
+        return HttpResponse("Unauthorized", status=403)
+    is_admin = bool(
+        request.user.is_authenticated
+        and not request.session.get("mentor")
+        and has_staff_panel_access(request.user)
+    )
     calendar = _calendar_for_module(module)
     phase = (request.GET.get("phase") or "T1").upper()
     week_param = (request.GET.get("week") or "all").strip().lower()
@@ -9612,7 +11499,9 @@ def weekly_attendance_excel(request):
 def recompute_week_from_daily(request):
     if request.session.get("mentor"):
         return JsonResponse({"ok": False, "msg": "Forbidden"}, status=403)
-    module = _active_module(request)
+    module, _, invalid_module = _selected_allowed_module(request, source="POST")
+    if invalid_module or not module:
+        return JsonResponse({"ok": False, "msg": "Unauthorized"}, status=403)
     phase = (request.POST.get("phase") or "T1").upper()
     week_raw = request.POST.get("week_no")
     try:
@@ -9654,4 +11543,3 @@ def manage_mentors_debug(request):
     resp = JsonResponse(payload)
     resp["Cache-Control"] = "no-store"
     return resp
-

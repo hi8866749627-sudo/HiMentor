@@ -4,7 +4,7 @@ from django.contrib.auth.models import User
 from django.test import Client
 from django.utils import timezone
 
-from core.models import AcademicCalendar, AcademicModule, CoordinatorModuleAccess, Mentor
+from core.models import AcademicCalendar, AcademicModule, College, CoordinatorModuleAccess, Mentor, RoleAssignment, University, YearScope
 
 
 def create_module(
@@ -35,6 +35,79 @@ def create_superadmin(username="superadmin1", password="pass12345"):
         user.is_active = True
         user.save()
     return user
+
+
+def create_erp_owner(username="erpowner1", password="pass12345"):
+    user = User.objects.create_user(
+        username=username,
+        password=password,
+        is_active=True,
+    )
+    RoleAssignment.objects.create(
+        user=user,
+        role=RoleAssignment.ROLE_ERP_OWNER,
+    )
+    return user
+
+
+def create_college_head(username="collegehead1", password="pass12345"):
+    user = User.objects.create_user(
+        username=username,
+        password=password,
+        is_active=True,
+    )
+    university, _ = University.objects.get_or_create(name="LJU", defaults={"code": "LJU"})
+    college, _ = College.objects.get_or_create(
+        university=university,
+        name="LJIET",
+        defaults={"code": "LJIET"},
+    )
+    RoleAssignment.objects.create(
+        user=user,
+        role=RoleAssignment.ROLE_COLLEGE_HEAD,
+        college=college,
+    )
+    return user, college
+
+
+def create_university_head(username="universityhead1", password="pass12345"):
+    user = User.objects.create_user(
+        username=username,
+        password=password,
+        is_active=True,
+    )
+    university, _ = University.objects.get_or_create(name="LJU", defaults={"code": "LJU"})
+    RoleAssignment.objects.create(
+        user=user,
+        role=RoleAssignment.ROLE_UNIVERSITY_HEAD,
+        university=university,
+    )
+    return user, university
+
+
+def create_year_head(username="yearhead1", password="pass12345", year_code="FY"):
+    user = User.objects.create_user(
+        username=username,
+        password=password,
+        is_active=True,
+    )
+    university, _ = University.objects.get_or_create(name="LJU", defaults={"code": "LJU"})
+    college, _ = College.objects.get_or_create(
+        university=university,
+        name="LJIET",
+        defaults={"code": "LJIET"},
+    )
+    year_scope, _ = YearScope.objects.get_or_create(
+        college=college,
+        year_code=year_code,
+        defaults={"title": year_code},
+    )
+    RoleAssignment.objects.create(
+        user=user,
+        role=RoleAssignment.ROLE_YEAR_HEAD,
+        year_scope=year_scope,
+    )
+    return user, year_scope
 
 
 def create_coordinator(module, username="coordinator1", password="pass12345"):

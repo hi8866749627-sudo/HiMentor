@@ -4,7 +4,17 @@ import time
 from django.conf import settings
 from django.db import connection
 
-from .module_utils import allowed_modules_for_user, get_current_module, is_superadmin_user, get_mentor_home_url
+from .module_utils import (
+    allowed_modules_for_user,
+    get_current_module,
+    get_mentor_home_url,
+    get_staff_home_url,
+    get_staff_role_name,
+    has_staff_panel_access,
+    is_legacy_admin_user,
+)
+from .access import is_college_head, is_erp_owner, is_university_head
+from .exam_access import has_exam_section_access
 from .models import MentorAdminAccess
 from .utils import resolve_mentor_identity
 
@@ -86,11 +96,23 @@ def _system_footer_info():
 
 
 def module_context(request):
+    sidebar_role_class = "role-public"
     home_url = "/"
     if request.session.get("mentor"):
         home_url = "/mentor-dashboard/"
+        sidebar_role_class = "role-mentor"
     elif request.user.is_authenticated:
-        home_url = "/home/" if is_superadmin_user(request.user) else "/reports/"
+        home_url = get_staff_home_url(request.user)
+        if is_erp_owner(request.user):
+            sidebar_role_class = "role-erp-owner"
+        elif is_university_head(request.user):
+            sidebar_role_class = "role-university-head"
+        elif is_college_head(request.user):
+            sidebar_role_class = "role-college-head"
+        elif get_staff_role_name(request.user) == "Coordinator":
+            sidebar_role_class = "role-coordinator"
+        else:
+            sidebar_role_class = "role-year-head"
 
     if not request.user.is_authenticated and not request.session.get("mentor"):
         return {
@@ -100,6 +122,7 @@ def module_context(request):
             "home_url": home_url,
             "mentor_display_name": "",
             "login_role_name": "",
+            "sidebar_role_class": sidebar_role_class,
         }
 
     current = get_current_module(request)
@@ -107,6 +130,16 @@ def module_context(request):
     current_id = current.id if current else None
     for m in modules:
         m.is_current = (m.id == current_id)
+    current_scope = None
+    if current and getattr(current, "year_scope_id", None) and getattr(current.year_scope, "college_id", None):
+        college = current.year_scope.college
+        university = getattr(college, "university", None)
+        current_scope = {
+            "university_name": university.name if university else "",
+            "college_name": college.name,
+            "year_code": current.year_scope.year_code,
+            "module_name": current.name,
+        }
 
     mentor_display_name = ""
     mentor_is_admin = False
@@ -128,17 +161,35 @@ def module_context(request):
                 home_url = get_mentor_home_url(current)
     login_role_name = ""
     if request.user.is_authenticated and not request.session.get("mentor"):
-        login_role_name = "Superadmin" if is_superadmin_user(request.user) else "Coordinator"
+        login_role_name = get_staff_role_name(request.user)
     context = {
         "module_list": modules,
         "current_module": current,
-        "can_manage_modules": bool(request.user.is_authenticated and not request.session.get("mentor") and is_superadmin_user(request.user)),
+        "can_manage_modules": bool(
+            request.user.is_authenticated and not request.session.get("mentor") and has_staff_panel_access(request.user)
+        ),
         "home_url": home_url,
         "mentor_display_name": mentor_display_name,
         "mentor_is_admin": mentor_is_admin,
         "admin_mode": admin_mode,
         "login_role_name": login_role_name,
+        "current_scope": current_scope,
+        "sidebar_role_class": sidebar_role_class,
     }
     if request.user.is_authenticated and not request.session.get("mentor"):
+        role_name = get_staff_role_name(request.user)
+        context["show_org_setup_nav_link"] = bool(has_staff_panel_access(request.user))
+        context["show_university_home_link"] = bool(is_erp_owner(request.user) or is_university_head(request.user))
+        context["show_college_home_link"] = bool(
+            is_erp_owner(request.user) or is_university_head(request.user) or is_college_head(request.user)
+        )
+        context["show_exam_section_link"] = bool(has_exam_section_access(request.user) or has_staff_panel_access(request.user))
+        context["is_owner_role"] = bool(is_erp_owner(request.user))
+        context["is_university_head_role"] = bool(is_university_head(request.user))
+        context["is_college_head_role"] = bool(is_college_head(request.user))
+        context["is_year_head_role"] = bool(sidebar_role_class == "role-year-head")
+        context["is_legacy_admin_role"] = bool(is_legacy_admin_user(request.user))
+        context["is_coordinator_role"] = bool(role_name == "Coordinator")
+        context["is_exam_only_role"] = bool(role_name == "Exam Faculty")
         context["system_footer_info"] = _system_footer_info()
     return context

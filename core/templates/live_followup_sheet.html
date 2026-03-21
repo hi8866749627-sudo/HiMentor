@@ -7,47 +7,68 @@
 </div>
 
 <div class="card p-3 mb-3">
-    {% with base_q='mentor='|add:selected_mentor|urlencode|add:'&type='|add:selected_type|add:'&week='|add:selected_week_q|add:'&exam='|add:selected_exam %}
+    {% with base_q='module_id='|add:selected_module_id|add:'&year_scope_id='|add:selected_year_scope_id|add:'&mentor='|add:selected_mentor|urlencode|add:'&type='|add:selected_type|add:'&week='|add:selected_week_q|add:'&exam='|add:selected_exam %}
     <div class="d-flex flex-wrap gap-2 mb-3">
         <a class="btn btn-success btn-sm" href="/live-followup-sheet/excel/?{{ base_q }}">Export as Excel</a>
         <a class="btn btn-danger btn-sm" href="/live-followup-sheet/pdf/?{{ base_q }}">Export as PDF</a>
-        {% if is_superadmin_view %}
+        {% if is_admin_view %}
         <a class="btn btn-dark btn-sm" href="/live-followup-sheet/db-backup-json/">Download Full Legacy Backup</a>
         {% endif %}
     </div>
 
+    <form method="get" class="row g-2 align-items-end mb-3">
+        {% if selected_year_scope_id %}<input type="hidden" name="year_scope_id" value="{{ selected_year_scope_id }}">{% endif %}
+        <div class="col-md-4">
+            <label class="form-label">Module</label>
+            <select name="module_id" class="form-select">
+                {% for choice in module_choices %}
+                <option value="{{ choice.id }}" {% if selected_module_id == choice.id|stringformat:'s' %}selected{% endif %}>{{ choice.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <input type="hidden" name="mentor" value="{{ selected_mentor }}">
+        <input type="hidden" name="type" value="{{ selected_type }}">
+        <input type="hidden" name="week" value="{{ selected_week_q }}">
+        <input type="hidden" name="exam" value="{{ selected_exam }}">
+        <input type="hidden" name="sort" value="{{ selected_sort }}">
+        <input type="hidden" name="dir" value="{{ selected_dir }}">
+        <div class="col-md-2">
+            <button class="btn btn-primary" type="submit">Show</button>
+        </div>
+    </form>
+
     <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
         <span class="fw-semibold">Week:</span>
         <a class="btn btn-sm {% if not selected_week %}btn-primary{% else %}btn-outline-primary{% endif %}"
-           href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week=ALL&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">All Weeks</a>
+           href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week=ALL&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">All Weeks</a>
         {% for w in attendance_weeks %}
         <a class="btn btn-sm {% if selected_week == w %}btn-primary{% else %}btn-outline-primary{% endif %}"
-           href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ w }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">Week-{{ w }}</a>
+           href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ w }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">Week-{{ w }}</a>
         {% endfor %}
     </div>
 
     <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
         <span class="fw-semibold">Exam:</span>
         <a class="btn btn-sm {% if selected_exam == 'ALL' %}btn-secondary{% else %}btn-outline-secondary{% endif %}"
-           href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam=ALL&sort={{ selected_sort }}&dir={{ selected_dir }}">All Exams</a>
+           href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam=ALL&sort={{ selected_sort }}&dir={{ selected_dir }}">All Exams</a>
         <a class="btn btn-sm {% if selected_exam == 'T1' %}btn-secondary{% else %}btn-outline-secondary{% endif %}"
-           href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam=T1&sort={{ selected_sort }}&dir={{ selected_dir }}">T1</a>
+           href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam=T1&sort={{ selected_sort }}&dir={{ selected_dir }}">T1</a>
         <a class="btn btn-sm {% if selected_exam == 'T2' %}btn-secondary{% else %}btn-outline-secondary{% endif %}"
-           href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam=T2&sort={{ selected_sort }}&dir={{ selected_dir }}">T2/T1+T2</a>
+           href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam=T2&sort={{ selected_sort }}&dir={{ selected_dir }}">T2/T1+T2</a>
         <a class="btn btn-sm {% if selected_exam == 'T3' %}btn-secondary{% else %}btn-outline-secondary{% endif %}"
-           href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam=T3&sort={{ selected_sort }}&dir={{ selected_dir }}">T3/T1+T2+T3</a>
+           href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam=T3&sort={{ selected_sort }}&dir={{ selected_dir }}">T3/T1+T2+T3</a>
         <a class="btn btn-sm {% if selected_exam == 'T4' %}btn-secondary{% else %}btn-outline-secondary{% endif %}"
-           href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam=T4&sort={{ selected_sort }}&dir={{ selected_dir }}">T4/TOTAL</a>
+           href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam=T4&sort={{ selected_sort }}&dir={{ selected_dir }}">T4/TOTAL</a>
     </div>
 
     {% if not mentor_mode %}
     <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
         <span class="fw-semibold">Mentor:</span>
         <a class="btn btn-sm {% if not selected_mentor %}btn-primary{% else %}btn-outline-primary{% endif %}"
-           href="?type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">All Mentors</a>
+           href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">All Mentors</a>
         {% for m in mentor_names %}
         <a class="btn btn-sm {% if selected_mentor == m %}btn-primary{% else %}btn-outline-primary{% endif %}"
-           href="?mentor={{ m|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">{{ m }}</a>
+           href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ m|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">{{ m }}</a>
         {% endfor %}
     </div>
     {% endif %}
@@ -55,15 +76,15 @@
     <div class="d-flex flex-wrap align-items-center gap-2">
         <span class="fw-semibold">Followup Type:</span>
         <a class="btn btn-sm {% if selected_type == 'all' %}btn-dark{% else %}btn-outline-dark{% endif %}"
-           href="?mentor={{ selected_mentor|urlencode }}&type=all&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">All</a>
+           href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type=all&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">All</a>
         <a class="btn btn-sm {% if selected_type == 'less_attendance' %}btn-danger{% else %}btn-outline-danger{% endif %}"
-           href="?mentor={{ selected_mentor|urlencode }}&type=less_attendance&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">Less Attendance</a>
+           href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type=less_attendance&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">Less Attendance</a>
         <a class="btn btn-sm {% if selected_type == 'poor_result' %}btn-warning{% else %}btn-outline-warning{% endif %}"
-           href="?mentor={{ selected_mentor|urlencode }}&type=poor_result&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">Poor Result</a>
+           href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type=poor_result&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">Poor Result</a>
         <a class="btn btn-sm {% if selected_type == 'other_direct' %}btn-info{% else %}btn-outline-info{% endif %}"
-           href="?mentor={{ selected_mentor|urlencode }}&type=other_direct&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">Other (Direct)</a>
+           href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type=other_direct&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">Other (Direct)</a>
         <a class="btn btn-sm {% if selected_type == 'mentor_intro' %}btn-success{% else %}btn-outline-success{% endif %}"
-           href="?mentor={{ selected_mentor|urlencode }}&type=mentor_intro&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">Mentor Intro Call</a>
+           href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type=mentor_intro&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}">Mentor Intro Call</a>
     </div>
     {% endwith %}
 </div>
@@ -73,16 +94,16 @@
         <table class="table table-bordered table-hover align-middle">
             <thead class="table-dark">
                 <tr>
-                    <th><a class="text-white text-decoration-none" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=mentor&dir={% if selected_sort == 'mentor' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Mentor ↑↓</a></th>
-                    <th><a class="text-white text-decoration-none" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=roll&dir={% if selected_sort == 'roll' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Roll No. ↑↓</a></th>
-                    <th><a class="text-white text-decoration-none" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=enrollment&dir={% if selected_sort == 'enrollment' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Enrollment No. ↑↓</a></th>
-                    <th><a class="text-white text-decoration-none" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=name&dir={% if selected_sort == 'name' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Name of Students ↑↓</a></th>
-                    <th><a class="text-white text-decoration-none" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=type&dir={% if selected_sort == 'type' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Followup Type ↑↓</a></th>
-                    <th><a class="text-white text-decoration-none" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=status&dir={% if selected_sort == 'status' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Status ↑↓</a></th>
-                    <th><a class="text-white text-decoration-none" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=date&dir={% if selected_sort == 'date' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Date of Phone Call ↑↓</a></th>
-                    <th><a class="text-white text-decoration-none" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=duration&dir={% if selected_sort == 'duration' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Call Duration (Mins) ↑↓</a></th>
-                    <th><a class="text-white text-decoration-none" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=reason&dir={% if selected_sort == 'reason' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Reason of Phone Call ↑↓</a></th>
-                    <th><a class="text-white text-decoration-none" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=remarks&dir={% if selected_sort == 'remarks' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Remarks by Parents ↑↓</a></th>
+                    <th><a class="text-white text-decoration-none" href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=mentor&dir={% if selected_sort == 'mentor' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Mentor</a></th>
+                    <th><a class="text-white text-decoration-none" href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=roll&dir={% if selected_sort == 'roll' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Roll No.</a></th>
+                    <th><a class="text-white text-decoration-none" href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=enrollment&dir={% if selected_sort == 'enrollment' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Enrollment No.</a></th>
+                    <th><a class="text-white text-decoration-none" href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=name&dir={% if selected_sort == 'name' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Name of Students</a></th>
+                    <th><a class="text-white text-decoration-none" href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=type&dir={% if selected_sort == 'type' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Followup Type</a></th>
+                    <th><a class="text-white text-decoration-none" href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=status&dir={% if selected_sort == 'status' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Status</a></th>
+                    <th><a class="text-white text-decoration-none" href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=date&dir={% if selected_sort == 'date' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Date of Phone Call</a></th>
+                    <th><a class="text-white text-decoration-none" href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=duration&dir={% if selected_sort == 'duration' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Call Duration (Mins)</a></th>
+                    <th><a class="text-white text-decoration-none" href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=reason&dir={% if selected_sort == 'reason' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Reason of Phone Call</a></th>
+                    <th><a class="text-white text-decoration-none" href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort=remarks&dir={% if selected_sort == 'remarks' and selected_dir == 'asc' %}desc{% else %}asc{% endif %}">Remarks by Parents</a></th>
                 </tr>
             </thead>
             <tbody>
@@ -113,7 +134,7 @@
         <ul class="pagination pagination-sm mb-0">
             {% if page_obj.has_previous %}
             <li class="page-item">
-                <a class="page-link" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}&page={{ page_obj.previous_page_number }}">Prev</a>
+                <a class="page-link" href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}&page={{ page_obj.previous_page_number }}">Prev</a>
             </li>
             {% else %}
             <li class="page-item disabled"><span class="page-link">Prev</span></li>
@@ -125,7 +146,7 @@
 
             {% if page_obj.has_next %}
             <li class="page-item">
-                <a class="page-link" href="?mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}&page={{ page_obj.next_page_number }}">Next</a>
+                <a class="page-link" href="?module_id={{ module.id }}&year_scope_id={{ selected_year_scope_id }}&mentor={{ selected_mentor|urlencode }}&type={{ selected_type }}&week={{ selected_week_q }}&exam={{ selected_exam }}&sort={{ selected_sort }}&dir={{ selected_dir }}&page={{ page_obj.next_page_number }}">Next</a>
             </li>
             {% else %}
             <li class="page-item disabled"><span class="page-link">Next</span></li>
@@ -136,4 +157,3 @@
 </div>
 
 {% endblock %}
-

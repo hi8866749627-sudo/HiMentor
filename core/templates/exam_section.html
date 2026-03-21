@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid py-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <div>
+            <h3 class="mb-1">Exam Section</h3>
+            <div class="text-muted small">{{ module.name }}</div>
+        </div>
+        <form method="get" class="d-flex gap-2">
+            <select name="module_id" class="form-select">
+                {% for choice in module_choices %}
+                <option value="{{ choice.id }}" {% if choice.id == module.id %}selected{% endif %}>{{ choice.name }}</option>
+                {% endfor %}
+            </select>
+            <button class="btn btn-primary" type="submit">Open</button>
+        </form>
+    </div>
+
+    {% if can_manage_exam %}
+    <div class="row g-3 mb-4">
+        <div class="col-lg-4">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <h5 class="card-title">Create Exam</h5>
+                    <form method="post" class="d-grid gap-2">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="create_session">
+                        <select name="test_name" class="form-select" required>
+                            <option value="">Select exam</option>
+                            <option value="T1">T1</option>
+                            <option value="T2">T2</option>
+                            <option value="T3">T3</option>
+                            <option value="T4">T4</option>
+                        </select>
+                        <input name="title" class="form-control" placeholder="Optional title">
+                        <button class="btn btn-primary" type="submit">Save Exam</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <h5 class="card-title">Assign Exam Manager</h5>
+                    <form method="post" class="d-grid gap-2">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="assign_manager">
+                        <select name="manager_user_id" class="form-select" required>
+                            <option value="">Select user</option>
+                            {% for user in manager_candidates %}
+                            <option value="{{ user.id }}">{{ user.username }}</option>
+                            {% endfor %}
+                        </select>
+                        <button class="btn btn-outline-primary" type="submit">Assign</button>
+                    </form>
+                    <div class="small text-muted mt-2">
+                        {% for manager in module_managers %}
+                        <span class="badge bg-secondary">{{ manager.user.username }}</span>
+                        {% empty %}
+                        No extra exam managers yet.
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4" id="faculty-directory">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <h5 class="card-title">Create Faculty Login</h5>
+                    <form method="post" class="d-grid gap-2">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="create_faculty_account">
+                        <input name="short_code" class="form-control" placeholder="3-letter short code" required>
+                        <input name="full_name" class="form-control" placeholder="Full name">
+                        <input name="email" class="form-control" placeholder="Email (optional)">
+                        <input name="password" type="text" class="form-control" placeholder="Password" required>
+                        <button class="btn btn-outline-dark" type="submit">Create Faculty</button>
+                    </form>
+                    <div class="mt-2 small text-muted">
+                        Existing year faculty:
+                        {% for profile in profiles %}
+                        <span class="badge bg-light text-dark border">{{ profile.short_code }}</span>
+                        {% endfor %}
+                        {% for name in unregistered_names %}
+                        <span class="badge text-bg-warning">{{ name }}</span>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            <h5 class="card-title">Exam Tabs</h5>
+            <div class="d-flex flex-wrap gap-2">
+                {% for session in sessions %}
+                <a class="btn {% if selected_session and session.id == selected_session.id %}btn-primary{% else %}btn-outline-primary{% endif %}" href="/exam-section/?module_id={{ module.id }}&test_name={{ session.test_name }}">{{ session.test_name }}</a>
+                {% empty %}
+                <span class="text-muted">No exam created yet.</span>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    {% if can_manage_exam and selected_session %}
+    <div class="row g-3 mb-4">
+        <div class="col-xl-5">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <h5 class="card-title">Create Subject Timetable</h5>
+                    <form method="post" class="row g-2">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="create_entry">
+                        <input type="hidden" name="session_id" value="{{ selected_session.id }}">
+                        <div class="col-12">
+                            <select name="subject_id" class="form-select" required>
+                                <option value="">Select subject</option>
+                                {% for subject in module.subjects.all %}
+                                {% if subject.is_active %}
+                                <option value="{{ subject.id }}">{{ subject.name }}</option>
+                                {% endif %}
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6"><input type="date" name="exam_date" class="form-control" required></div>
+                        <div class="col-md-6"><input type="time" name="start_time" class="form-control" required></div>
+                        <div class="col-md-6"><input type="time" name="end_time" class="form-control" required></div>
+                        <div class="col-md-6"><input type="datetime-local" name="entry_deadline" class="form-control" required></div>
+                        <div class="col-md-4"><input type="number" step="0.5" name="max_marks" value="{{ phase_defaults.max_marks }}" class="form-control" placeholder="Max marks"></div>
+                        <div class="col-md-4"><input type="number" step="0.5" name="pass_marks" value="{{ phase_defaults.pass_marks }}" class="form-control" placeholder="Pass marks"></div>
+                        <div class="col-md-4"><input type="number" step="0.5" name="total_pass_marks" value="{{ phase_defaults.total_pass_marks }}" class="form-control" placeholder="Total pass"></div>
+                        <div class="col-12"><button class="btn btn-primary" type="submit">Save Subject Exam</button></div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% for card in entry_cards %}
+    {% with entry=card.entry stats=card.stats blocks=card.blocks %}
+    <div class="card shadow-sm mb-4" id="entry-{{ entry.id }}">
+        <div class="card-body">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                <div>
+                    <h5 class="mb-1">{{ entry.subject.name }} · {{ entry.session.test_name }}</h5>
+                    <div class="small text-muted">
+                        {{ entry.exam_date }} | {{ entry.start_time }} - {{ entry.end_time }} | Opens {{ stats.opens_at }}
+                    </div>
+                    <div class="small text-muted">
+                        Deadline: {{ entry.entry_deadline }} | Max: {{ entry.max_marks }} | Pass: {{ entry.pass_marks }} | Total pass: {{ entry.total_pass_marks }}
+                    </div>
+                </div>
+                <div class="d-flex flex-wrap gap-2">
+                    <span class="badge {% if entry.is_locked %}bg-danger{% else %}bg-success{% endif %}">{% if entry.is_locked %}Locked{% else %}Open{% endif %}</span>
+                    {% if entry.published_upload %}
+                    <a class="btn btn-sm btn-outline-secondary" href="/view-results/?test={{ entry.session.test_name }}&subject={{ entry.subject.id }}">View Published</a>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="row g-2 mb-3">
+                <div class="col-md-2"><div class="border rounded p-2 small">Total: <strong>{{ stats.total_students }}</strong></div></div>
+                <div class="col-md-2"><div class="border rounded p-2 small">Entered: <strong>{{ stats.entered_students }}</strong></div></div>
+                <div class="col-md-2"><div class="border rounded p-2 small">Absent: <strong>{{ stats.absent_students }}</strong></div></div>
+                <div class="col-md-2"><div class="border rounded p-2 small">Fail: <strong>{{ stats.failed_students }}</strong></div></div>
+                <div class="col-md-2"><div class="border rounded p-2 small">Pending: <strong>{{ stats.pending_students }}</strong></div></div>
+            </div>
+
+            {% if can_manage_exam %}
+            <form method="post" class="row g-2 mb-3">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="assign_block">
+                <input type="hidden" name="timetable_entry_id" value="{{ entry.id }}">
+                <div class="col-md-3">
+                    <select name="evaluator_user_id" class="form-select" required>
+                        <option value="">Evaluator</option>
+                        {% for profile in profiles %}
+                        <option value="{{ profile.user_id }}">{{ profile.short_code }}{% if profile.full_name %} - {{ profile.full_name }}{% endif %}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <select name="block_type" class="form-select" required>
+                        <option value="range">Range</option>
+                        <option value="batch">Batch</option>
+                        <option value="manual">Manual</option>
+                    </select>
+                </div>
+                <div class="col-md-2"><input name="block_name" class="form-control" placeholder="Block name"></div>
+                <div class="col-md-2"><input name="batch" class="form-control" placeholder="Batch"></div>
+                <div class="col-md-1"><input name="enrollment_start" class="form-control" placeholder="From"></div>
+                <div class="col-md-1"><input name="enrollment_end" class="form-control" placeholder="To"></div>
+                <div class="col-md-1"><button class="btn btn-outline-primary w-100" type="submit">Add</button></div>
+                <div class="col-12">
+                    <details>
+                        <summary class="small text-muted">Manual student selection</summary>
+                        <div class="row row-cols-2 row-cols-md-4 g-1 mt-2">
+                            {% for student in students %}
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="manual_student_ids" value="{{ student.id }}" id="student-{{ entry.id }}-{{ student.id }}">
+                                <label class="form-check-label small" for="student-{{ entry.id }}-{{ student.id }}">{{ student.enrollment }} - {{ student.name }}</label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </details>
+                </div>
+            </form>
+            {% endif %}
+
+            <div class="table-responsive">
+                <table class="table table-sm table-bordered align-middle">
+                    <thead>
+                        <tr>
+                            <th>Block</th>
+                            <th>Evaluator</th>
+                            <th>Students</th>
+                            <th>Type</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for block in blocks %}
+                        <tr>
+                            <td>{{ block.name }}</td>
+                            <td>{{ block.evaluator.username }}</td>
+                            <td>{{ block.student_links.count }}</td>
+                            <td>{{ block.get_block_type_display }}</td>
+                            <td><a class="btn btn-sm btn-outline-dark" href="/exam-section/marks/{{ block.id }}/">Open</a></td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="5" class="text-muted">No evaluator blocks yet.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            {% if can_manage_exam %}
+            <div class="d-flex gap-2 mt-3">
+                <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="timetable_entry_id" value="{{ entry.id }}">
+                    <input type="hidden" name="action" value="lock_entry">
+                    <button class="btn btn-danger btn-sm" type="submit">Lock and Publish</button>
+                </form>
+                <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="timetable_entry_id" value="{{ entry.id }}">
+                    <input type="hidden" name="action" value="unlock_entry">
+                    <button class="btn btn-outline-secondary btn-sm" type="submit">Unlock</button>
+                </form>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endwith %}
+    {% endfor %}
+</div>
+{% endblock %}

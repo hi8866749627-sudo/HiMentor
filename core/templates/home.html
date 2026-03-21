@@ -54,41 +54,343 @@ body.dark-mode .sa-orange .sa-title{ color:#fdba74; }
 body.dark-mode .sa-orange .sa-num{ color:#ffedd5; }
 </style>
 
-<h3>SuperAdmin Home</h3>
+{% if show_scoped_year_actions %}
+<nav class="mb-3 small">
+    <a href="/org-setup/" class="text-decoration-none">Organization Setup</a>
+    <span class="text-muted"> / </span>
+    <a href="/university-home/" class="text-decoration-none">University Home</a>
+    <span class="text-muted"> / </span>
+    <a href="/college-home/" class="text-decoration-none">College Home</a>
+    <span class="text-muted"> / </span>
+    <a href="/home/" class="text-decoration-none">Year Head Home</a>
+</nav>
+{% endif %}
 
-<div class="row g-3 mb-3">
-    <div class="col-md-3">
-        <div class="card p-3 sa-tile sa-blue" onclick="showSection('coordinators')">
-            <div class="small sa-title">Coordinator List</div>
-            <h4 class="mb-0 sa-num">{{ stats.total_coordinators }}</h4>
+<div class="dashboard-shell mb-3">
+    <div class="dashboard-hero {% if is_owner_dashboard or is_legacy_admin_dashboard %}hero-owner{% else %}hero-year{% endif %}">
+        {% if is_owner_dashboard or is_legacy_admin_dashboard %}
+        <div class="row g-3 align-items-center">
+            <div class="col-lg-8">
+                <div class="small text-uppercase fw-semibold mb-2">Platform Management</div>
+                <h3 class="mb-2">{% if is_owner_dashboard %}ERP Owner Dashboard{% else %}Legacy Admin Dashboard{% endif %}</h3>
+                <p class="mb-0">This is the top control layer for structure, head assignment, and operational visibility across the platform. Use it to move into university, college, and year dashboards with context instead of treating everything as one flat admin panel.</p>
+            </div>
+            <div class="col-lg-4">
+                <ul class="focus-list">
+                    <li><div><strong>{{ stats.total_modules }}</strong><small>Visible modules across the current platform data.</small></div><a class="btn btn-sm btn-light" href="/modules/">Open</a></li>
+                    <li><div><strong>{{ stats.total_coordinators }}</strong><small>Coordinator footprint across existing mapped modules.</small></div><a class="btn btn-sm btn-light" href="#sec-coordinators">Review</a></li>
+                    <li><div><strong>{{ stats.total_students }}</strong><small>Current students reachable from active modules.</small></div><a class="btn btn-sm btn-light" href="#sec-students">Inspect</a></li>
+                </ul>
+            </div>
         </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card p-3 sa-tile sa-teal" onclick="showSection('modules')">
-            <div class="small sa-title">Module List</div>
-            <h4 class="mb-0 sa-num">{{ stats.total_modules }}</h4>
+        {% else %}
+        <div class="row g-3 align-items-center">
+            <div class="col-lg-8">
+                <div class="small text-uppercase fw-semibold mb-2">Year Operations</div>
+                <h3 class="mb-2">Year Head Dashboard</h3>
+                <p class="mb-0">This page is now tuned for year execution: review owned years, open scoped setup pages, keep module readiness visible, and jump into coordinator, student, faculty, subject, timetable, and analytics work without extra clicks.</p>
+            </div>
+            <div class="col-lg-4">
+                <ul class="focus-list">
+                    <li><div><strong>{{ year_scope_rows|length }}</strong><small>Year scopes currently owned by you.</small></div><a class="btn btn-sm btn-light" href="/year-home/">Open</a></li>
+                    <li><div><strong>{{ stats.total_modules }}</strong><small>Modules available for year-level management.</small></div><a class="btn btn-sm btn-light" href="/modules/{% if year_scope_rows %}?year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}">Open</a></li>
+                    <li><div><strong>{{ stats.total_coordinators }}</strong><small>Coordinators currently active in your year scope.</small></div><a class="btn btn-sm btn-light" href="/year-coordinators/{% if year_scope_rows %}?year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}">Open</a></li>
+                </ul>
+            </div>
         </div>
+        {% endif %}
     </div>
-    <div class="col-md-3">
-        <div class="card p-3 sa-tile sa-violet" onclick="showSection('mentors')">
-            <div class="small sa-title">Mentor List</div>
-            <h4 class="mb-0 sa-num">{{ stats.total_mentors }}</h4>
+
+    <div class="dashboard-grid">
+        <div class="dashboard-card">
+            <h5 class="mb-1">{% if is_owner_dashboard or is_legacy_admin_dashboard %}Management Shortcuts{% else %}Operational Shortcuts{% endif %}</h5>
+            <div class="dashboard-subtext">{% if is_owner_dashboard or is_legacy_admin_dashboard %}The best next steps for governing structure and delegating work across the hierarchy.{% else %}The best next steps for keeping your year healthy and ready for daily operations.{% endif %}</div>
+            <div class="action-grid">
+                {% if show_org_setup_link %}
+                <a class="action-tile" href="/org-setup/">
+                    <strong>Organization Setup</strong>
+                    <span>Create structure, assign heads, and audit ownership gaps.</span>
+                </a>
+                {% endif %}
+                {% if is_owner_dashboard or is_legacy_admin_dashboard %}
+                <a class="action-tile" href="/university-home/">
+                    <strong>University Dashboard</strong>
+                    <span>Review universities, heads, and college creation status.</span>
+                </a>
+                <a class="action-tile" href="/college-home/">
+                    <strong>College Dashboard</strong>
+                    <span>Track year expansion and college-level operating counts.</span>
+                </a>
+                <a class="action-tile" href="/year-home/">
+                    <strong>Year Dashboard</strong>
+                    <span>Check module readiness and coordinator ownership by year.</span>
+                </a>
+                <a class="action-tile" href="/modules/">
+                    <strong>Module Management</strong>
+                    <span>Open platform module structure directly.</span>
+                </a>
+                <a class="action-tile" href="/live-followup-sheet/db-backup-json/">
+                    <strong>Download Full Legacy Backup</strong>
+                    <span>Export users and all current HiMentor business data as a safer zip backup.</span>
+                </a>
+                {% else %}
+                <a class="action-tile" href="/modules/{% if year_scope_rows %}?year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}">
+                    <strong>Manage Modules</strong>
+                    <span>Create and maintain year-specific modules.</span>
+                </a>
+                <a class="action-tile" href="/year-coordinators/{% if year_scope_rows %}?year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}">
+                    <strong>Manage Coordinators</strong>
+                    <span>Keep module ownership and coordinator mapping clean.</span>
+                </a>
+                <a class="action-tile" href="/upload-students/{% if year_scope_rows and year_scope_rows.0.primary_module_id %}?module_id={{ year_scope_rows.0.primary_module_id }}&year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}">
+                    <strong>Student Setup</strong>
+                    <span>Open student work already narrowed to your active year.</span>
+                </a>
+                <a class="action-tile" href="/upload-faculty/{% if year_scope_rows and year_scope_rows.0.primary_module_id %}?module_id={{ year_scope_rows.0.primary_module_id }}&year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}">
+                    <strong>Faculty Setup</strong>
+                    <span>Update faculty and mentor-level master data.</span>
+                </a>
+                <a class="action-tile" href="/subjects/{% if year_scope_rows and year_scope_rows.0.primary_module_id %}?module_id={{ year_scope_rows.0.primary_module_id }}&year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}">
+                    <strong>Subject Setup</strong>
+                    <span>Keep subject readiness aligned before timetable or results.</span>
+                </a>
+                <a class="action-tile" href="/view-timetable/{% if year_scope_rows and year_scope_rows.0.primary_module_id %}?module_id={{ year_scope_rows.0.primary_module_id }}&year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}">
+                    <strong>Timetable Setup</strong>
+                    <span>Move directly into timetable work within the selected year.</span>
+                </a>
+                {% endif %}
+            </div>
         </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card p-3 sa-tile sa-orange" onclick="showSection('students')">
-            <div class="small sa-title">Student Report</div>
-            <h4 class="mb-0 sa-num">{{ stats.total_students }}</h4>
+
+        <div class="dashboard-card">
+            <h5 class="mb-1">{% if is_owner_dashboard or is_legacy_admin_dashboard %}Suggested Review Path{% else %}Daily Focus{% endif %}</h5>
+            <div class="dashboard-subtext">{% if is_owner_dashboard or is_legacy_admin_dashboard %}A low-friction path for validating hierarchy and operational coverage.{% else %}A compact checklist for starting year-level admin work fast.{% endif %}</div>
+            <ul class="focus-list mt-3">
+                {% if is_owner_dashboard or is_legacy_admin_dashboard %}
+                <li><div><strong>Structure</strong><small>Check whether all universities, colleges, and years have heads assigned.</small></div><a class="btn btn-sm btn-outline-dark" href="/org-setup/">Open</a></li>
+                <li><div><strong>Rollups</strong><small>Use college and year dashboards instead of scrolling one long admin page.</small></div><a class="btn btn-sm btn-outline-dark" href="/college-home/">Open</a></li>
+                <li><div><strong>Operational depth</strong><small>Dive into year-level module readiness only when needed.</small></div><a class="btn btn-sm btn-outline-dark" href="/year-home/">Open</a></li>
+                {% else %}
+                <li><div><strong>Coordinator coverage</strong><small>Confirm each active module has the right coordinator mapping.</small></div><a class="btn btn-sm btn-outline-dark" href="/year-coordinators/{% if year_scope_rows %}?year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}">Open</a></li>
+                <li><div><strong>Module readiness</strong><small>Review subjects, timetable, calendar, and results entry points.</small></div><a class="btn btn-sm btn-outline-dark" href="/year-home/{% if year_scope_rows %}?year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}">Open</a></li>
+                <li><div><strong>Student operations</strong><small>Jump into student setup or analytics from the active year scope.</small></div><a class="btn btn-sm btn-outline-dark" href="/upload-students/{% if year_scope_rows and year_scope_rows.0.primary_module_id %}?module_id={{ year_scope_rows.0.primary_module_id }}&year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}">Open</a></li>
+                {% endif %}
+            </ul>
         </div>
     </div>
 </div>
 
+{% if show_scoped_year_actions %}
+<div class="card p-3 mb-3">
+    <h5 class="mb-3">Quick Actions</h5>
+    <div class="d-flex gap-2 flex-wrap">
+        <a class="btn btn-primary btn-sm" href="/org-setup/">Manage Year Structure</a>
+        <a class="btn btn-outline-primary btn-sm" href="/modules/">Manage Modules</a>
+        <a class="btn btn-outline-primary btn-sm" href="/year-coordinators/{% if year_scope_rows %}?year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}">Manage Coordinators</a>
+        <a class="btn btn-outline-success btn-sm" href="/upload-students/{% if year_scope_rows and year_scope_rows.0.primary_module_id %}?module_id={{ year_scope_rows.0.primary_module_id }}&year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}">Student Setup</a>
+        <a class="btn btn-outline-secondary btn-sm" href="/upload-faculty/{% if year_scope_rows and year_scope_rows.0.primary_module_id %}?module_id={{ year_scope_rows.0.primary_module_id }}&year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}">Faculty Master</a>
+        <a class="btn btn-outline-secondary btn-sm" href="/subjects/{% if year_scope_rows and year_scope_rows.0.primary_module_id %}?module_id={{ year_scope_rows.0.primary_module_id }}&year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}">Subject Setup</a>
+        <a class="btn btn-outline-secondary btn-sm" href="/view-timetable/{% if year_scope_rows and year_scope_rows.0.primary_module_id %}?module_id={{ year_scope_rows.0.primary_module_id }}&year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}">Timetable Setup</a>
+    </div>
+</div>
+
+<div class="card p-3 mb-3" id="year-ownership">
+    <h5>Year Ownership</h5>
+    <div class="table-responsive">
+        <table class="table table-sm mb-0">
+            <thead>
+                <tr>
+                    <th>Year</th>
+                    <th>College</th>
+                    <th>University</th>
+                    <th>Modules</th>
+                    <th>Coordinators</th>
+                    <th>Setup</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in year_scope_rows %}
+                <tr>
+                    <td><a class="text-decoration-none" href="/year-coordinators/?year_scope_id={{ row.year_scope.id }}">{{ row.year_scope.year_code }}</a></td>
+                    <td>{{ row.year_scope.college.name }}</td>
+                    <td>{{ row.year_scope.college.university.name }}</td>
+                    <td><a class="text-decoration-none" href="/modules/?year_scope_id={{ row.year_scope.id }}">{{ row.module_count }}</a></td>
+                    <td><a class="text-decoration-none" href="/year-coordinators/?year_scope_id={{ row.year_scope.id }}#year-coordinator-table">{{ row.coordinator_count }}</a></td>
+                    <td>
+                        <div class="d-flex gap-1 flex-wrap">
+                            <a class="btn btn-outline-success btn-sm" href="/upload-students/{% if row.primary_module_id %}?module_id={{ row.primary_module_id }}&year_scope_id={{ row.year_scope.id }}{% endif %}">Students</a>
+                            <a class="btn btn-outline-secondary btn-sm" href="/upload-faculty/{% if row.primary_module_id %}?module_id={{ row.primary_module_id }}&year_scope_id={{ row.year_scope.id }}{% endif %}">Faculty</a>
+                            <a class="btn btn-outline-secondary btn-sm" href="/subjects/{% if row.primary_module_id %}?module_id={{ row.primary_module_id }}&year_scope_id={{ row.year_scope.id }}{% endif %}">Subjects</a>
+                            <a class="btn btn-outline-secondary btn-sm" href="/view-timetable/{% if row.primary_module_id %}?module_id={{ row.primary_module_id }}&year_scope_id={{ row.year_scope.id }}{% endif %}">Timetable</a>
+                        </div>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" class="text-muted">No year scopes in your ownership.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<div class="row g-3 mb-3">
+    <div class="col-md-3">
+        {% if show_scoped_year_actions %}
+        <a class="card p-3 sa-tile sa-blue text-decoration-none" href="/year-coordinators/{% if year_scope_rows %}?year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}">
+            <div class="small sa-title">Coordinator List</div>
+            <h4 class="mb-0 sa-num">{{ stats.total_coordinators }}</h4>
+        </a>
+        {% else %}
+        <div class="card p-3 sa-tile sa-blue" onclick="showSection('coordinators')">
+            <div class="small sa-title">Coordinator List</div>
+            <h4 class="mb-0 sa-num">{{ stats.total_coordinators }}</h4>
+        </div>
+        {% endif %}
+    </div>
+    <div class="col-md-3">
+        {% if show_scoped_year_actions %}
+        <a class="card p-3 sa-tile sa-teal text-decoration-none" href="/modules/{% if year_scope_rows %}?year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}">
+            <div class="small sa-title">Module List</div>
+            <h4 class="mb-0 sa-num">{{ stats.total_modules }}</h4>
+        </a>
+        {% else %}
+        <div class="card p-3 sa-tile sa-teal" onclick="showSection('modules')">
+            <div class="small sa-title">Module List</div>
+            <h4 class="mb-0 sa-num">{{ stats.total_modules }}</h4>
+        </div>
+        {% endif %}
+    </div>
+    <div class="col-md-3">
+        {% if show_scoped_year_actions %}
+        <a class="card p-3 sa-tile sa-violet text-decoration-none" href="/manage-mentors/{% if year_scope_rows and year_scope_rows.0.primary_module_id %}?module_id={{ year_scope_rows.0.primary_module_id }}&year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}">
+            <div class="small sa-title">Mentor List</div>
+            <h4 class="mb-0 sa-num">{{ stats.total_mentors }}</h4>
+        </a>
+        {% else %}
+        <div class="card p-3 sa-tile sa-violet" onclick="showSection('mentors')">
+            <div class="small sa-title">Mentor List</div>
+            <h4 class="mb-0 sa-num">{{ stats.total_mentors }}</h4>
+        </div>
+        {% endif %}
+    </div>
+    <div class="col-md-3">
+        {% if show_scoped_year_actions %}
+        <a class="card p-3 sa-tile sa-orange text-decoration-none" href="/attendance-analytics/{% if year_scope_rows and year_scope_rows.0.primary_module_id %}?module_id={{ year_scope_rows.0.primary_module_id }}&year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}">
+            <div class="small sa-title">Student Report</div>
+            <h4 class="mb-0 sa-num">{{ stats.total_students }}</h4>
+        </a>
+        {% else %}
+        <div class="card p-3 sa-tile sa-orange" onclick="showSection('students')">
+            <div class="small sa-title">Student Report</div>
+            <h4 class="mb-0 sa-num">{{ stats.total_students }}</h4>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{% if show_scoped_year_actions %}
+<div class="row g-3 mb-3">
+    <div class="col-md-3 col-6">
+        <a href="/year-home/{% if year_scope_rows %}?year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}" class="card p-3 h-100 text-decoration-none text-reset">
+            <div class="text-muted small">Owned Years</div>
+            <h4 class="mb-0">{{ year_scope_rows|length }}</h4>
+        </a>
+    </div>
+    <div class="col-md-3 col-6">
+        <a href="/modules/{% if year_scope_rows %}?year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}" class="card p-3 h-100 text-decoration-none text-reset">
+            <div class="text-muted small">Active Modules</div>
+            <h4 class="mb-0">{{ stats.total_modules }}</h4>
+        </a>
+    </div>
+    <div class="col-md-3 col-6">
+        <a href="/year-coordinators/{% if year_scope_rows %}?year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}" class="card p-3 h-100 text-decoration-none text-reset">
+            <div class="text-muted small">Coordinators</div>
+            <h4 class="mb-0">{{ stats.total_coordinators }}</h4>
+        </a>
+    </div>
+    <div class="col-md-3 col-6">
+        <a href="/upload-students/{% if year_scope_rows and year_scope_rows.0.primary_module_id %}?module_id={{ year_scope_rows.0.primary_module_id }}&year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}" class="card p-3 h-100 text-decoration-none text-reset">
+            <div class="text-muted small">Student Setup</div>
+            <h4 class="mb-0">{{ stats.total_students }}</h4>
+        </a>
+    </div>
+    <div class="col-md-3 col-6">
+        <a href="/subjects/{% if year_scope_rows and year_scope_rows.0.primary_module_id %}?module_id={{ year_scope_rows.0.primary_module_id }}&year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}" class="card p-3 h-100 text-decoration-none text-reset">
+            <div class="text-muted small">Subject Setup</div>
+            <h4 class="mb-0">{{ stats.total_modules }}</h4>
+        </a>
+    </div>
+    <div class="col-md-3 col-6">
+        <a href="/view-timetable/{% if year_scope_rows and year_scope_rows.0.primary_module_id %}?module_id={{ year_scope_rows.0.primary_module_id }}&year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}" class="card p-3 h-100 text-decoration-none text-reset">
+            <div class="text-muted small">Timetable Setup</div>
+            <h4 class="mb-0">{{ stats.total_modules }}</h4>
+        </a>
+    </div>
+</div>
+{% endif %}
+
 <div id="sec-coordinators" class="sa-section active">
+    {% if not show_global_coordinator_management %}
+        <div class="card p-3 mb-3">
+        <h5>Coordinator Management</h5>
+        <div class="alert alert-info mb-0">
+            Coordinator creation and module mapping now live in <a href="/year-coordinators/{% if year_scope_rows %}?year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}" class="alert-link">Year Coordinators</a>.
+        </div>
+    </div>
+
+    <div class="card p-3 mb-3" id="coordinator-ownership">
+        <h5>Coordinator Ownership</h5>
+        {% if coordinator_rows %}
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Coordinator</th>
+                        <th>Assigned Modules</th>
+                        <th style="width: 120px;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in coordinator_rows %}
+                    <tr>
+                        <td>{{ row.user.first_name|default:"-" }}</td>
+                        <td>{{ row.user.username }}</td>
+                        <td>
+                            {% for m in row.modules %}
+                            <span class="badge bg-secondary">{{ m.name }}</span>
+                            {% empty %}
+                            <span class="text-muted">No modules</span>
+                            {% endfor %}
+                        </td>
+                        <td>
+                            <form method="post" class="mb-0" onsubmit="return confirm('Delete coordinator {{ row.user.username|escapejs }}?');">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="delete_scoped_coordinator">
+                                <input type="hidden" name="return_anchor" value="coordinator-ownership">
+                                <input type="hidden" name="coordinator_id" value="{{ row.user.id }}">
+                                <button class="btn btn-outline-danger btn-sm">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="alert alert-info mb-0">No coordinators found.</div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if show_global_coordinator_management %}
     <div class="card p-3 mb-3">
         <h5>Create Coordinator</h5>
         <form method="post" class="row g-2">
             {% csrf_token %}
             <input type="hidden" name="action" value="create">
+            <input type="hidden" name="return_anchor" value="sec-coordinators">
             <div class="col-md-3"><input name="coordinator_name" class="form-control" placeholder="Name of coordinator"
                     required></div>
             <div class="col-md-2"><input name="username" class="form-control" placeholder="Username" required></div>
@@ -113,6 +415,7 @@ body.dark-mode .sa-orange .sa-num{ color:#ffedd5; }
         <form method="post" class="row g-2 align-items-end">
             {% csrf_token %}
             <input type="hidden" name="action" value="assign_faculty_admin">
+            <input type="hidden" name="return_anchor" value="sec-coordinators">
             <div class="col-md-4">
                 <label class="form-label">Faculty</label>
                 <select name="mentor_id" class="form-select" required>
@@ -160,6 +463,7 @@ body.dark-mode .sa-orange .sa-num{ color:#ffedd5; }
                                 <form method="post" class="ms-2">
                                     {% csrf_token %}
                                     <input type="hidden" name="action" value="remove_faculty_admin">
+                                    <input type="hidden" name="return_anchor" value="sec-coordinators">
                                     <input type="hidden" name="mentor_id" value="{{ row.mentor.id }}">
                                     <input type="hidden" name="module_id" value="{{ m.id }}">
                                     <button class="btn btn-sm btn-outline-danger">Remove</button>
@@ -179,10 +483,11 @@ body.dark-mode .sa-orange .sa-num{ color:#ffedd5; }
     </div>
 
     <div class="card p-3 mb-3">
-        <h5>Update SuperAdmin Password</h5>
+        <h5>Update Admin Password</h5>
         <form method="post" class="row g-2">
             {% csrf_token %}
-            <input type="hidden" name="action" value="change_super_password">
+            <input type="hidden" name="action" value="change_admin_password">
+            <input type="hidden" name="return_anchor" value="sec-coordinators">
             <div class="col-md-4"><input type="password" name="current_password" class="form-control"
                     placeholder="Current password" required></div>
             <div class="col-md-4"><input type="password" name="new_password" class="form-control"
@@ -190,14 +495,6 @@ body.dark-mode .sa-orange .sa-num{ color:#ffedd5; }
             <div class="col-md-2"><button class="btn btn-warning w-100">Update Password</button></div>
         </form>
     </div>
-    <div class="card p-3 mb-3">
-        <h5>Legacy Migration Backup</h5>
-        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
-            <div class="text-muted small">Download a full legacy JSON backup for migration or recovery.</div>
-            <a class="btn btn-dark" href="/live-followup-sheet/db-backup-json/">Download Full Legacy Backup</a>
-        </div>
-    </div>
-
 
     <div class="card p-3 mb-3">
         <h5>Coordinator Details</h5>
@@ -259,6 +556,7 @@ body.dark-mode .sa-orange .sa-num{ color:#ffedd5; }
                                 class="d-flex gap-2 align-items-center flex-wrap">
                                 {% csrf_token %}
                                 <input type="hidden" name="action" value="update">
+                                <input type="hidden" name="return_anchor" value="sec-coordinators">
                                 <input type="hidden" name="coordinator_id" value="{{ row.user.id }}">
                                 <input id="pwd-{{ row.user.id }}" type="password" name="new_password" class="form-control form-control-sm" style="max-width:180px;"
                                     placeholder="New password (optional)">
@@ -274,6 +572,7 @@ body.dark-mode .sa-orange .sa-num{ color:#ffedd5; }
                             <form id="delete-form-{{ row.user.id }}" method="post" class="d-none">
                                 {% csrf_token %}
                                 <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="return_anchor" value="sec-coordinators">
                                 <input type="hidden" name="coordinator_id" value="{{ row.user.id }}">
                             </form>
                         </td>
@@ -286,9 +585,55 @@ body.dark-mode .sa-orange .sa-num{ color:#ffedd5; }
         <div class="alert alert-info mb-0">No coordinators found.</div>
         {% endif %}
     </div>
+    {% endif %}
 </div>
 
 <div id="sec-modules" class="sa-section">
+    {% if not show_global_module_setup %}
+    <div class="card p-3 mb-3">
+        <h5>Module Setup</h5>
+        <div class="alert alert-info mb-0">
+            Use <a href="/modules/{% if year_scope_rows %}?year_scope_id={{ year_scope_rows.0.year_scope.id }}{% endif %}" class="alert-link">Module Management</a> for year-scoped module setup and editing.
+        </div>
+    </div>
+
+    <div class="card p-3 mb-3" id="module-ownership">
+        <h5>Module Ownership</h5>
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>Module</th>
+                        <th>Students</th>
+                        <th>Coordinators</th>
+                        <th style="width: 120px;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in module_summary %}
+                    <tr>
+                        <td>{{ r.module.name }}</td>
+                        <td>{{ r.students }}</td>
+                        <td>{{ r.coordinators }}</td>
+                        <td>
+                            <form method="post" class="mb-0" onsubmit="return confirm('Delete module {{ r.module.name|escapejs }}?');">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="delete_scoped_module">
+                                <input type="hidden" name="return_anchor" value="module-ownership">
+                                <input type="hidden" name="module_id" value="{{ r.module.id }}">
+                                <button class="btn btn-outline-danger btn-sm">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="4" class="text-muted">No modules found.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
     <div class="card p-3 mb-3">
         <h5>Module List with Student/Mentor Count</h5>
         <div class="table-responsive">
@@ -377,6 +722,20 @@ body.dark-mode .sa-orange .sa-num{ color:#ffedd5; }
 </div>
 
 <script>
+    function sectionKeyForHash(hashValue) {
+        const anchor = (hashValue || "").replace(/^#/, "");
+        const anchorToSection = {
+            "year-ownership": "coordinators",
+            "coordinator-ownership": "coordinators",
+            "module-ownership": "modules",
+            "sec-coordinators": "coordinators",
+            "sec-modules": "modules",
+            "sec-mentors": "mentors",
+            "sec-students": "students",
+        };
+        return anchorToSection[anchor] || "";
+    }
+
     function showSection(key) {
         ["coordinators", "modules", "mentors", "students"].forEach(function (k) {
             const el = document.getElementById("sec-" + k);
@@ -420,8 +779,13 @@ body.dark-mode .sa-orange .sa-num{ color:#ffedd5; }
             btn.innerText = "View";
         }
     }
+
+    (function () {
+        const key = sectionKeyForHash(window.location.hash);
+        if (key) {
+            showSection(key);
+        }
+    })();
 </script>
 
 {% endblock %}
-
-

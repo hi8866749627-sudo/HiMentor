@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid py-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <div>
+            <h3 class="mb-1">Exam Marks Entry</h3>
+            <div class="text-muted small">
+                {{ block.timetable_entry.session.module.name }} · {{ block.timetable_entry.session.test_name }} · {{ block.timetable_entry.subject.name }} · {{ block.name }}
+            </div>
+        </div>
+        <a href="/exam-section/?module_id={{ block.timetable_entry.session.module_id }}&test_name={{ block.timetable_entry.session.test_name }}" class="btn btn-outline-secondary">Back to Exam Section</a>
+    </div>
+
+    <div class="row g-3 mb-3">
+        <div class="col-md-2"><div class="border rounded p-2 small">Total: <strong>{{ stats.total }}</strong></div></div>
+        <div class="col-md-2"><div class="border rounded p-2 small">Appeared: <strong>{{ stats.appeared }}</strong></div></div>
+        <div class="col-md-2"><div class="border rounded p-2 small">Absent: <strong>{{ stats.absent }}</strong></div></div>
+        <div class="col-md-2"><div class="border rounded p-2 small">Pass: <strong>{{ stats.passed }}</strong></div></div>
+        <div class="col-md-2"><div class="border rounded p-2 small">Fail: <strong>{{ stats.failed }}</strong></div></div>
+        <div class="col-md-2"><div class="border rounded p-2 small">Pending: <strong>{{ stats.pending }}</strong></div></div>
+    </div>
+
+    {% if not editable and edit_message %}
+    <div class="alert alert-warning">{{ edit_message }}</div>
+    {% endif %}
+
+    <form method="post">
+        {% csrf_token %}
+        <div class="table-responsive">
+            <table class="table table-sm table-bordered align-middle">
+                <thead>
+                    <tr>
+                        <th>Enrollment</th>
+                        <th>Roll</th>
+                        <th>Name</th>
+                        <th>Mentor</th>
+                        <th>Marks / AB</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in mark_rows %}
+                    {% with link=row.link mark=row.mark %}
+                    <tr>
+                        <td>{{ link.student.enrollment }}</td>
+                        <td>{{ link.student.roll_no }}</td>
+                        <td>{{ link.student.name }}</td>
+                        <td>{{ link.student.mentor.name }}</td>
+                        <td>
+                            <input
+                                type="text"
+                                name="mark_{{ link.student_id }}"
+                                class="form-control {% if mark and not mark.is_absent and mark.marks_obtained < block.timetable_entry.pass_marks %}border-primary text-primary fw-semibold{% endif %}"
+                                value="{% if mark %}{% if mark.is_absent %}AB{% else %}{{ mark.raw_value }}{% endif %}{% endif %}"
+                                {% if not editable %}disabled{% endif %}
+                            >
+                        </td>
+                    </tr>
+                    {% endwith %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if editable %}
+        <button class="btn btn-primary" type="submit">Save Marks</button>
+        {% endif %}
+    </form>
+</div>
+{% endblock %}

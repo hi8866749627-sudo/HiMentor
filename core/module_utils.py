@@ -2,9 +2,19 @@ from datetime import time
 from django.utils import timezone
 from django.db.models import Q
 from .models import AcademicModule, Mentor, MentorModuleAccess, MentorAdminAccess, MentorModuleOptOut, MentorHomeSetting
+from .access import (
+    is_college_head,
+    is_erp_owner,
+    is_scoped_admin_user,
+    is_university_head,
+    is_year_head,
+    modules_for_user,
+)
+from .exam_access import has_exam_section_access
 
 
-SUPERADMIN_USERNAMES = {"superadmin1", "superadmin2"}
+LEGACY_ADMIN_USERNAMES = {"superadmin1", "superadmin2"}
+SUPERADMIN_USERNAMES = LEGACY_ADMIN_USERNAMES
 
 
 DEFAULT_MODULE_NAME = "FY2-CE_Sem-1 - Batch 2026-29"
@@ -24,8 +34,72 @@ def get_or_create_default_module():
     return module
 
 
+def is_legacy_superadmin_user(user):
+    return bool(user and user.is_authenticated and user.username.lower() in LEGACY_ADMIN_USERNAMES)
+
+
+def is_legacy_admin_user(user):
+    return is_legacy_superadmin_user(user)
+
+
+def is_global_staff_admin(user):
+    return bool(
+        user
+        and user.is_authenticated
+        and (
+            is_legacy_admin_user(user)
+            or is_erp_owner(user)
+            or is_year_head(user)
+        )
+    )
+
+
 def is_superadmin_user(user):
-    return bool(user and user.is_authenticated and user.username.lower() in SUPERADMIN_USERNAMES)
+    # Backward-compatible alias for older call sites.
+    return is_global_staff_admin(user)
+
+
+def has_staff_panel_access(user):
+    return bool(user and user.is_authenticated and (is_global_staff_admin(user) or is_scoped_admin_user(user)))
+
+
+def has_superadmin_panel_access(user):
+    # Backward-compatible alias for older call sites.
+    return has_staff_panel_access(user)
+
+
+def get_staff_home_url(user):
+    if not user or not user.is_authenticated:
+        return "/"
+    if is_erp_owner(user) or is_year_head(user) or is_legacy_admin_user(user):
+        return "/home/"
+    if is_university_head(user):
+        return "/university-home/"
+    if is_college_head(user):
+        return "/college-home/"
+    if has_exam_section_access(user):
+        return "/exam-section/"
+    return "/reports/" if not has_staff_panel_access(user) else "/home/"
+
+
+def get_staff_role_name(user):
+    if not user or not user.is_authenticated:
+        return ""
+    if is_erp_owner(user):
+        return "ERP Owner"
+    if is_university_head(user):
+        return "University Head"
+    if is_college_head(user):
+        return "College Head"
+    if is_year_head(user):
+        return "Year Head"
+    if is_legacy_admin_user(user):
+        return "Admin"
+    if is_scoped_admin_user(user):
+        return "Admin"
+    if has_exam_section_access(user):
+        return "Exam Faculty"
+    return "Coordinator"
 
 
 def allowed_modules_for_user(request):
@@ -103,8 +177,11 @@ def allowed_modules_for_user(request):
     if not user or not user.is_authenticated:
         return AcademicModule.objects.none()
 
-    if is_superadmin_user(user):
+    if is_legacy_admin_user(user):
         return AcademicModule.objects.filter(is_active=True).order_by("-id")
+
+    if has_staff_panel_access(user):
+        return modules_for_user(user).filter(is_active=True).order_by("-id")
 
     return (
         AcademicModule.objects.filter(is_active=True, coordinator_accesses__coordinator=user)
@@ -124,7 +201,7 @@ def get_current_module(request):
     if not module:
         module = allowed_qs.first()
 
-    if not module and getattr(request, "user", None) and is_superadmin_user(request.user):
+    if not module and getattr(request, "user", None) and has_staff_panel_access(request.user):
         module = get_or_create_default_module()
 
     if module:
