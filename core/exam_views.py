@@ -266,21 +266,30 @@ def exam_section(request):
                 return redirect(f"/exam-section/?module_id={module.id}")
             block_type = (request.POST.get("block_type") or "").strip()
             delivery_mode = (request.POST.get("delivery_mode") or ExamSeatingBlock.MODE_OFFLINE).strip()
-            if block_type not in {ExamSeatingBlock.TYPE_ENROLLMENT_RANGE, ExamSeatingBlock.TYPE_BATCH, ExamSeatingBlock.TYPE_MANUAL}:
+            if block_type not in {ExamSeatingBlock.TYPE_ENROLLMENT_RANGE, ExamSeatingBlock.TYPE_MANUAL}:
                 messages.error(request, "Select a valid block type.")
                 return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}")
             if delivery_mode not in {ExamSeatingBlock.MODE_OFFLINE, ExamSeatingBlock.MODE_ONLINE}:
                 delivery_mode = ExamSeatingBlock.MODE_OFFLINE
             manual_enrollments = (request.POST.get("manual_enrollments") or "").strip()
+            dept_label = (request.POST.get("dept_label") or "").strip()
+            block_number = (request.POST.get("block_number") or "").strip()
+            block_name = (request.POST.get("block_name") or "").strip()
+            if not block_name:
+                name_bits = [dept_label or session.module.year_level or "Block"]
+                if block_number:
+                    name_bits.append(f"Block {block_number}")
+                block_name = " ".join(name_bits).strip()
             ExamSeatingBlock.objects.create(
                 session=session,
+                dept_label=dept_label,
                 delivery_mode=delivery_mode,
-                block_number=(request.POST.get("block_number") or "").strip(),
+                block_number=block_number,
                 room=(request.POST.get("room") or "").strip(),
                 lab=(request.POST.get("lab") or "").strip(),
                 block_type=block_type,
-                name=(request.POST.get("block_name") or "").strip() or "Block",
-                batch=(request.POST.get("batch") or "").strip(),
+                name=block_name or "Block",
+                batch="",
                 enrollment_start=(request.POST.get("enrollment_start") or "").strip(),
                 enrollment_end=(request.POST.get("enrollment_end") or "").strip(),
                 manual_enrollments=manual_enrollments,
@@ -462,10 +471,32 @@ def exam_section(request):
             .select_related("subject", "published_upload")
             .order_by("exam_date", "start_time", "subject__name")
         )
+    enrollment_choices = []
+    if module:
+        enrollment_choices = list(
+            module.students.order_by("enrollment").values_list("enrollment", flat=True).distinct()
+        )
+    dept_label_default = ""
+    if module and module.variant:
+        variant = module.variant.split("-")[0].strip()
+        dept_label_default = variant or module.year_level
+    elif module:
+        dept_label_default = module.year_level
     seating_blocks = []
     seating_block_rows = []
+    next_block_number = 1
+    next_enrollment_start = ""
+    next_enrollment_end = ""
     if selected_session:
         seating_blocks = list(ExamSeatingBlock.objects.filter(session=selected_session).order_by("name", "id"))
+        block_numbers = []
+        for block in seating_blocks:
+            try:
+                block_numbers.append(int(str(block.block_number).strip()))
+            except Exception:
+                continue
+        if block_numbers:
+            next_block_number = max(block_numbers) + 1
         for block in seating_blocks:
             manual_ids = []
             manual_enrollments = [
@@ -486,6 +517,17 @@ def exam_section(request):
                 manual_student_ids=manual_ids,
             )
             seating_block_rows.append({"block": block, "student_count": len(students)})
+        if seating_blocks and enrollment_choices:
+            last_end = ""
+            for block in reversed(seating_blocks):
+                if block.enrollment_end:
+                    last_end = block.enrollment_end
+                    break
+            if last_end and last_end in enrollment_choices:
+                idx = enrollment_choices.index(last_end)
+                if idx + 1 < len(enrollment_choices):
+                    next_enrollment_start = enrollment_choices[idx + 1]
+                    next_enrollment_end = enrollment_choices[idx + 1]
     mentors, profiles, unregistered_names = _module_faculty_directory(module)
     manager_candidates = _manager_candidate_users(module)
     module_managers = list(ModuleExamManager.objects.filter(module=module).select_related("user").order_by("user__username"))
@@ -541,6 +583,11 @@ def exam_section(request):
             "available_subjects": available_subjects,
             "seating_blocks": seating_blocks,
             "seating_block_rows": seating_block_rows,
+            "enrollment_choices": enrollment_choices,
+            "dept_label_default": dept_label_default,
+            "next_block_number": next_block_number,
+            "next_enrollment_start": next_enrollment_start,
+            "next_enrollment_end": next_enrollment_end,
             "phase_defaults": (exam_phase_defaults(selected_session.test_name) if selected_session else {}),
         },
     )

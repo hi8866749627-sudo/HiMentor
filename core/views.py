@@ -9326,8 +9326,12 @@ def coordinator_load_adjustment(request):
             .values_list("faculty", flat=True)
         }
     )
+    if not selected_faculty:
+        selected_faculty = (request.session.get("coordinator_selected_faculty") or "").strip()
     if not selected_faculty and faculty_choices:
         selected_faculty = faculty_choices[0]
+    if selected_faculty:
+        request.session["coordinator_selected_faculty"] = selected_faculty
     day_of_week = selected_date.weekday()
 
     if request.method == "POST":

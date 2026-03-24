@@ -992,6 +992,7 @@ class ExamSeatingBlock(models.Model):
     ]
 
     session = models.ForeignKey(ModuleExamSession, on_delete=models.CASCADE, related_name="seating_blocks")
+    dept_label = models.CharField(max_length=30, blank=True)
     delivery_mode = models.CharField(max_length=10, choices=MODE_CHOICES, default=MODE_OFFLINE)
     block_number = models.CharField(max_length=20, blank=True)
     room = models.CharField(max_length=50, blank=True)

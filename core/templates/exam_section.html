@@ -139,19 +139,31 @@
                         <div class="col-md-2">
                             <select name="block_type" class="form-select" required>
                                 <option value="range">Range</option>
-                                <option value="batch">Batch</option>
                                 <option value="manual">Manual</option>
                             </select>
                         </div>
-                        <div class="col-md-2"><input name="block_name" class="form-control" placeholder="Block name"></div>
-                        <div class="col-md-2"><input name="block_number" class="form-control" placeholder="Block #"></div>
+                        <div class="col-md-2"><input name="dept_label" class="form-control" value="{{ dept_label_default }}" placeholder="Block Dept."></div>
+                        <div class="col-md-2"><input name="block_number" class="form-control" value="{{ next_block_number }}" placeholder="Block #"></div>
                         <div class="col-md-2"><input name="room" class="form-control" placeholder="Room (offline)"></div>
                         <div class="col-md-2"><input name="lab" class="form-control" placeholder="Lab (online)"></div>
-                        <div class="col-md-2"><input name="batch" class="form-control" placeholder="Batch"></div>
-                        <div class="col-md-2"><input name="enrollment_start" class="form-control" placeholder="From"></div>
-                        <div class="col-md-2"><input name="enrollment_end" class="form-control" placeholder="To"></div>
+                        <div class="col-md-2">
+                            <select name="enrollment_start" class="form-select">
+                                <option value="">From</option>
+                                {% for enrollment in enrollment_choices %}
+                                <option value="{{ enrollment }}" {% if enrollment == next_enrollment_start %}selected{% endif %}>{{ enrollment }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <select name="enrollment_end" class="form-select">
+                                <option value="">To</option>
+                                {% for enrollment in enrollment_choices %}
+                                <option value="{{ enrollment }}" {% if enrollment == next_enrollment_end %}selected{% endif %}>{{ enrollment }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
                         <div class="col-md-3">
-                            <input name="manual_enrollments" class="form-control" placeholder="Extra enrollments (csv)">
+                            <input name="manual_enrollments" class="form-control" placeholder="Extra enrollments (comma separated)">
                         </div>
                         <div class="col-md-1">
                             <button class="btn btn-outline-primary w-100" type="submit">Save</button>
@@ -161,7 +173,8 @@
                         <table class="table table-sm table-bordered align-middle">
                             <thead>
                                 <tr>
-                                    <th>Block</th>
+                                    <th>Block #</th>
+                                    <th>Dept</th>
                                     <th>Mode</th>
                                     <th>Block #</th>
                                     <th>Room/Lab</th>
@@ -173,7 +186,8 @@
                             <tbody>
                                 {% for row in seating_block_rows %}
                                 <tr>
-                                    <td>{{ row.block.name }}</td>
+                                    <td>{{ row.block.block_number|default:"-" }}</td>
+                                    <td>{{ row.block.dept_label|default:"-" }}</td>
                                     <td>{{ row.block.get_delivery_mode_display }}</td>
                                     <td>{{ row.block.block_number|default:"-" }}</td>
                                     <td>
@@ -185,16 +199,18 @@
                                     </td>
                                     <td>{{ row.block.get_block_type_display }}</td>
                                     <td>
-                                        {% if row.block.block_type == "batch" %}
-                                            {{ row.block.batch|default:"-" }}
-                                        {% else %}
+                                        {% if row.block.block_type == "range" %}
                                             {{ row.block.enrollment_start|default:"-" }} - {{ row.block.enrollment_end|default:"-" }}
+                                        {% elif row.block.block_type == "manual" %}
+                                            Manual
+                                        {% else %}
+                                            -
                                         {% endif %}
                                     </td>
                                     <td>{{ row.student_count }}</td>
                                 </tr>
                                 {% empty %}
-                                <tr><td colspan="7" class="text-muted">No seating blocks yet.</td></tr>
+                                <tr><td colspan="8" class="text-muted">No seating blocks yet.</td></tr>
                                 {% endfor %}
                             </tbody>
                         </table>
@@ -365,7 +381,9 @@
                     <select name="seating_block_id" class="form-select" required>
                         <option value="">Select seating block</option>
                         {% for row in seating_block_rows %}
-                        <option value="{{ row.block.id }}">{{ row.block.name }} ({{ row.block.get_delivery_mode_display }}, {{ row.student_count }} students)</option>
+                        <option value="{{ row.block.id }}">
+                            Block {{ row.block.block_number|default:"-" }}{% if row.block.dept_label %} · {{ row.block.dept_label }}{% endif %} ({{ row.block.get_delivery_mode_display }}, {{ row.student_count }} students)
+                        </option>
                         {% endfor %}
                     </select>
                 </div>
