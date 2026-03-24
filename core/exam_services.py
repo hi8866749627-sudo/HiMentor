@@ -65,17 +65,14 @@ def can_edit_entry_now(entry):
 
 def build_block_students(block, manual_student_ids=None):
     entry = block.timetable_entry
-    module_students = entry.session.module.students.all().select_related("mentor").order_by("roll_no", "name")
-    if block.block_type == block.TYPE_BATCH:
-        selected = list(module_students.filter(batch__iexact=(block.batch or "").strip()))
-    elif block.block_type == block.TYPE_ENROLLMENT_RANGE:
-        start = (block.enrollment_start or "").strip()
-        end = (block.enrollment_end or "").strip()
-        selected = list(
-            module_students.filter(enrollment__gte=start, enrollment__lte=end).order_by("enrollment")
-        )
-    else:
-        selected = list(module_students.filter(id__in=list(manual_student_ids or [])))
+    selected = resolve_block_students(
+        entry.session.module,
+        block.block_type,
+        block.batch,
+        block.enrollment_start,
+        block.enrollment_end,
+        manual_student_ids=manual_student_ids,
+    )
 
     existing_ids = set(
         ExamBlockStudent.objects.filter(block__timetable_entry=entry)
@@ -89,6 +86,19 @@ def build_block_students(block, manual_student_ids=None):
         ignore_conflicts=True,
     )
     return final_students, len(selected) - len(final_students)
+
+
+def resolve_block_students(module, block_type, batch, enrollment_start, enrollment_end, manual_student_ids=None):
+    module_students = module.students.all().select_related("mentor").order_by("roll_no", "name")
+    if block_type == "batch":
+        selected = list(module_students.filter(batch__iexact=(batch or "").strip()))
+    elif block_type == "range":
+        start = (enrollment_start or "").strip()
+        end = (enrollment_end or "").strip()
+        selected = list(module_students.filter(enrollment__gte=start, enrollment__lte=end).order_by("enrollment"))
+    else:
+        selected = list(module_students.filter(id__in=list(manual_student_ids or [])))
+    return selected
 
 
 def exam_stats_for_block(block):

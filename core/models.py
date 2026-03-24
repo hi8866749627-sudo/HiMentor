@@ -974,6 +974,50 @@ class ExamBlock(models.Model):
         return f"{self.timetable_entry} - {self.name}"
 
 
+class ExamSeatingBlock(models.Model):
+    MODE_OFFLINE = "offline"
+    MODE_ONLINE = "online"
+    MODE_CHOICES = [
+        (MODE_OFFLINE, "Offline"),
+        (MODE_ONLINE, "Online"),
+    ]
+
+    TYPE_ENROLLMENT_RANGE = "range"
+    TYPE_BATCH = "batch"
+    TYPE_MANUAL = "manual"
+    TYPE_CHOICES = [
+        (TYPE_ENROLLMENT_RANGE, "Enrollment Range"),
+        (TYPE_BATCH, "Batch"),
+        (TYPE_MANUAL, "Manual"),
+    ]
+
+    session = models.ForeignKey(ModuleExamSession, on_delete=models.CASCADE, related_name="seating_blocks")
+    delivery_mode = models.CharField(max_length=10, choices=MODE_CHOICES, default=MODE_OFFLINE)
+    block_number = models.CharField(max_length=20, blank=True)
+    room = models.CharField(max_length=50, blank=True)
+    lab = models.CharField(max_length=50, blank=True)
+    block_type = models.CharField(max_length=12, choices=TYPE_CHOICES)
+    name = models.CharField(max_length=120)
+    batch = models.CharField(max_length=20, blank=True)
+    enrollment_start = models.CharField(max_length=20, blank=True)
+    enrollment_end = models.CharField(max_length=20, blank=True)
+    manual_enrollments = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_exam_seating_blocks",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["session__test_name", "name", "id"]
+
+    def __str__(self):
+        return f"{self.session} - {self.name}"
+
+
 class ExamBlockStudent(models.Model):
     block = models.ForeignKey(ExamBlock, on_delete=models.CASCADE, related_name="student_links")
     student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name="exam_block_links")

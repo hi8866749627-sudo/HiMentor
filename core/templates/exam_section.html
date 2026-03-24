@@ -105,6 +105,107 @@
     </div>
 
     {% if can_manage_exam and selected_session %}
+    <div class="row g-3 mb-4" id="seating-blocks">
+        <div class="col-xl-7">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                        <h5 class="card-title mb-0">Exam Seating Blocks ({{ selected_session.test_name }})</h5>
+                        <form method="post" class="d-flex gap-2 align-items-center">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="copy_seating_blocks">
+                            <input type="hidden" name="session_id" value="{{ selected_session.id }}">
+                            <select name="source_session_id" class="form-select form-select-sm">
+                                <option value="">Copy from exam</option>
+                                {% for session in sessions %}
+                                {% if session.id != selected_session.id %}
+                                <option value="{{ session.id }}">{{ session.test_name }}</option>
+                                {% endif %}
+                                {% endfor %}
+                            </select>
+                            <button class="btn btn-outline-secondary btn-sm" type="submit">Copy</button>
+                        </form>
+                    </div>
+                    <form method="post" class="row g-2 mb-3">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="create_seating_block">
+                        <input type="hidden" name="session_id" value="{{ selected_session.id }}">
+                        <div class="col-md-2">
+                            <select name="delivery_mode" class="form-select" required>
+                                <option value="offline">Offline</option>
+                                <option value="online">Online</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <select name="block_type" class="form-select" required>
+                                <option value="range">Range</option>
+                                <option value="batch">Batch</option>
+                                <option value="manual">Manual</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2"><input name="block_name" class="form-control" placeholder="Block name"></div>
+                        <div class="col-md-2"><input name="block_number" class="form-control" placeholder="Block #"></div>
+                        <div class="col-md-2"><input name="room" class="form-control" placeholder="Room (offline)"></div>
+                        <div class="col-md-2"><input name="lab" class="form-control" placeholder="Lab (online)"></div>
+                        <div class="col-md-2"><input name="batch" class="form-control" placeholder="Batch"></div>
+                        <div class="col-md-2"><input name="enrollment_start" class="form-control" placeholder="From"></div>
+                        <div class="col-md-2"><input name="enrollment_end" class="form-control" placeholder="To"></div>
+                        <div class="col-md-3">
+                            <input name="manual_enrollments" class="form-control" placeholder="Extra enrollments (csv)">
+                        </div>
+                        <div class="col-md-1">
+                            <button class="btn btn-outline-primary w-100" type="submit">Save</button>
+                        </div>
+                    </form>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered align-middle">
+                            <thead>
+                                <tr>
+                                    <th>Block</th>
+                                    <th>Mode</th>
+                                    <th>Block #</th>
+                                    <th>Room/Lab</th>
+                                    <th>Type</th>
+                                    <th>Range</th>
+                                    <th>Students</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in seating_block_rows %}
+                                <tr>
+                                    <td>{{ row.block.name }}</td>
+                                    <td>{{ row.block.get_delivery_mode_display }}</td>
+                                    <td>{{ row.block.block_number|default:"-" }}</td>
+                                    <td>
+                                        {% if row.block.delivery_mode == "offline" %}
+                                            {{ row.block.room|default:"-" }}
+                                        {% else %}
+                                            {{ row.block.lab|default:"-" }}
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ row.block.get_block_type_display }}</td>
+                                    <td>
+                                        {% if row.block.block_type == "batch" %}
+                                            {{ row.block.batch|default:"-" }}
+                                        {% else %}
+                                            {{ row.block.enrollment_start|default:"-" }} - {{ row.block.enrollment_end|default:"-" }}
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ row.student_count }}</td>
+                                </tr>
+                                {% empty %}
+                                <tr><td colspan="7" class="text-muted">No seating blocks yet.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if can_manage_exam and selected_session %}
     <div class="row g-3 mb-4">
         <div class="col-xl-5">
             <div class="card shadow-sm h-100">
@@ -128,7 +229,7 @@
                                         <th>Online Max</th>
                                         <th>Overall Max</th>
                                         <th>Pass</th>
-                                        <th>Total Pass</th>
+                                        <th>Cumulative Pass</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -190,7 +291,7 @@
                         {{ entry.exam_date }} | {{ entry.start_time }} - {{ entry.end_time }} | Opens {{ stats.opens_at }}
                     </div>
                     <div class="small text-muted">
-                        Deadline: {{ entry.entry_deadline }} | Mode: {{ entry.get_mode_display }} | Max: {{ entry.max_marks }} | Pass: {{ entry.pass_marks }} | Total pass: {{ entry.total_pass_marks }}
+                        Deadline: {{ entry.entry_deadline }} | Mode: {{ entry.get_mode_display }} | Max: {{ entry.max_marks }} | Pass: {{ entry.pass_marks }} | Cumulative pass: {{ entry.total_pass_marks }}
                         {% if entry.mode == "both" %}
                         | Offline: {{ entry.offline_max_marks }} | Online: {{ entry.online_max_marks }}
                         {% endif %}
@@ -242,7 +343,7 @@
                 <div class="col-md-2"><input type="number" step="0.5" name="online_max_marks" value="{{ entry.online_max_marks }}" class="form-control" placeholder="Online"></div>
                 <div class="col-md-2"><input type="number" step="0.5" name="max_marks" value="{{ entry.max_marks }}" class="form-control" placeholder="Max"></div>
                 <div class="col-md-2"><input type="number" step="0.5" name="pass_marks" value="{{ entry.pass_marks }}" class="form-control" placeholder="Pass"></div>
-                <div class="col-md-2"><input type="number" step="0.5" name="total_pass_marks" value="{{ entry.total_pass_marks }}" class="form-control" placeholder="Total pass"></div>
+                <div class="col-md-2"><input type="number" step="0.5" name="total_pass_marks" value="{{ entry.total_pass_marks }}" class="form-control" placeholder="Cumulative pass"></div>
                 <div class="col-md-2">
                     <button class="btn btn-outline-primary w-100" type="submit">Update Timetable</button>
                 </div>
@@ -260,44 +361,15 @@
                         {% endfor %}
                     </select>
                 </div>
-                <div class="col-md-2">
-                    <select name="delivery_mode" class="form-select" required>
-                        <option value="offline">Offline</option>
-                        <option value="online">Online</option>
+                <div class="col-md-5">
+                    <select name="seating_block_id" class="form-select" required>
+                        <option value="">Select seating block</option>
+                        {% for row in seating_block_rows %}
+                        <option value="{{ row.block.id }}">{{ row.block.name }} ({{ row.block.get_delivery_mode_display }}, {{ row.student_count }} students)</option>
+                        {% endfor %}
                     </select>
                 </div>
-                <div class="col-md-2">
-                    <select name="block_type" class="form-select" required>
-                        <option value="range">Range</option>
-                        <option value="batch">Batch</option>
-                        <option value="manual">Manual</option>
-                    </select>
-                </div>
-                <div class="col-md-2"><input name="block_name" class="form-control" placeholder="Block name"></div>
-                <div class="col-md-2"><input name="block_number" class="form-control" placeholder="Block #"></div>
-                <div class="col-md-2"><input name="room" class="form-control" placeholder="Room (offline)"></div>
-                <div class="col-md-2"><input name="lab" class="form-control" placeholder="Lab (online)"></div>
-                <div class="col-md-2"><input name="batch" class="form-control" placeholder="Batch"></div>
-                <div class="col-md-1"><input name="enrollment_start" class="form-control" placeholder="From"></div>
-                <div class="col-md-1"><input name="enrollment_end" class="form-control" placeholder="To"></div>
-                <div class="col-md-1"><button class="btn btn-outline-primary w-100" type="submit">Add</button></div>
-                <div class="col-12">
-                    <details>
-                        <summary class="small text-muted">Manual student selection</summary>
-                        <div class="row row-cols-2 row-cols-md-4 g-1 mt-2">
-                            {% for student in students %}
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="manual_student_ids" value="{{ student.id }}" id="student-{{ entry.id }}-{{ student.id }}">
-                                <label class="form-check-label small" for="student-{{ entry.id }}-{{ student.id }}">{{ student.enrollment }} - {{ student.name }}</label>
-                            </div>
-                            {% endfor %}
-                        </div>
-                    </details>
-                    <div class="mt-2">
-                        <label class="form-label small text-muted">Additional enrollments (comma or new line separated)</label>
-                        <textarea name="manual_enrollments" rows="2" class="form-control" placeholder="25002170210101, 25002170210102"></textarea>
-                    </div>
-                </div>
+                <div class="col-md-2"><button class="btn btn-outline-primary w-100" type="submit">Assign</button></div>
             </form>
             {% endif %}
 
