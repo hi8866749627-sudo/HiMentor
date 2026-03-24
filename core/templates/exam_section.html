@@ -46,9 +46,9 @@
                         {% csrf_token %}
                         <input type="hidden" name="action" value="assign_manager">
                         <select name="manager_user_id" class="form-select" required>
-                            <option value="">Select user</option>
+                            <option value="">Select faculty</option>
                             {% for user in manager_candidates %}
-                            <option value="{{ user.id }}">{{ user.username }}</option>
+                            <option value="{{ user.id }}">{{ user.label }}</option>
                             {% endfor %}
                         </select>
                         <button class="btn btn-outline-primary" type="submit">Assign</button>
@@ -110,28 +110,68 @@
             <div class="card shadow-sm h-100">
                 <div class="card-body">
                     <h5 class="card-title">Create Subject Timetable</h5>
-                    <form method="post" class="row g-2">
+                    <form method="post" id="create-exam-entry-form" data-default-max="{{ phase_defaults.max_marks }}" data-default-pass="{{ phase_defaults.pass_marks }}" data-default-total="{{ phase_defaults.total_pass_marks }}">
                         {% csrf_token %}
                         <input type="hidden" name="action" value="create_entry">
                         <input type="hidden" name="session_id" value="{{ selected_session.id }}">
-                        <div class="col-12">
-                            <select name="subject_id" class="form-select" required>
-                                <option value="">Select subject</option>
-                                {% for subject in module.subjects.all %}
-                                {% if subject.is_active %}
-                                <option value="{{ subject.id }}">{{ subject.name }}</option>
-                                {% endif %}
-                                {% endfor %}
-                            </select>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-bordered align-middle">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Subject</th>
+                                        <th>Mode</th>
+                                        <th>Date</th>
+                                        <th>Start</th>
+                                        <th>End</th>
+                                        <th>Deadline</th>
+                                        <th>Offline Max</th>
+                                        <th>Online Max</th>
+                                        <th>Overall Max</th>
+                                        <th>Pass</th>
+                                        <th>Total Pass</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td>
+                                            <select name="subject_id" class="form-select" {% if not available_subjects %}disabled{% endif %} required>
+                                                <option value="">{% if available_subjects %}Select subject{% else %}No subjects left{% endif %}</option>
+                                                {% for subject in available_subjects %}
+                                                <option value="{{ subject.id }}">{{ subject.name }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </td>
+                                        <td class="small">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="radio" name="entry_mode" value="offline" id="mode-offline-new" checked>
+                                                <label class="form-check-label" for="mode-offline-new">Only Offline</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="radio" name="entry_mode" value="both" id="mode-both-new">
+                                                <label class="form-check-label" for="mode-both-new">Also Online</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="radio" name="entry_mode" value="online" id="mode-online-new">
+                                                <label class="form-check-label" for="mode-online-new">Only Online</label>
+                                            </div>
+                                        </td>
+                                        <td><input type="date" name="exam_date" class="form-control" required></td>
+                                        <td><input type="time" name="start_time" class="form-control" required></td>
+                                        <td><input type="time" name="end_time" class="form-control" required></td>
+                                        <td><input type="datetime-local" name="entry_deadline" class="form-control" required></td>
+                                        <td><input type="number" step="0.5" name="offline_max_marks" value="16" class="form-control js-offline-max"></td>
+                                        <td><input type="number" step="0.5" name="online_max_marks" value="9" class="form-control js-online-max"></td>
+                                        <td><input type="number" step="0.5" name="max_marks" value="{{ phase_defaults.max_marks }}" class="form-control js-max-marks"></td>
+                                        <td><input type="number" step="0.5" name="pass_marks" value="{{ phase_defaults.pass_marks }}" class="form-control js-pass-marks"></td>
+                                        <td><input type="number" step="0.5" name="total_pass_marks" value="{{ phase_defaults.total_pass_marks }}" class="form-control js-total-pass"></td>
+                                    </tr>
+                                </tbody>
+                            </table>
                         </div>
-                        <div class="col-md-6"><input type="date" name="exam_date" class="form-control" required></div>
-                        <div class="col-md-6"><input type="time" name="start_time" class="form-control" required></div>
-                        <div class="col-md-6"><input type="time" name="end_time" class="form-control" required></div>
-                        <div class="col-md-6"><input type="datetime-local" name="entry_deadline" class="form-control" required></div>
-                        <div class="col-md-4"><input type="number" step="0.5" name="max_marks" value="{{ phase_defaults.max_marks }}" class="form-control" placeholder="Max marks"></div>
-                        <div class="col-md-4"><input type="number" step="0.5" name="pass_marks" value="{{ phase_defaults.pass_marks }}" class="form-control" placeholder="Pass marks"></div>
-                        <div class="col-md-4"><input type="number" step="0.5" name="total_pass_marks" value="{{ phase_defaults.total_pass_marks }}" class="form-control" placeholder="Total pass"></div>
-                        <div class="col-12"><button class="btn btn-primary" type="submit">Save Subject Exam</button></div>
+                        {% if not available_subjects %}
+                        <div class="small text-muted mb-2">All subjects already have an exam entry for this test.</div>
+                        {% endif %}
+                        <button class="btn btn-primary" type="submit" {% if not available_subjects %}disabled{% endif %}>Save Subject Exam</button>
                     </form>
                 </div>
             </div>
@@ -150,7 +190,10 @@
                         {{ entry.exam_date }} | {{ entry.start_time }} - {{ entry.end_time }} | Opens {{ stats.opens_at }}
                     </div>
                     <div class="small text-muted">
-                        Deadline: {{ entry.entry_deadline }} | Max: {{ entry.max_marks }} | Pass: {{ entry.pass_marks }} | Total pass: {{ entry.total_pass_marks }}
+                        Deadline: {{ entry.entry_deadline }} | Mode: {{ entry.get_mode_display }} | Max: {{ entry.max_marks }} | Pass: {{ entry.pass_marks }} | Total pass: {{ entry.total_pass_marks }}
+                        {% if entry.mode == "both" %}
+                        | Offline: {{ entry.offline_max_marks }} | Online: {{ entry.online_max_marks }}
+                        {% endif %}
                     </div>
                 </div>
                 <div class="d-flex flex-wrap gap-2">
@@ -172,6 +215,41 @@
             {% if can_manage_exam %}
             <form method="post" class="row g-2 mb-3">
                 {% csrf_token %}
+                <input type="hidden" name="action" value="update_entry">
+                <input type="hidden" name="timetable_entry_id" value="{{ entry.id }}">
+                <div class="col-md-3">
+                    <div class="border rounded p-2 h-100">
+                        <div class="small fw-semibold mb-1">Mode</div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="entry_mode" value="offline" id="mode-offline-{{ entry.id }}" {% if entry.mode == "offline" %}checked{% endif %}>
+                            <label class="form-check-label" for="mode-offline-{{ entry.id }}">Only Offline</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="entry_mode" value="both" id="mode-both-{{ entry.id }}" {% if entry.mode == "both" %}checked{% endif %}>
+                            <label class="form-check-label" for="mode-both-{{ entry.id }}">Also Online</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="entry_mode" value="online" id="mode-online-{{ entry.id }}" {% if entry.mode == "online" %}checked{% endif %}>
+                            <label class="form-check-label" for="mode-online-{{ entry.id }}">Only Online</label>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-2"><input type="date" name="exam_date" value="{{ entry.exam_date|date:'Y-m-d' }}" class="form-control" required></div>
+                <div class="col-md-2"><input type="time" name="start_time" value="{{ entry.start_time|time:'H:i' }}" class="form-control" required></div>
+                <div class="col-md-2"><input type="time" name="end_time" value="{{ entry.end_time|time:'H:i' }}" class="form-control" required></div>
+                <div class="col-md-3"><input type="datetime-local" name="entry_deadline" value="{{ entry.entry_deadline|date:'Y-m-d\\TH:i' }}" class="form-control" required></div>
+                <div class="col-md-2"><input type="number" step="0.5" name="offline_max_marks" value="{{ entry.offline_max_marks }}" class="form-control" placeholder="Offline"></div>
+                <div class="col-md-2"><input type="number" step="0.5" name="online_max_marks" value="{{ entry.online_max_marks }}" class="form-control" placeholder="Online"></div>
+                <div class="col-md-2"><input type="number" step="0.5" name="max_marks" value="{{ entry.max_marks }}" class="form-control" placeholder="Max"></div>
+                <div class="col-md-2"><input type="number" step="0.5" name="pass_marks" value="{{ entry.pass_marks }}" class="form-control" placeholder="Pass"></div>
+                <div class="col-md-2"><input type="number" step="0.5" name="total_pass_marks" value="{{ entry.total_pass_marks }}" class="form-control" placeholder="Total pass"></div>
+                <div class="col-md-2">
+                    <button class="btn btn-outline-primary w-100" type="submit">Update Timetable</button>
+                </div>
+            </form>
+
+            <form method="post" class="row g-2 mb-3">
+                {% csrf_token %}
                 <input type="hidden" name="action" value="assign_block">
                 <input type="hidden" name="timetable_entry_id" value="{{ entry.id }}">
                 <div class="col-md-3">
@@ -183,6 +261,12 @@
                     </select>
                 </div>
                 <div class="col-md-2">
+                    <select name="delivery_mode" class="form-select" required>
+                        <option value="offline">Offline</option>
+                        <option value="online">Online</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
                     <select name="block_type" class="form-select" required>
                         <option value="range">Range</option>
                         <option value="batch">Batch</option>
@@ -190,6 +274,9 @@
                     </select>
                 </div>
                 <div class="col-md-2"><input name="block_name" class="form-control" placeholder="Block name"></div>
+                <div class="col-md-2"><input name="block_number" class="form-control" placeholder="Block #"></div>
+                <div class="col-md-2"><input name="room" class="form-control" placeholder="Room (offline)"></div>
+                <div class="col-md-2"><input name="lab" class="form-control" placeholder="Lab (online)"></div>
                 <div class="col-md-2"><input name="batch" class="form-control" placeholder="Batch"></div>
                 <div class="col-md-1"><input name="enrollment_start" class="form-control" placeholder="From"></div>
                 <div class="col-md-1"><input name="enrollment_end" class="form-control" placeholder="To"></div>
@@ -206,6 +293,10 @@
                             {% endfor %}
                         </div>
                     </details>
+                    <div class="mt-2">
+                        <label class="form-label small text-muted">Additional enrollments (comma or new line separated)</label>
+                        <textarea name="manual_enrollments" rows="2" class="form-control" placeholder="25002170210101, 25002170210102"></textarea>
+                    </div>
                 </div>
             </form>
             {% endif %}
@@ -215,6 +306,9 @@
                     <thead>
                         <tr>
                             <th>Block</th>
+                            <th>Mode</th>
+                            <th>Block #</th>
+                            <th>Room/Lab</th>
                             <th>Evaluator</th>
                             <th>Students</th>
                             <th>Type</th>
@@ -225,13 +319,22 @@
                         {% for block in blocks %}
                         <tr>
                             <td>{{ block.name }}</td>
+                            <td>{{ block.get_delivery_mode_display }}</td>
+                            <td>{{ block.block_number|default:"-" }}</td>
+                            <td>
+                                {% if block.delivery_mode == "offline" %}
+                                    {{ block.room|default:"-" }}
+                                {% else %}
+                                    {{ block.lab|default:"-" }}
+                                {% endif %}
+                            </td>
                             <td>{{ block.evaluator.username }}</td>
                             <td>{{ block.student_links.count }}</td>
                             <td>{{ block.get_block_type_display }}</td>
                             <td><a class="btn btn-sm btn-outline-dark" href="/exam-section/marks/{{ block.id }}/">Open</a></td>
                         </tr>
                         {% empty %}
-                        <tr><td colspan="5" class="text-muted">No evaluator blocks yet.</td></tr>
+                        <tr><td colspan="8" class="text-muted">No evaluator blocks yet.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -258,4 +361,54 @@
     {% endwith %}
     {% endfor %}
 </div>
+<script>
+(() => {
+    const form = document.getElementById("create-exam-entry-form");
+    if (!form) return;
+    const defaultMax = parseFloat(form.dataset.defaultMax || "25");
+    const defaultPass = parseFloat(form.dataset.defaultPass || "9");
+    const defaultTotal = parseFloat(form.dataset.defaultTotal || "9");
+    const offlineInput = form.querySelector(".js-offline-max");
+    const onlineInput = form.querySelector(".js-online-max");
+    const maxInput = form.querySelector(".js-max-marks");
+    const passInput = form.querySelector(".js-pass-marks");
+    const totalInput = form.querySelector(".js-total-pass");
+    const modeInputs = form.querySelectorAll('input[name="entry_mode"]');
+
+    const applyModeDefaults = (mode) => {
+        if (!offlineInput || !onlineInput || !maxInput || !passInput || !totalInput) return;
+        if (mode === "both") {
+            offlineInput.value = "16";
+            onlineInput.value = "9";
+            maxInput.value = "25";
+            passInput.value = "9";
+            totalInput.value = String(defaultTotal);
+            return;
+        }
+        if (mode === "online") {
+            offlineInput.value = "0";
+            onlineInput.value = "100";
+            maxInput.value = "100";
+            passInput.value = "35";
+            totalInput.value = "35";
+            return;
+        }
+        offlineInput.value = String(defaultMax);
+        onlineInput.value = "0";
+        maxInput.value = String(defaultMax);
+        passInput.value = String(defaultPass);
+        totalInput.value = String(defaultTotal);
+    };
+
+    modeInputs.forEach((input) => {
+        input.addEventListener("change", (event) => {
+            applyModeDefaults(event.target.value);
+        });
+    });
+    const selected = form.querySelector('input[name="entry_mode"]:checked');
+    if (selected) {
+        applyModeDefaults(selected.value);
+    }
+})();
+</script>
 {% endblock %}

@@ -880,12 +880,24 @@ class ModuleExamSession(models.Model):
 
 
 class ExamTimetableEntry(models.Model):
+    MODE_OFFLINE = "offline"
+    MODE_ONLINE = "online"
+    MODE_BOTH = "both"
+    MODE_CHOICES = [
+        (MODE_OFFLINE, "Only Offline"),
+        (MODE_ONLINE, "Only Online"),
+        (MODE_BOTH, "Also Online"),
+    ]
+
     session = models.ForeignKey(ModuleExamSession, on_delete=models.CASCADE, related_name="entries")
     subject = models.ForeignKey(Subject, on_delete=models.PROTECT, related_name="exam_entries")
     exam_date = models.DateField()
     start_time = models.TimeField()
     end_time = models.TimeField()
     entry_deadline = models.DateTimeField()
+    mode = models.CharField(max_length=10, choices=MODE_CHOICES, default=MODE_OFFLINE)
+    offline_max_marks = models.DecimalField(max_digits=5, decimal_places=1, default=25)
+    online_max_marks = models.DecimalField(max_digits=5, decimal_places=1, default=0)
     max_marks = models.DecimalField(max_digits=5, decimal_places=1, default=25)
     pass_marks = models.DecimalField(max_digits=5, decimal_places=1, default=9)
     total_pass_marks = models.DecimalField(max_digits=5, decimal_places=1, default=9)
@@ -919,6 +931,13 @@ class ExamTimetableEntry(models.Model):
 
 
 class ExamBlock(models.Model):
+    MODE_OFFLINE = "offline"
+    MODE_ONLINE = "online"
+    MODE_CHOICES = [
+        (MODE_OFFLINE, "Offline"),
+        (MODE_ONLINE, "Online"),
+    ]
+
     TYPE_ENROLLMENT_RANGE = "range"
     TYPE_BATCH = "batch"
     TYPE_MANUAL = "manual"
@@ -930,6 +949,10 @@ class ExamBlock(models.Model):
 
     timetable_entry = models.ForeignKey(ExamTimetableEntry, on_delete=models.CASCADE, related_name="blocks")
     evaluator = models.ForeignKey(User, on_delete=models.CASCADE, related_name="exam_blocks")
+    delivery_mode = models.CharField(max_length=10, choices=MODE_CHOICES, default=MODE_OFFLINE)
+    block_number = models.CharField(max_length=20, blank=True)
+    room = models.CharField(max_length=50, blank=True)
+    lab = models.CharField(max_length=50, blank=True)
     block_type = models.CharField(max_length=12, choices=TYPE_CHOICES)
     name = models.CharField(max_length=120)
     batch = models.CharField(max_length=20, blank=True)
@@ -970,6 +993,10 @@ class ExamMarkEntry(models.Model):
     student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name="exam_mark_entries")
     evaluator = models.ForeignKey(User, on_delete=models.CASCADE, related_name="exam_mark_entries")
     raw_value = models.CharField(max_length=20, blank=True)
+    raw_offline = models.CharField(max_length=20, blank=True)
+    raw_online = models.CharField(max_length=20, blank=True)
+    offline_marks = models.DecimalField(max_digits=5, decimal_places=1, null=True, blank=True)
+    online_marks = models.DecimalField(max_digits=5, decimal_places=1, null=True, blank=True)
     marks_obtained = models.DecimalField(max_digits=5, decimal_places=1, null=True, blank=True)
     is_absent = models.BooleanField(default=False)
     updated_at = models.DateTimeField(auto_now=True)

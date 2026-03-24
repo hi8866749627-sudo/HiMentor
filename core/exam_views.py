@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -91,11 +92,32 @@ def _module_faculty_directory(module):
     return mentors, profiles, unregistered_names
 
 
-def _manager_candidate_users(module, profiles):
+def _manager_candidate_users(module):
     coordinator_ids = CoordinatorModuleAccess.objects.filter(module=module).values_list("coordinator_id", flat=True)
+    profile_users = list(
+        ExamFacultyProfile.objects.select_related("user", "mentor").order_by("short_code")
+    )
+    mentor_user_ids = list(
+        User.objects.filter(username__in=[name.lower() for name in Mentor.objects.values_list("name", flat=True)]).values_list("id", flat=True)
+    )
     user_ids = set(coordinator_ids)
-    user_ids.update(profile.user_id for profile in profiles)
-    return list(User.objects.filter(id__in=user_ids).order_by("username"))
+    user_ids.update(profile.user_id for profile in profile_users)
+    user_ids.update(mentor_user_ids)
+    users = list(User.objects.filter(id__in=user_ids).order_by("username"))
+
+    profile_labels = {
+        profile.user_id: f"{profile.short_code} - {(profile.full_name or getattr(profile.mentor, 'full_name', '') or '').strip()}".strip(" -")
+        for profile in profile_users
+    }
+    candidates = []
+    seen = set()
+    for user in users:
+        label = profile_labels.get(user.id) or user.username
+        if user.id in seen:
+            continue
+        seen.add(user.id)
+        candidates.append({"id": user.id, "label": label})
+    return sorted(candidates, key=lambda item: item["label"].lower())
 
 
 @login_required
@@ -174,6 +196,9 @@ def exam_section(request):
                 messages.error(request, "Select a valid exam and subject.")
                 return redirect(f"/exam-section/?module_id={module.id}")
             defaults = exam_phase_defaults(session.test_name)
+            mode = (request.POST.get("entry_mode") or ExamTimetableEntry.MODE_OFFLINE).strip()
+            if mode not in {ExamTimetableEntry.MODE_OFFLINE, ExamTimetableEntry.MODE_ONLINE, ExamTimetableEntry.MODE_BOTH}:
+                mode = ExamTimetableEntry.MODE_OFFLINE
             try:
                 exam_date = datetime.strptime((request.POST.get("exam_date") or "").strip(), "%Y-%m-%d").date()
                 start_time = datetime.strptime((request.POST.get("start_time") or "").strip(), "%H:%M").time()
@@ -181,9 +206,26 @@ def exam_section(request):
                 entry_deadline = timezone.make_aware(
                     datetime.strptime((request.POST.get("entry_deadline") or "").strip(), "%Y-%m-%dT%H:%M")
                 )
-                max_marks = request.POST.get("max_marks") or str(defaults["max_marks"])
-                pass_marks = request.POST.get("pass_marks") or str(defaults["pass_marks"])
-                total_pass_marks = request.POST.get("total_pass_marks") or str(defaults["total_pass_marks"])
+                offline_max = (request.POST.get("offline_max_marks") or "").strip()
+                online_max = (request.POST.get("online_max_marks") or "").strip()
+                if mode == ExamTimetableEntry.MODE_BOTH:
+                    offline_max = offline_max or "16"
+                    online_max = online_max or "9"
+                    max_marks = request.POST.get("max_marks") or str(Decimal(offline_max) + Decimal(online_max))
+                    pass_marks = request.POST.get("pass_marks") or "9"
+                    total_pass_marks = request.POST.get("total_pass_marks") or str(defaults["total_pass_marks"])
+                elif mode == ExamTimetableEntry.MODE_ONLINE:
+                    max_marks = request.POST.get("max_marks") or "100"
+                    pass_marks = request.POST.get("pass_marks") or "35"
+                    total_pass_marks = request.POST.get("total_pass_marks") or "35"
+                    offline_max = "0"
+                    online_max = max_marks
+                else:
+                    max_marks = request.POST.get("max_marks") or str(defaults["max_marks"])
+                    pass_marks = request.POST.get("pass_marks") or str(defaults["pass_marks"])
+                    total_pass_marks = request.POST.get("total_pass_marks") or str(defaults["total_pass_marks"])
+                    offline_max = max_marks
+                    online_max = "0"
                 entry, _ = ExamTimetableEntry.objects.update_or_create(
                     session=session,
                     subject=subject,
@@ -192,6 +234,9 @@ def exam_section(request):
                         "start_time": start_time,
                         "end_time": end_time,
                         "entry_deadline": entry_deadline,
+                        "mode": mode,
+                        "offline_max_marks": offline_max,
+                        "online_max_marks": online_max,
                         "max_marks": max_marks,
                         "pass_marks": pass_marks,
                         "total_pass_marks": total_pass_marks,
@@ -202,17 +247,79 @@ def exam_section(request):
                 messages.error(request, "Enter valid exam date, time, and deadline.")
             return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}")
 
+        if action == "update_entry":
+            entry = ExamTimetableEntry.objects.filter(id=request.POST.get("timetable_entry_id"), session__module=module).first()
+            if not entry:
+                messages.error(request, "Exam subject entry not found.")
+                return redirect(f"/exam-section/?module_id={module.id}")
+            defaults = exam_phase_defaults(entry.session.test_name)
+            mode = (request.POST.get("entry_mode") or entry.mode).strip()
+            if mode not in {ExamTimetableEntry.MODE_OFFLINE, ExamTimetableEntry.MODE_ONLINE, ExamTimetableEntry.MODE_BOTH}:
+                mode = entry.mode
+            try:
+                exam_date = datetime.strptime((request.POST.get("exam_date") or "").strip(), "%Y-%m-%d").date()
+                start_time = datetime.strptime((request.POST.get("start_time") or "").strip(), "%H:%M").time()
+                end_time = datetime.strptime((request.POST.get("end_time") or "").strip(), "%H:%M").time()
+                entry_deadline = timezone.make_aware(
+                    datetime.strptime((request.POST.get("entry_deadline") or "").strip(), "%Y-%m-%dT%H:%M")
+                )
+                offline_max = (request.POST.get("offline_max_marks") or "").strip()
+                online_max = (request.POST.get("online_max_marks") or "").strip()
+                if mode == ExamTimetableEntry.MODE_BOTH:
+                    offline_max = offline_max or "16"
+                    online_max = online_max or "9"
+                    max_marks = request.POST.get("max_marks") or str(Decimal(offline_max) + Decimal(online_max))
+                    pass_marks = request.POST.get("pass_marks") or "9"
+                    total_pass_marks = request.POST.get("total_pass_marks") or str(defaults["total_pass_marks"])
+                elif mode == ExamTimetableEntry.MODE_ONLINE:
+                    max_marks = request.POST.get("max_marks") or "100"
+                    pass_marks = request.POST.get("pass_marks") or "35"
+                    total_pass_marks = request.POST.get("total_pass_marks") or "35"
+                    offline_max = "0"
+                    online_max = max_marks
+                else:
+                    max_marks = request.POST.get("max_marks") or str(defaults["max_marks"])
+                    pass_marks = request.POST.get("pass_marks") or str(defaults["pass_marks"])
+                    total_pass_marks = request.POST.get("total_pass_marks") or str(defaults["total_pass_marks"])
+                    offline_max = max_marks
+                    online_max = "0"
+                entry.exam_date = exam_date
+                entry.start_time = start_time
+                entry.end_time = end_time
+                entry.entry_deadline = entry_deadline
+                entry.mode = mode
+                entry.offline_max_marks = offline_max
+                entry.online_max_marks = online_max
+                entry.max_marks = max_marks
+                entry.pass_marks = pass_marks
+                entry.total_pass_marks = total_pass_marks
+                entry.save()
+                messages.success(request, f"Exam timetable updated for {entry.subject.name}.")
+            except ValueError:
+                messages.error(request, "Enter valid exam date, time, and deadline.")
+            return redirect(f"/exam-section/?module_id={module.id}&test_name={entry.session.test_name}#entry-{entry.id}")
+
         if action == "assign_block":
             entry = ExamTimetableEntry.objects.filter(id=request.POST.get("timetable_entry_id"), session__module=module).first()
             evaluator = User.objects.filter(id=request.POST.get("evaluator_user_id")).first()
             block_type = (request.POST.get("block_type") or "").strip()
             block_name = (request.POST.get("block_name") or "").strip()
+            delivery_mode = (request.POST.get("delivery_mode") or ExamBlock.MODE_OFFLINE).strip()
+            block_number = (request.POST.get("block_number") or "").strip()
+            room = (request.POST.get("room") or "").strip()
+            lab = (request.POST.get("lab") or "").strip()
             if not entry or not evaluator or block_type not in {ExamBlock.TYPE_ENROLLMENT_RANGE, ExamBlock.TYPE_BATCH, ExamBlock.TYPE_MANUAL}:
                 messages.error(request, "Select a valid subject and evaluator.")
                 return redirect(f"/exam-section/?module_id={module.id}")
+            if delivery_mode not in {ExamBlock.MODE_OFFLINE, ExamBlock.MODE_ONLINE}:
+                delivery_mode = ExamBlock.MODE_OFFLINE
             block = ExamBlock.objects.create(
                 timetable_entry=entry,
                 evaluator=evaluator,
+                delivery_mode=delivery_mode,
+                block_number=block_number,
+                room=room,
+                lab=lab,
                 block_type=block_type,
                 name=block_name or f"{entry.subject.short_name or entry.subject.name} Block",
                 batch=(request.POST.get("batch") or "").strip(),
@@ -221,6 +328,15 @@ def exam_section(request):
                 created_by=request.user,
             )
             manual_student_ids = [value for value in request.POST.getlist("manual_student_ids") if value.isdigit()]
+            manual_enrollments = []
+            extra_text = (request.POST.get("manual_enrollments") or "").strip()
+            if extra_text:
+                manual_enrollments = [value.strip() for value in extra_text.replace("\n", ",").split(",") if value.strip()]
+            if manual_enrollments:
+                extra_students = list(
+                    entry.session.module.students.filter(enrollment__in=manual_enrollments).values_list("id", flat=True)
+                )
+                manual_student_ids.extend(extra_students)
             students, skipped = build_block_students(block, manual_student_ids=manual_student_ids)
             if not students:
                 block.delete()
@@ -279,9 +395,14 @@ def exam_section(request):
             .order_by("exam_date", "start_time", "subject__name")
         )
     mentors, profiles, unregistered_names = _module_faculty_directory(module)
-    manager_candidates = _manager_candidate_users(module, profiles)
+    manager_candidates = _manager_candidate_users(module)
     module_managers = list(ModuleExamManager.objects.filter(module=module).select_related("user").order_by("user__username"))
     students = list(module.students.select_related("mentor").order_by("roll_no", "enrollment"))
+    available_subjects = []
+    if selected_session:
+        available_subjects = list(
+            module.subjects.filter(is_active=True).exclude(exam_entries__session=selected_session).order_by("name")
+        )
     entry_cards = []
     for entry in entries:
         blocks = list(entry.blocks.select_related("evaluator").order_by("name", "id"))
@@ -325,6 +446,7 @@ def exam_section(request):
             "manager_candidates": manager_candidates,
             "module_managers": module_managers,
             "students": students,
+            "available_subjects": available_subjects,
             "phase_defaults": (exam_phase_defaults(selected_session.test_name) if selected_session else {}),
         },
     )
@@ -352,23 +474,85 @@ def exam_marks_entry(request, block_id):
         if not can_edit_now:
             messages.error(request, edit_message)
             return redirect(f"/exam-section/marks/{block.id}/")
+        entry = block.timetable_entry
         for link in block.student_links.select_related("student").order_by("student__roll_no", "student__name"):
+            if entry.mode == ExamTimetableEntry.MODE_BOTH:
+                raw_offline = request.POST.get(f"offline_mark_{link.student_id}", "")
+                raw_online = request.POST.get(f"online_mark_{link.student_id}", "")
+                if not (raw_offline or "").strip() and not (raw_online or "").strip():
+                    continue
+                off_text = (raw_offline or "").strip().upper()
+                on_text = (raw_online or "").strip().upper()
+                if "AB" in {off_text, on_text}:
+                    if (off_text and off_text != "AB") or (on_text and on_text != "AB"):
+                        messages.error(request, f"{link.student.enrollment}: Use AB only if absent.")
+                        return redirect(f"/exam-section/marks/{block.id}/")
+                    ExamMarkEntry.objects.update_or_create(
+                        timetable_entry=entry,
+                        block=block,
+                        student=link.student,
+                        defaults={
+                            "evaluator": request.user,
+                            "raw_value": "AB",
+                            "raw_offline": "AB" if off_text == "AB" else "",
+                            "raw_online": "AB" if on_text == "AB" else "",
+                            "marks_obtained": None,
+                            "offline_marks": None,
+                            "online_marks": None,
+                            "is_absent": True,
+                        },
+                    )
+                    continue
+                if not off_text or not on_text:
+                    messages.error(request, f"{link.student.enrollment}: Enter both offline and online marks (or AB).")
+                    return redirect(f"/exam-section/marks/{block.id}/")
+                try:
+                    raw_off_text, offline_marks, _ = parse_exam_mark(off_text, entry.offline_max_marks)
+                    raw_on_text, online_marks, _ = parse_exam_mark(on_text, entry.online_max_marks)
+                except ValueError as exc:
+                    messages.error(request, f"{link.student.enrollment}: {exc}")
+                    return redirect(f"/exam-section/marks/{block.id}/")
+                total = (offline_marks or Decimal("0")) + (online_marks or Decimal("0"))
+                if total > Decimal(str(entry.max_marks)):
+                    messages.error(request, f"{link.student.enrollment}: Total cannot exceed {entry.max_marks}.")
+                    return redirect(f"/exam-section/marks/{block.id}/")
+                ExamMarkEntry.objects.update_or_create(
+                    timetable_entry=entry,
+                    block=block,
+                    student=link.student,
+                    defaults={
+                        "evaluator": request.user,
+                        "raw_value": str(total),
+                        "raw_offline": raw_off_text or "",
+                        "raw_online": raw_on_text or "",
+                        "marks_obtained": total,
+                        "offline_marks": offline_marks,
+                        "online_marks": online_marks,
+                        "is_absent": False,
+                    },
+                )
+                continue
+
             raw_value = request.POST.get(f"mark_{link.student_id}", "")
             if not (raw_value or "").strip():
                 continue
             try:
-                raw_text, numeric_value, is_absent = parse_exam_mark(raw_value, block.timetable_entry.max_marks)
+                raw_text, numeric_value, is_absent = parse_exam_mark(raw_value, entry.max_marks)
             except ValueError as exc:
                 messages.error(request, f"{link.student.enrollment}: {exc}")
                 return redirect(f"/exam-section/marks/{block.id}/")
             ExamMarkEntry.objects.update_or_create(
-                timetable_entry=block.timetable_entry,
+                timetable_entry=entry,
                 block=block,
                 student=link.student,
                 defaults={
                     "evaluator": request.user,
                     "raw_value": raw_text or "",
                     "marks_obtained": numeric_value,
+                    "offline_marks": None,
+                    "online_marks": None,
+                    "raw_offline": "",
+                    "raw_online": "",
                     "is_absent": is_absent,
                 },
             )
@@ -388,6 +572,7 @@ def exam_marks_entry(request, block_id):
         {
             "block": block,
             "mark_rows": mark_rows,
+            "entry": block.timetable_entry,
             "editable": editable and can_edit_now,
             "edit_message": "" if editable and can_edit_now else edit_message,
             "stats": stats,
