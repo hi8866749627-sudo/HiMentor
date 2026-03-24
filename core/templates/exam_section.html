@@ -126,6 +126,47 @@
                             <button class="btn btn-outline-secondary btn-sm" type="submit">Copy</button>
                         </form>
                     </div>
+                    <div class="border rounded p-2 mb-3">
+                        <div class="fw-semibold mb-2">Auto Generate Blocks (Preview)</div>
+                        <form method="post" class="row g-2 align-items-end">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="auto_generate_blocks">
+                            <input type="hidden" name="session_id" value="{{ selected_session.id }}">
+                            <div class="col-md-2">
+                                <label class="form-label small">Mode</label>
+                                <select name="delivery_mode" class="form-select">
+                                    <option value="offline">Offline (20)</option>
+                                    <option value="online">Online (12)</option>
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label small">Start Block #</label>
+                                <input name="start_block_number" class="form-control" value="{{ next_block_number }}">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label small">Dept</label>
+                                <input name="dept_label" class="form-control" value="{{ dept_label_default }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small">Select Rooms/Labs</label>
+                                <div class="d-flex flex-wrap gap-2 border rounded p-2" style="max-height:120px; overflow:auto;">
+                                    {% for room in year_rooms %}
+                                    <label class="form-check small">
+                                        <input class="form-check-input" type="checkbox" name="room_list" value="{{ room }}">
+                                        <span class="form-check-label">{{ room }}</span>
+                                    </label>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small">Manual Rooms (comma separated)</label>
+                                <input name="manual_rooms" class="form-control" placeholder="517-A, 517-B">
+                            </div>
+                            <div class="col-md-3">
+                                <button class="btn btn-outline-primary w-100" type="submit">Generate Preview</button>
+                            </div>
+                        </form>
+                    </div>
                     <form method="post" class="row g-2 mb-3">
                         {% csrf_token %}
                         <input type="hidden" name="action" value="create_seating_block">
@@ -169,6 +210,85 @@
                             <button class="btn btn-outline-primary w-100" type="submit">Save</button>
                         </div>
                     </form>
+                    {% if preview_block_rows %}
+                    <div class="border rounded p-2 mb-3">
+                        <div class="fw-semibold mb-2">Preview Blocks (Edit then Finalize)</div>
+                        <form method="post" class="d-flex flex-wrap gap-2 mb-2">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="finalize_seating_blocks">
+                            <input type="hidden" name="session_id" value="{{ selected_session.id }}">
+                            <select name="delivery_mode" class="form-select form-select-sm" required>
+                                <option value="">Mode</option>
+                                <option value="offline">Offline</option>
+                                <option value="online">Online</option>
+                            </select>
+                            <button class="btn btn-success btn-sm" type="submit">Finalize Generation</button>
+                        </form>
+                        <form method="post" class="d-flex flex-wrap gap-2 mb-2">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="discard_seating_preview">
+                            <input type="hidden" name="session_id" value="{{ selected_session.id }}">
+                            <select name="delivery_mode" class="form-select form-select-sm">
+                                <option value="">All Preview</option>
+                                <option value="offline">Offline</option>
+                                <option value="online">Online</option>
+                            </select>
+                            <button class="btn btn-outline-danger btn-sm" type="submit">Discard Preview</button>
+                        </form>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-bordered align-middle">
+                                <thead>
+                                    <tr>
+                                        <th>Block #</th>
+                                        <th>Dept</th>
+                                        <th>Mode</th>
+                                        <th>Room/Lab</th>
+                                        <th>Type</th>
+                                        <th>Range</th>
+                                        <th>Students</th>
+                                        <th>Update</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for row in preview_block_rows %}
+                                    <tr>
+                                        <form method="post">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="action" value="update_seating_block">
+                                            <input type="hidden" name="seating_block_id" value="{{ row.block.id }}">
+                                            <td><input name="block_number" class="form-control form-control-sm" value="{{ row.block.block_number }}"></td>
+                                            <td><input name="dept_label" class="form-control form-control-sm" value="{{ row.block.dept_label }}"></td>
+                                            <td>
+                                                <select name="delivery_mode" class="form-select form-select-sm">
+                                                    <option value="offline" {% if row.block.delivery_mode == "offline" %}selected{% endif %}>Offline</option>
+                                                    <option value="online" {% if row.block.delivery_mode == "online" %}selected{% endif %}>Online</option>
+                                                </select>
+                                            </td>
+                                            <td>
+                                                <input name="room" class="form-control form-control-sm mb-1" value="{{ row.block.room }}" placeholder="Room">
+                                                <input name="lab" class="form-control form-control-sm" value="{{ row.block.lab }}" placeholder="Lab">
+                                            </td>
+                                            <td>
+                                                <select name="block_type" class="form-select form-select-sm">
+                                                    <option value="range" {% if row.block.block_type == "range" %}selected{% endif %}>Range</option>
+                                                    <option value="manual" {% if row.block.block_type == "manual" %}selected{% endif %}>Manual</option>
+                                                </select>
+                                            </td>
+                                            <td>
+                                                <input name="enrollment_start" class="form-control form-control-sm mb-1" value="{{ row.block.enrollment_start }}" placeholder="From">
+                                                <input name="enrollment_end" class="form-control form-control-sm" value="{{ row.block.enrollment_end }}" placeholder="To">
+                                                <input name="manual_enrollments" class="form-control form-control-sm mt-1" value="{{ row.block.manual_enrollments }}" placeholder="Extra enrollments">
+                                            </td>
+                                            <td>{{ row.student_count }}</td>
+                                            <td><button class="btn btn-outline-primary btn-sm" type="submit">Update</button></td>
+                                        </form>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    {% endif %}
                     <div class="table-responsive">
                         <table class="table table-sm table-bordered align-middle">
                             <thead>

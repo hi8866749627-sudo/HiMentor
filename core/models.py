@@ -1003,6 +1003,7 @@ class ExamSeatingBlock(models.Model):
     enrollment_start = models.CharField(max_length=20, blank=True)
     enrollment_end = models.CharField(max_length=20, blank=True)
     manual_enrollments = models.TextField(blank=True)
+    is_preview = models.BooleanField(default=False)
     created_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,

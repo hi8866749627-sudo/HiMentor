@@ -293,9 +293,125 @@ def exam_section(request):
                 enrollment_start=(request.POST.get("enrollment_start") or "").strip(),
                 enrollment_end=(request.POST.get("enrollment_end") or "").strip(),
                 manual_enrollments=manual_enrollments,
+                is_preview=False,
                 created_by=request.user,
             )
             messages.success(request, "Seating block saved.")
+            return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#seating-blocks")
+
+        if action == "auto_generate_blocks":
+            session = ModuleExamSession.objects.filter(id=request.POST.get("session_id"), module=module).first()
+            if not session:
+                messages.error(request, "Select a valid exam session.")
+                return redirect(f"/exam-section/?module_id={module.id}")
+            delivery_mode = (request.POST.get("delivery_mode") or ExamSeatingBlock.MODE_OFFLINE).strip()
+            if delivery_mode not in {ExamSeatingBlock.MODE_OFFLINE, ExamSeatingBlock.MODE_ONLINE}:
+                delivery_mode = ExamSeatingBlock.MODE_OFFLINE
+            start_number_raw = (request.POST.get("start_block_number") or "1").strip()
+            try:
+                start_number = int(start_number_raw)
+            except Exception:
+                start_number = 1
+            dept_label = (request.POST.get("dept_label") or "").strip()
+            rooms = request.POST.getlist("room_list")
+            manual_rooms = (request.POST.get("manual_rooms") or "").strip()
+            if manual_rooms:
+                rooms.extend([item.strip() for item in manual_rooms.replace("\n", ",").split(",") if item.strip()])
+            rooms = [room for room in rooms if room]
+            if not rooms:
+                messages.error(request, "Select at least one room/lab.")
+                return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#seating-blocks")
+            capacity = 20 if delivery_mode == ExamSeatingBlock.MODE_OFFLINE else 12
+            enrollments = list(
+                session.module.students.order_by("enrollment").values_list("enrollment", flat=True)
+            )
+            if not enrollments:
+                messages.error(request, "No students found to generate blocks.")
+                return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#seating-blocks")
+            chunks = [enrollments[i : i + capacity] for i in range(0, len(enrollments), capacity)]
+            ExamSeatingBlock.objects.filter(session=session, delivery_mode=delivery_mode, is_preview=True).delete()
+            new_blocks = []
+            for idx, chunk in enumerate(chunks):
+                block_number = str(start_number + idx)
+                room_value = rooms[idx % len(rooms)] if rooms else ""
+                block_name = f"{dept_label or session.module.year_level} Block {block_number}".strip()
+                new_blocks.append(
+                    ExamSeatingBlock(
+                        session=session,
+                        dept_label=dept_label,
+                        delivery_mode=delivery_mode,
+                        block_number=block_number,
+                        room=room_value if delivery_mode == ExamSeatingBlock.MODE_OFFLINE else "",
+                        lab=room_value if delivery_mode == ExamSeatingBlock.MODE_ONLINE else "",
+                        block_type=ExamSeatingBlock.TYPE_ENROLLMENT_RANGE,
+                        name=block_name,
+                        batch="",
+                        enrollment_start=chunk[0],
+                        enrollment_end=chunk[-1],
+                        manual_enrollments="",
+                        is_preview=True,
+                        created_by=request.user,
+                    )
+                )
+            if new_blocks:
+                ExamSeatingBlock.objects.bulk_create(new_blocks)
+            messages.success(request, f"Generated {len(new_blocks)} preview blocks.")
+            return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#seating-blocks")
+
+        if action == "update_seating_block":
+            block_id = (request.POST.get("seating_block_id") or "").strip()
+            block = ExamSeatingBlock.objects.filter(id=block_id, session__module=module).first()
+            if not block:
+                messages.error(request, "Seating block not found.")
+                return redirect(f"/exam-section/?module_id={module.id}")
+            block.delivery_mode = (request.POST.get("delivery_mode") or block.delivery_mode).strip()
+            if block.delivery_mode not in {ExamSeatingBlock.MODE_OFFLINE, ExamSeatingBlock.MODE_ONLINE}:
+                block.delivery_mode = ExamSeatingBlock.MODE_OFFLINE
+            block.block_number = (request.POST.get("block_number") or "").strip()
+            block.dept_label = (request.POST.get("dept_label") or "").strip()
+            block.room = (request.POST.get("room") or "").strip()
+            block.lab = (request.POST.get("lab") or "").strip()
+            block.block_type = (request.POST.get("block_type") or "").strip()
+            if block.block_type not in {ExamSeatingBlock.TYPE_ENROLLMENT_RANGE, ExamSeatingBlock.TYPE_MANUAL}:
+                block.block_type = ExamSeatingBlock.TYPE_ENROLLMENT_RANGE
+            block.enrollment_start = (request.POST.get("enrollment_start") or "").strip()
+            block.enrollment_end = (request.POST.get("enrollment_end") or "").strip()
+            block.manual_enrollments = (request.POST.get("manual_enrollments") or "").strip()
+            if not block.name:
+                name_bits = [block.dept_label or block.session.module.year_level or "Block"]
+                if block.block_number:
+                    name_bits.append(f"Block {block.block_number}")
+                block.name = " ".join(name_bits).strip()
+            block.save()
+            messages.success(request, "Seating block updated.")
+            return redirect(f"/exam-section/?module_id={module.id}&test_name={block.session.test_name}#seating-blocks")
+
+        if action == "finalize_seating_blocks":
+            session = ModuleExamSession.objects.filter(id=request.POST.get("session_id"), module=module).first()
+            delivery_mode = (request.POST.get("delivery_mode") or "").strip()
+            if not session or delivery_mode not in {ExamSeatingBlock.MODE_OFFLINE, ExamSeatingBlock.MODE_ONLINE}:
+                messages.error(request, "Select a valid exam and mode.")
+                return redirect(f"/exam-section/?module_id={module.id}")
+            preview_qs = ExamSeatingBlock.objects.filter(session=session, delivery_mode=delivery_mode, is_preview=True)
+            if not preview_qs.exists():
+                messages.error(request, "No preview blocks to finalize.")
+                return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#seating-blocks")
+            ExamSeatingBlock.objects.filter(session=session, delivery_mode=delivery_mode, is_preview=False).delete()
+            preview_qs.update(is_preview=False)
+            messages.success(request, "Seating blocks finalized.")
+            return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#seating-blocks")
+
+        if action == "discard_seating_preview":
+            session = ModuleExamSession.objects.filter(id=request.POST.get("session_id"), module=module).first()
+            delivery_mode = (request.POST.get("delivery_mode") or "").strip()
+            if not session:
+                messages.error(request, "Select a valid exam session.")
+                return redirect(f"/exam-section/?module_id={module.id}")
+            if delivery_mode in {ExamSeatingBlock.MODE_OFFLINE, ExamSeatingBlock.MODE_ONLINE}:
+                ExamSeatingBlock.objects.filter(session=session, delivery_mode=delivery_mode, is_preview=True).delete()
+            else:
+                ExamSeatingBlock.objects.filter(session=session, is_preview=True).delete()
+            messages.success(request, "Preview blocks cleared.")
             return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#seating-blocks")
 
         if action == "copy_seating_blocks":
@@ -306,9 +422,10 @@ def exam_section(request):
                 messages.error(request, "Select a valid source exam.")
                 return redirect(f"/exam-section/?module_id={module.id}")
             copied = 0
-            for block in ExamSeatingBlock.objects.filter(session=source_session):
+            for block in ExamSeatingBlock.objects.filter(session=source_session, is_preview=False):
                 ExamSeatingBlock.objects.create(
                     session=session,
+                    dept_label=block.dept_label,
                     delivery_mode=block.delivery_mode,
                     block_number=block.block_number,
                     room=block.room,
@@ -319,6 +436,7 @@ def exam_section(request):
                     enrollment_start=block.enrollment_start,
                     enrollment_end=block.enrollment_end,
                     manual_enrollments=block.manual_enrollments,
+                    is_preview=False,
                     created_by=request.user,
                 )
                 copied += 1
@@ -384,7 +502,7 @@ def exam_section(request):
             if not entry or not evaluator:
                 messages.error(request, "Select a valid subject and evaluator.")
                 return redirect(f"/exam-section/?module_id={module.id}")
-            seating_block = ExamSeatingBlock.objects.filter(id=seating_block_id, session=entry.session).first()
+            seating_block = ExamSeatingBlock.objects.filter(id=seating_block_id, session=entry.session, is_preview=False).first()
             if not seating_block:
                 messages.error(request, "Select a valid seating block.")
                 return redirect(f"/exam-section/?module_id={module.id}&test_name={entry.session.test_name}#entry-{entry.id}")
@@ -484,11 +602,18 @@ def exam_section(request):
         dept_label_default = module.year_level
     seating_blocks = []
     seating_block_rows = []
+    preview_block_rows = []
     next_block_number = 1
     next_enrollment_start = ""
     next_enrollment_end = ""
+    year_rooms = []
     if selected_session:
-        seating_blocks = list(ExamSeatingBlock.objects.filter(session=selected_session).order_by("name", "id"))
+        seating_blocks = list(
+            ExamSeatingBlock.objects.filter(session=selected_session, is_preview=False).order_by("block_number", "id")
+        )
+        preview_blocks = list(
+            ExamSeatingBlock.objects.filter(session=selected_session, is_preview=True).order_by("block_number", "id")
+        )
         block_numbers = []
         for block in seating_blocks:
             try:
@@ -517,6 +642,26 @@ def exam_section(request):
                 manual_student_ids=manual_ids,
             )
             seating_block_rows.append({"block": block, "student_count": len(students)})
+        for block in preview_blocks:
+            manual_ids = []
+            manual_enrollments = [
+                value.strip()
+                for value in (block.manual_enrollments or "").replace("\n", ",").split(",")
+                if value.strip()
+            ]
+            if manual_enrollments:
+                manual_ids = list(
+                    selected_session.module.students.filter(enrollment__in=manual_enrollments).values_list("id", flat=True)
+                )
+            students = resolve_block_students(
+                selected_session.module,
+                block.block_type,
+                block.batch,
+                block.enrollment_start,
+                block.enrollment_end,
+                manual_student_ids=manual_ids,
+            )
+            preview_block_rows.append({"block": block, "student_count": len(students)})
         if seating_blocks and enrollment_choices:
             last_end = ""
             for block in reversed(seating_blocks):
@@ -528,6 +673,19 @@ def exam_section(request):
                 if idx + 1 < len(enrollment_choices):
                     next_enrollment_start = enrollment_choices[idx + 1]
                     next_enrollment_end = enrollment_choices[idx + 1]
+        year_modules = AcademicModule.objects.filter(is_active=True)
+        if module.year_scope_id:
+            year_modules = year_modules.filter(year_scope=module.year_scope)
+        else:
+            year_modules = year_modules.filter(id=module.id)
+        year_rooms = sorted(
+            {
+                (room or "").strip()
+                for room in TimetableEntry.objects.filter(module__in=year_modules, is_active=True)
+                .values_list("room", flat=True)
+                if (room or "").strip()
+            }
+        )
     mentors, profiles, unregistered_names = _module_faculty_directory(module)
     manager_candidates = _manager_candidate_users(module)
     module_managers = list(ModuleExamManager.objects.filter(module=module).select_related("user").order_by("user__username"))
@@ -583,11 +741,13 @@ def exam_section(request):
             "available_subjects": available_subjects,
             "seating_blocks": seating_blocks,
             "seating_block_rows": seating_block_rows,
+            "preview_block_rows": preview_block_rows,
             "enrollment_choices": enrollment_choices,
             "dept_label_default": dept_label_default,
             "next_block_number": next_block_number,
             "next_enrollment_start": next_enrollment_start,
             "next_enrollment_end": next_enrollment_end,
+            "year_rooms": year_rooms,
             "phase_defaults": (exam_phase_defaults(selected_session.test_name) if selected_session else {}),
         },
     )
