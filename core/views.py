@@ -9657,18 +9657,18 @@ def coordinator_load_adjustment(request):
                         faculty=conflict_entry.faculty,
                         room=merge_room,
                     )
-            _sync_existing_session(
-                module,
-                selected_date,
-                entry.batch,
-                    entry.lecture_no,
-                    timetable_entry=entry,
-                    day_of_week=selected_date.weekday(),
-                    time_slot=entry.time_slot,
-                    subject=adjustment.subject,
-                    faculty=proxy.name,
-                    room=room,
-                )
+                _sync_existing_session(
+                    module,
+                    selected_date,
+                    entry.batch,
+                        entry.lecture_no,
+                        timetable_entry=entry,
+                        day_of_week=selected_date.weekday(),
+                        time_slot=entry.time_slot,
+                        subject=adjustment.subject,
+                        faculty=proxy.name,
+                        room=room,
+                    )
                 _trigger_weekly_recompute_for_date(module, selected_date)
                 messages.success(request, "Proxy assigned (this week only).")
         elif action == "update_proxy":
