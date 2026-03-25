@@ -493,16 +493,27 @@ def exam_section(request):
                 messages.error(request, "Select a valid exam session.")
                 return redirect(f"/exam-section/?module_id={module.id}")
             payload_raw = (request.POST.get("payload") or "").strip()
+            remove_raw = (request.POST.get("remove_ids") or "").strip()
             try:
                 payload = json.loads(payload_raw) if payload_raw else []
             except json.JSONDecodeError:
                 messages.error(request, "Invalid preview payload.")
                 return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#seating-blocks")
+            try:
+                remove_ids = json.loads(remove_raw) if remove_raw else []
+            except json.JSONDecodeError:
+                remove_ids = []
             preview_blocks = list(ExamSeatingBlock.objects.filter(session=session, is_preview=True))
             preview_by_id = {str(block.id): block for block in preview_blocks}
             enrollments = set(
                 session.module.students.order_by("enrollment").values_list("enrollment", flat=True)
             )
+            if remove_ids:
+                ExamSeatingBlock.objects.filter(
+                    session=session,
+                    is_preview=True,
+                    id__in=[rid for rid in remove_ids if str(rid).isdigit() or isinstance(rid, int)],
+                ).delete()
             updates = []
             for item in payload:
                 block_id = str(item.get("id") or "")
