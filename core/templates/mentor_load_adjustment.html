@@ -314,14 +314,17 @@ document.querySelectorAll('form[data-allow-conflict]').forEach(form => {
     const subjectInput = form.querySelector('input[name="proxy_subject"]');
     const mergeInput = form.querySelector('input[name="merge_room"]');
     const roomSelect = form.querySelector('select[name="room_select"]');
+    const roomCustom = form.querySelector('input[name="room_custom"]');
     if (!facultySelect || !subjectInput || !mergeInput || !roomSelect) return;
 
     const allowConflict = form.getAttribute('data-allow-conflict') === '1';
+    let lastBusyRoom = '';
 
     function renderRooms(facultyName) {
         const baseRooms = JSON.parse(roomSelect.getAttribute('data-base-rooms') || '[]');
         const conflictRooms = JSON.parse(roomSelect.getAttribute('data-conflict-rooms') || '{}');
         const busyRoom = conflictRooms[(facultyName || '').trim().toLowerCase()] || '';
+        lastBusyRoom = busyRoom || '';
         const options = [''].concat(baseRooms);
         if (busyRoom && options.indexOf(busyRoom) === -1) {
             options.push(busyRoom);
@@ -367,6 +370,27 @@ document.querySelectorAll('form[data-allow-conflict]').forEach(form => {
             mergeInput.value = '';
         }
     });
+
+    roomSelect.addEventListener('change', () => {
+        if (allowConflict && lastBusyRoom && roomSelect.value === lastBusyRoom) {
+            mergeInput.value = roomSelect.value;
+        } else if (allowConflict && roomCustom && roomCustom.value) {
+            mergeInput.value = roomCustom.value;
+        } else if (allowConflict) {
+            mergeInput.value = '';
+        }
+    });
+    if (roomCustom) {
+        roomCustom.addEventListener('input', () => {
+            if (allowConflict && roomCustom.value) {
+                mergeInput.value = roomCustom.value;
+            } else if (allowConflict && roomSelect.value === lastBusyRoom) {
+                mergeInput.value = roomSelect.value;
+            } else if (allowConflict) {
+                mergeInput.value = '';
+            }
+        });
+    }
 
     renderRooms('');
 });

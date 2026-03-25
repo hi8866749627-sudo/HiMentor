@@ -143,6 +143,7 @@ def exam_section(request):
             "create_entry",
             "create_seating_block",
             "copy_seating_blocks",
+            "shift_preview_block",
             "assign_block",
             "lock_entry",
             "unlock_entry",
@@ -356,6 +357,132 @@ def exam_section(request):
             if new_blocks:
                 ExamSeatingBlock.objects.bulk_create(new_blocks)
             messages.success(request, f"Generated {len(new_blocks)} preview blocks.")
+            return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#seating-blocks")
+
+        if action == "shift_preview_block":
+            block_id = (request.POST.get("seating_block_id") or "").strip()
+            delta_raw = (request.POST.get("delta") or "").strip()
+            try:
+                delta = int(delta_raw)
+            except Exception:
+                delta = 0
+            block = ExamSeatingBlock.objects.filter(id=block_id, session__module=module, is_preview=True).select_related("session").first()
+            if not block or delta not in {-1, 1}:
+                messages.error(request, "Preview block not found.")
+                return redirect(f"/exam-section/?module_id={module.id}")
+
+            session = block.session
+            enrollments = list(
+                session.module.students.order_by("enrollment").values_list("enrollment", flat=True)
+            )
+            if not enrollments:
+                messages.error(request, "No students available.")
+                return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#seating-blocks")
+
+            def _sort_key(b):
+                try:
+                    return (0, int(str(b.block_number).strip()))
+                except Exception:
+                    return (1, str(b.block_number))
+
+            blocks = list(
+                ExamSeatingBlock.objects.filter(
+                    session=session,
+                    is_preview=True,
+                    delivery_mode=block.delivery_mode,
+                )
+            )
+            blocks.sort(key=_sort_key)
+
+            index_map = {b.id: idx for idx, b in enumerate(blocks)}
+            if block.id not in index_map:
+                messages.error(request, "Preview block not found.")
+                return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#seating-blocks")
+
+            sizes = []
+            prev_end = -1
+            for b in blocks:
+                start_idx = enrollments.index(b.enrollment_start) if b.enrollment_start in enrollments else prev_end + 1
+                if start_idx < prev_end + 1:
+                    start_idx = prev_end + 1
+                if start_idx >= len(enrollments):
+                    start_idx = len(enrollments) - 1
+                end_idx = enrollments.index(b.enrollment_end) if b.enrollment_end in enrollments else start_idx
+                if end_idx < start_idx:
+                    end_idx = start_idx
+                size = max(1, end_idx - start_idx + 1)
+                sizes.append(size)
+                prev_end = start_idx + size - 1
+
+            total = sum(sizes)
+            if total < len(enrollments):
+                sizes[-1] += len(enrollments) - total
+            elif total > len(enrollments):
+                diff = total - len(enrollments)
+                sizes[-1] = max(1, sizes[-1] - diff)
+
+            idx = index_map[block.id]
+            if delta == 1:
+                if idx + 1 < len(sizes) and sizes[idx + 1] > 1:
+                    sizes[idx] += 1
+                    sizes[idx + 1] -= 1
+                else:
+                    messages.error(request, "Cannot increase this block further.")
+                    return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#seating-blocks")
+            else:
+                if idx == len(sizes) - 1:
+                    if sizes[idx] > 1:
+                        sizes[idx] -= 1
+                        sizes.append(1)
+                    else:
+                        messages.error(request, "Cannot reduce this block further.")
+                        return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#seating-blocks")
+                else:
+                    if sizes[idx] > 1:
+                        sizes[idx] -= 1
+                        sizes[idx + 1] += 1
+                    else:
+                        sizes.pop(idx)
+                        sizes[idx] += 1
+                        blocks.pop(idx)
+
+            cursor = 0
+            for b, size in zip(blocks, sizes):
+                start = enrollments[cursor]
+                end = enrollments[cursor + size - 1]
+                b.enrollment_start = start
+                b.enrollment_end = end
+                b.save(update_fields=["enrollment_start", "enrollment_end"])
+                cursor += size
+
+            if len(sizes) > len(blocks):
+                max_num = 0
+                for b in blocks:
+                    try:
+                        max_num = max(max_num, int(str(b.block_number).strip()))
+                    except Exception:
+                        continue
+                new_number = str(max_num + 1) if max_num else "1"
+                last_start = enrollments[cursor]
+                last_end = enrollments[cursor]
+                name_bits = [block.dept_label or session.module.year_level or "Block", f"Block {new_number}"]
+                ExamSeatingBlock.objects.create(
+                    session=session,
+                    dept_label=block.dept_label,
+                    delivery_mode=block.delivery_mode,
+                    block_number=new_number,
+                    room=block.room if block.delivery_mode == ExamSeatingBlock.MODE_OFFLINE else "",
+                    lab=block.lab if block.delivery_mode == ExamSeatingBlock.MODE_ONLINE else "",
+                    block_type=ExamSeatingBlock.TYPE_ENROLLMENT_RANGE,
+                    name=" ".join(name_bits).strip(),
+                    batch="",
+                    enrollment_start=last_start,
+                    enrollment_end=last_end,
+                    manual_enrollments="",
+                    is_preview=True,
+                    created_by=request.user,
+                )
+            messages.success(request, "Preview block updated.")
             return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#seating-blocks")
 
         if action == "update_seating_block":
@@ -608,12 +735,20 @@ def exam_section(request):
     next_enrollment_end = ""
     year_rooms = []
     if selected_session:
+        def _block_sort_key(item):
+            try:
+                return (0, int(str(item.block_number).strip()))
+            except Exception:
+                return (1, str(item.block_number))
+
         seating_blocks = list(
-            ExamSeatingBlock.objects.filter(session=selected_session, is_preview=False).order_by("block_number", "id")
+            ExamSeatingBlock.objects.filter(session=selected_session, is_preview=False)
         )
+        seating_blocks.sort(key=_block_sort_key)
         preview_blocks = list(
-            ExamSeatingBlock.objects.filter(session=selected_session, is_preview=True).order_by("block_number", "id")
+            ExamSeatingBlock.objects.filter(session=selected_session, is_preview=True)
         )
+        preview_blocks.sort(key=_block_sort_key)
         block_numbers = []
         for block in seating_blocks:
             try:

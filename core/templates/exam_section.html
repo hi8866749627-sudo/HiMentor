@@ -106,7 +106,7 @@
 
     {% if can_manage_exam and selected_session %}
     <div class="row g-3 mb-4" id="seating-blocks">
-        <div class="col-xl-7">
+        <div class="col-12">
             <div class="card shadow-sm h-100">
                 <div class="card-body">
                     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
@@ -245,9 +245,10 @@
                                         <th>Room/Lab</th>
                                         <th>Type</th>
                                         <th>Range</th>
-                                        <th>Students</th>
-                                        <th>Update</th>
-                                    </tr>
+                                    <th>Students</th>
+                                    <th>Adjust</th>
+                                    <th>Update</th>
+                                </tr>
                                 </thead>
                                 <tbody>
                                     {% for row in preview_block_rows %}
@@ -280,12 +281,22 @@
                                                 <input name="manual_enrollments" class="form-control form-control-sm mt-1" value="{{ row.block.manual_enrollments }}" placeholder="Extra enrollments">
                                             </td>
                                             <td>{{ row.student_count }}</td>
+                                            <td class="d-flex gap-1">
+                                                <button type="button" class="btn btn-outline-secondary btn-sm preview-shift-btn" data-block-id="{{ row.block.id }}" data-delta="-1">-</button>
+                                                <button type="button" class="btn btn-outline-secondary btn-sm preview-shift-btn" data-block-id="{{ row.block.id }}" data-delta="1">+</button>
+                                            </td>
                                             <td><button class="btn btn-outline-primary btn-sm" type="submit">Update</button></td>
                                         </form>
                                     </tr>
                                     {% endfor %}
                                 </tbody>
                             </table>
+                            <form method="post" id="previewShiftForm" class="d-none">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="shift_preview_block">
+                                <input type="hidden" name="seating_block_id" value="">
+                                <input type="hidden" name="delta" value="">
+                            </form>
                         </div>
                     </div>
                     {% endif %}
@@ -620,5 +631,15 @@
         applyModeDefaults(selected.value);
     }
 })();
+
+document.querySelectorAll('.preview-shift-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const form = document.getElementById('previewShiftForm');
+        if (!form) return;
+        form.querySelector('input[name="seating_block_id"]').value = btn.dataset.blockId || '';
+        form.querySelector('input[name="delta"]').value = btn.dataset.delta || '';
+        form.submit();
+    });
+});
 </script>
 {% endblock %}

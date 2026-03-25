@@ -9051,9 +9051,33 @@ def mentor_load_adjustment(request):
                 faculty__iexact=proxy.name,
                 is_active=True,
             ).exists()
+            conflict_entry = TimetableEntry.objects.filter(
+                module__in=active_modules,
+                day_of_week=day_of_week,
+                lecture_no=entry.lecture_no,
+                faculty__iexact=proxy.name,
+                is_active=True,
+            ).first()
+            conflict_room = ""
+            if conflict_entry:
+                conflict_adj = LectureAdjustment.objects.filter(
+                    module=conflict_entry.module,
+                    date=selected_date,
+                    batch=conflict_entry.batch,
+                    lecture_no=conflict_entry.lecture_no,
+                    status=LectureAdjustment.STATUS_ACTIVE,
+                ).first()
+                conflict_room = (conflict_adj.room if conflict_adj and conflict_adj.room else conflict_entry.room) or ""
+            if conflict and not merge_room:
+                if room_custom:
+                    merge_room = room_custom
+                elif room_select and conflict_room and room_select == conflict_room:
+                    merge_room = room_select
             if conflict and not merge_room:
                 messages.error(request, "Proxy faculty already has a lecture. Merge room required.")
                 return redirect_response
+            if conflict and merge_room:
+                room = merge_room
             proxy_slot_subject = (
                 _resolve_proxy_subject(
                     module,
@@ -9097,6 +9121,44 @@ def mentor_load_adjustment(request):
                     "cancelled_at": None,
                 },
             )
+            if conflict_entry and merge_room:
+                existing_conflict = LectureAdjustment.objects.filter(
+                    module=conflict_entry.module,
+                    date=selected_date,
+                    batch=conflict_entry.batch,
+                    lecture_no=conflict_entry.lecture_no,
+                    status=LectureAdjustment.STATUS_ACTIVE,
+                ).first()
+                if not existing_conflict or existing_conflict.adjustment_type == LectureAdjustment.TYPE_ROOM:
+                    LectureAdjustment.objects.update_or_create(
+                        module=conflict_entry.module,
+                        date=selected_date,
+                        batch=conflict_entry.batch,
+                        lecture_no=conflict_entry.lecture_no,
+                        defaults={
+                            "timetable_entry": conflict_entry,
+                            "adjustment_type": LectureAdjustment.TYPE_ROOM,
+                            "time_slot": conflict_entry.time_slot,
+                            "subject": conflict_entry.subject,
+                            "original_faculty": conflict_entry.faculty,
+                            "room": merge_room,
+                            "remarks": "Merge room override",
+                            "status": LectureAdjustment.STATUS_ACTIVE,
+                            "created_by": mentor,
+                        },
+                    )
+                    _sync_existing_session(
+                        conflict_entry.module,
+                        selected_date,
+                        conflict_entry.batch,
+                        conflict_entry.lecture_no,
+                        timetable_entry=conflict_entry,
+                        day_of_week=day_of_week,
+                        time_slot=conflict_entry.time_slot,
+                        subject=conflict_entry.subject,
+                        faculty=conflict_entry.faculty,
+                        room=merge_room,
+                    )
             messages.success(request, "Adjustment saved.")
             return redirect_response
         if action == "update_proxy":
@@ -9133,6 +9195,31 @@ def mentor_load_adjustment(request):
                 batch=adj.batch,
                 is_active=True,
             ).first()
+            conflict_entry = None
+            conflict_room = ""
+            if entry:
+                active_modules = AcademicModule.objects.filter(is_active=True)
+                conflict_entry = TimetableEntry.objects.filter(
+                    module__in=active_modules,
+                    day_of_week=adj.date.weekday(),
+                    lecture_no=adj.lecture_no,
+                    faculty__iexact=proxy.name,
+                    is_active=True,
+                ).first()
+                if conflict_entry:
+                    conflict_adj = LectureAdjustment.objects.filter(
+                        module=conflict_entry.module,
+                        date=adj.date,
+                        batch=conflict_entry.batch,
+                        lecture_no=conflict_entry.lecture_no,
+                        status=LectureAdjustment.STATUS_ACTIVE,
+                    ).first()
+                    conflict_room = (conflict_adj.room if conflict_adj and conflict_adj.room else conflict_entry.room) or ""
+            if conflict_entry and not merge_room:
+                if room_custom:
+                    merge_room = room_custom
+                elif room_select and conflict_room and room_select == conflict_room:
+                    merge_room = room_select
             room = merge_room or room_custom or room_select or adj.room or (entry.room if entry else "")
             proxy_slot_subject = (
                 _resolve_proxy_subject(
@@ -9151,6 +9238,44 @@ def mentor_load_adjustment(request):
             adj.merge_room = merge_room
             adj.remarks = remarks
             adj.save(update_fields=["proxy_faculty", "subject", "room", "merge_room", "remarks"])
+            if conflict_entry and merge_room:
+                existing_conflict = LectureAdjustment.objects.filter(
+                    module=conflict_entry.module,
+                    date=adj.date,
+                    batch=conflict_entry.batch,
+                    lecture_no=conflict_entry.lecture_no,
+                    status=LectureAdjustment.STATUS_ACTIVE,
+                ).first()
+                if not existing_conflict or existing_conflict.adjustment_type == LectureAdjustment.TYPE_ROOM:
+                    LectureAdjustment.objects.update_or_create(
+                        module=conflict_entry.module,
+                        date=adj.date,
+                        batch=conflict_entry.batch,
+                        lecture_no=conflict_entry.lecture_no,
+                        defaults={
+                            "timetable_entry": conflict_entry,
+                            "adjustment_type": LectureAdjustment.TYPE_ROOM,
+                            "time_slot": conflict_entry.time_slot,
+                            "subject": conflict_entry.subject,
+                            "original_faculty": conflict_entry.faculty,
+                            "room": merge_room,
+                            "remarks": "Merge room override",
+                            "status": LectureAdjustment.STATUS_ACTIVE,
+                            "created_by": mentor,
+                        },
+                    )
+                    _sync_existing_session(
+                        conflict_entry.module,
+                        adj.date,
+                        conflict_entry.batch,
+                        conflict_entry.lecture_no,
+                        timetable_entry=conflict_entry,
+                        day_of_week=adj.date.weekday(),
+                        time_slot=conflict_entry.time_slot,
+                        subject=conflict_entry.subject,
+                        faculty=conflict_entry.faculty,
+                        room=merge_room,
+                    )
             _sync_existing_session(
                 module,
                 adj.date,
@@ -9364,9 +9489,33 @@ def coordinator_load_adjustment(request):
                 faculty__iexact=proxy.name,
                 is_active=True,
             ).exists()
+            conflict_entry = TimetableEntry.objects.filter(
+                module__in=active_modules,
+                day_of_week=day_of_week,
+                lecture_no=entry.lecture_no,
+                faculty__iexact=proxy.name,
+                is_active=True,
+            ).first()
+            conflict_room = ""
+            if conflict_entry:
+                conflict_adj = LectureAdjustment.objects.filter(
+                    module=conflict_entry.module,
+                    date=selected_date,
+                    batch=conflict_entry.batch,
+                    lecture_no=conflict_entry.lecture_no,
+                    status=LectureAdjustment.STATUS_ACTIVE,
+                ).first()
+                conflict_room = (conflict_adj.room if conflict_adj and conflict_adj.room else conflict_entry.room) or ""
+            if conflict and not merge_room:
+                if room_custom:
+                    merge_room = room_custom
+                elif room_select and conflict_room and room_select == conflict_room:
+                    merge_room = room_select
             if conflict and not merge_room:
                 messages.error(request, "Proxy faculty already has a lecture. Merge room required.")
                 return redirect(f"/coordinator-load-adjustment/?date={selected_date:%Y-%m-%d}")
+            if conflict and merge_room:
+                room = merge_room
             proxy_slot_subject = (
                 _resolve_proxy_subject(
                     module,
@@ -9400,6 +9549,36 @@ def coordinator_load_adjustment(request):
                     room=room,
                     time_slot=entry.time_slot,
                 )
+                if conflict_entry and merge_room:
+                    LectureAdjustment.objects.update_or_create(
+                        module=conflict_entry.module,
+                        date=selected_date,
+                        batch=conflict_entry.batch,
+                        lecture_no=conflict_entry.lecture_no,
+                        defaults={
+                            "timetable_entry": conflict_entry,
+                            "adjustment_type": LectureAdjustment.TYPE_ROOM,
+                            "time_slot": conflict_entry.time_slot,
+                            "subject": conflict_entry.subject,
+                            "original_faculty": conflict_entry.faculty,
+                            "room": merge_room,
+                            "remarks": "Merge room override",
+                            "status": LectureAdjustment.STATUS_ACTIVE,
+                            "created_by": created_by,
+                        },
+                    )
+                    _sync_existing_session(
+                        conflict_entry.module,
+                        selected_date,
+                        conflict_entry.batch,
+                        conflict_entry.lecture_no,
+                        timetable_entry=conflict_entry,
+                        day_of_week=selected_date.weekday(),
+                        time_slot=conflict_entry.time_slot,
+                        subject=conflict_entry.subject,
+                        faculty=conflict_entry.faculty,
+                        room=merge_room,
+                    )
                 _sync_existing_session(
                     module,
                     selected_date,
@@ -9436,14 +9615,52 @@ def coordinator_load_adjustment(request):
                         "remarks": remarks,
                         "status": LectureAdjustment.STATUS_ACTIVE,
                         "created_by": created_by,
-                        "cancelled_by": "",
-                        "cancelled_at": None,
-                    },
-                )
-                _sync_existing_session(
-                    module,
-                    selected_date,
-                    entry.batch,
+                    "cancelled_by": "",
+                    "cancelled_at": None,
+                },
+            )
+            if conflict_entry and merge_room:
+                existing_conflict = LectureAdjustment.objects.filter(
+                    module=conflict_entry.module,
+                    date=selected_date,
+                    batch=conflict_entry.batch,
+                    lecture_no=conflict_entry.lecture_no,
+                    status=LectureAdjustment.STATUS_ACTIVE,
+                ).first()
+                if not existing_conflict or existing_conflict.adjustment_type == LectureAdjustment.TYPE_ROOM:
+                    LectureAdjustment.objects.update_or_create(
+                        module=conflict_entry.module,
+                        date=selected_date,
+                        batch=conflict_entry.batch,
+                        lecture_no=conflict_entry.lecture_no,
+                        defaults={
+                            "timetable_entry": conflict_entry,
+                            "adjustment_type": LectureAdjustment.TYPE_ROOM,
+                            "time_slot": conflict_entry.time_slot,
+                            "subject": conflict_entry.subject,
+                            "original_faculty": conflict_entry.faculty,
+                            "room": merge_room,
+                            "remarks": "Merge room override",
+                            "status": LectureAdjustment.STATUS_ACTIVE,
+                            "created_by": created_by,
+                        },
+                    )
+                    _sync_existing_session(
+                        conflict_entry.module,
+                        selected_date,
+                        conflict_entry.batch,
+                        conflict_entry.lecture_no,
+                        timetable_entry=conflict_entry,
+                        day_of_week=selected_date.weekday(),
+                        time_slot=conflict_entry.time_slot,
+                        subject=conflict_entry.subject,
+                        faculty=conflict_entry.faculty,
+                        room=merge_room,
+                    )
+            _sync_existing_session(
+                module,
+                selected_date,
+                entry.batch,
                     entry.lecture_no,
                     timetable_entry=entry,
                     day_of_week=selected_date.weekday(),
@@ -9485,6 +9702,31 @@ def coordinator_load_adjustment(request):
                 batch=adj.batch,
                 is_active=True,
             ).first()
+            conflict_entry = None
+            conflict_room = ""
+            if entry:
+                active_modules = AcademicModule.objects.filter(is_active=True)
+                conflict_entry = TimetableEntry.objects.filter(
+                    module__in=active_modules,
+                    day_of_week=adj.date.weekday(),
+                    lecture_no=adj.lecture_no,
+                    faculty__iexact=proxy.name,
+                    is_active=True,
+                ).first()
+                if conflict_entry:
+                    conflict_adj = LectureAdjustment.objects.filter(
+                        module=conflict_entry.module,
+                        date=adj.date,
+                        batch=conflict_entry.batch,
+                        lecture_no=conflict_entry.lecture_no,
+                        status=LectureAdjustment.STATUS_ACTIVE,
+                    ).first()
+                    conflict_room = (conflict_adj.room if conflict_adj and conflict_adj.room else conflict_entry.room) or ""
+            if conflict_entry and not merge_room:
+                if room_custom:
+                    merge_room = room_custom
+                elif room_select and conflict_room and room_select == conflict_room:
+                    merge_room = room_select
             room = merge_room or room_custom or room_select or adj.room or (entry.room if entry else "")
             proxy_slot_subject = (
                 _resolve_proxy_subject(
@@ -9503,6 +9745,44 @@ def coordinator_load_adjustment(request):
             adj.merge_room = merge_room
             adj.remarks = remarks
             adj.save(update_fields=["proxy_faculty", "subject", "room", "merge_room", "remarks"])
+            if conflict_entry and merge_room:
+                existing_conflict = LectureAdjustment.objects.filter(
+                    module=conflict_entry.module,
+                    date=adj.date,
+                    batch=conflict_entry.batch,
+                    lecture_no=conflict_entry.lecture_no,
+                    status=LectureAdjustment.STATUS_ACTIVE,
+                ).first()
+                if not existing_conflict or existing_conflict.adjustment_type == LectureAdjustment.TYPE_ROOM:
+                    LectureAdjustment.objects.update_or_create(
+                        module=conflict_entry.module,
+                        date=adj.date,
+                        batch=conflict_entry.batch,
+                        lecture_no=conflict_entry.lecture_no,
+                        defaults={
+                            "timetable_entry": conflict_entry,
+                            "adjustment_type": LectureAdjustment.TYPE_ROOM,
+                            "time_slot": conflict_entry.time_slot,
+                            "subject": conflict_entry.subject,
+                            "original_faculty": conflict_entry.faculty,
+                            "room": merge_room,
+                            "remarks": "Merge room override",
+                            "status": LectureAdjustment.STATUS_ACTIVE,
+                            "created_by": Mentor.objects.filter(name__iexact=request.user.username).first(),
+                        },
+                    )
+                    _sync_existing_session(
+                        conflict_entry.module,
+                        adj.date,
+                        conflict_entry.batch,
+                        conflict_entry.lecture_no,
+                        timetable_entry=conflict_entry,
+                        day_of_week=adj.date.weekday(),
+                        time_slot=conflict_entry.time_slot,
+                        subject=conflict_entry.subject,
+                        faculty=conflict_entry.faculty,
+                        room=merge_room,
+                    )
             _sync_existing_session(
                 module,
                 adj.date,

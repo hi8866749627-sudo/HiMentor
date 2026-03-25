@@ -630,6 +630,24 @@
                 display: none !important;
             }
         }
+
+        /* Ensure dark mode sidebar colors override role themes */
+        body.dark-mode .lj-sidebar {
+            background: linear-gradient(180deg, #0f172a 0%, #111827 100%) !important;
+            border-right: 2px solid #334155 !important;
+            box-shadow: inset -1px 0 0 #1f2937 !important;
+        }
+        body.dark-mode .menu-group {
+            background: #1e293b !important;
+            color: #bfdbfe !important;
+        }
+        body.dark-mode .lj-sidebar a {
+            color: #dbeafe !important;
+        }
+        body.dark-mode .lj-sidebar a:hover {
+            background: #1d4ed8 !important;
+            color: #ffffff !important;
+        }
     </style>
 </head>
 
