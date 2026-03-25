@@ -736,6 +736,40 @@ document.querySelectorAll('.preview-shift-btn').forEach(btn => {
                 }
             }
         }
+        if (delta === -1) {
+            const targetIndex = Math.min(rowIndex + 1, sizes.length - 1);
+            if (sizes[targetIndex] > capacity) {
+                const ok = confirm(`Block exceeds ${capacity}. Create a new block for the extra student?`);
+                if (ok) {
+                    sizes[targetIndex] -= 1;
+                    sizes.splice(targetIndex + 1, 0, 1);
+                    const sourceRow = refreshedRows[targetIndex];
+                    if (sourceRow) {
+                        const cloned = sourceRow.cloneNode(true);
+                        const newId = `new-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                        cloned.dataset.blockId = newId;
+                        cloned.dataset.new = '1';
+                        const hiddenId = cloned.querySelector('input[name="seating_block_id"]');
+                        if (hiddenId) hiddenId.value = '';
+                        const updateBtn = cloned.querySelector('.js-preview-update');
+                        if (updateBtn) {
+                            updateBtn.disabled = true;
+                            updateBtn.textContent = 'New (save below)';
+                        }
+                        const blockNum = cloned.querySelector('input[name="block_number"]');
+                        if (blockNum) {
+                            const currentNums = Array.from(document.querySelectorAll('.js-preview-row input[name="block_number"]'))
+                                .map(el => parseInt(el.value || '0', 10))
+                                .filter(val => !Number.isNaN(val));
+                            const nextNum = currentNums.length ? Math.max(...currentNums) + 1 : 1;
+                            blockNum.value = String(nextNum);
+                        }
+                        sourceRow.parentElement.insertBefore(cloned, sourceRow.nextSibling);
+                        createdRow = cloned;
+                    }
+                }
+            }
+        }
         cursor = 0;
         const updatedRows = Array.from(document.querySelectorAll('.js-preview-row')).filter(row => (row.dataset.mode || '') === mode);
         updatedRows.forEach((row, idx) => {
