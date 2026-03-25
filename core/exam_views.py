@@ -515,20 +515,62 @@ def exam_section(request):
                     id__in=[rid for rid in remove_ids if str(rid).isdigit() or isinstance(rid, int)],
                 ).delete()
             updates = []
+            creates = []
             for item in payload:
                 block_id = str(item.get("id") or "")
                 start = (item.get("start") or "").strip()
                 end = (item.get("end") or "").strip()
-                block = preview_by_id.get(block_id)
-                if not block or not start or not end:
+                is_new = bool(item.get("is_new"))
+                if not start or not end:
                     continue
                 if enrollments and (start not in enrollments or end not in enrollments):
+                    continue
+                if is_new:
+                    delivery_mode = (item.get("delivery_mode") or ExamSeatingBlock.MODE_OFFLINE).strip()
+                    if delivery_mode not in {ExamSeatingBlock.MODE_OFFLINE, ExamSeatingBlock.MODE_ONLINE}:
+                        delivery_mode = ExamSeatingBlock.MODE_OFFLINE
+                    block_type = (item.get("block_type") or ExamSeatingBlock.TYPE_ENROLLMENT_RANGE).strip()
+                    if block_type not in {ExamSeatingBlock.TYPE_ENROLLMENT_RANGE, ExamSeatingBlock.TYPE_MANUAL}:
+                        block_type = ExamSeatingBlock.TYPE_ENROLLMENT_RANGE
+                    dept_label = (item.get("dept_label") or "").strip()
+                    block_number = (item.get("block_number") or "").strip()
+                    room_val = (item.get("room") or "").strip()
+                    lab_val = (item.get("lab") or "").strip()
+                    manual_enrollments = (item.get("manual_enrollments") or "").strip()
+                    name_bits = [dept_label or session.module.year_level or "Block"]
+                    if block_number:
+                        name_bits.append(f"Block {block_number}")
+                    block_name = " ".join(name_bits).strip()
+                    creates.append(
+                        ExamSeatingBlock(
+                            session=session,
+                            dept_label=dept_label,
+                            delivery_mode=delivery_mode,
+                            block_number=block_number,
+                            room=room_val if delivery_mode == ExamSeatingBlock.MODE_OFFLINE else "",
+                            lab=lab_val if delivery_mode == ExamSeatingBlock.MODE_ONLINE else "",
+                            block_type=block_type,
+                            name=block_name or "Block",
+                            batch="",
+                            enrollment_start=start,
+                            enrollment_end=end,
+                            manual_enrollments=manual_enrollments,
+                            is_preview=True,
+                            created_by=request.user,
+                        )
+                    )
+                    continue
+                block = preview_by_id.get(block_id)
+                if not block:
                     continue
                 block.enrollment_start = start
                 block.enrollment_end = end
                 updates.append(block)
             if updates:
                 ExamSeatingBlock.objects.bulk_update(updates, ["enrollment_start", "enrollment_end"])
+            if creates:
+                ExamSeatingBlock.objects.bulk_create(creates)
+            if updates or creates:
                 messages.success(request, "Preview ranges updated.")
             else:
                 messages.info(request, "No preview changes to update.")
