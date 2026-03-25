@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 from decimal import Decimal
 
 from django.contrib import messages
@@ -144,6 +145,7 @@ def exam_section(request):
             "create_seating_block",
             "copy_seating_blocks",
             "shift_preview_block",
+            "bulk_update_preview_ranges",
             "assign_block",
             "lock_entry",
             "unlock_entry",
@@ -483,6 +485,42 @@ def exam_section(request):
                     created_by=request.user,
                 )
             messages.success(request, "Preview block updated.")
+            return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#seating-blocks")
+
+        if action == "bulk_update_preview_ranges":
+            session = ModuleExamSession.objects.filter(id=request.POST.get("session_id"), module=module).first()
+            if not session:
+                messages.error(request, "Select a valid exam session.")
+                return redirect(f"/exam-section/?module_id={module.id}")
+            payload_raw = (request.POST.get("payload") or "").strip()
+            try:
+                payload = json.loads(payload_raw) if payload_raw else []
+            except json.JSONDecodeError:
+                messages.error(request, "Invalid preview payload.")
+                return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#seating-blocks")
+            preview_blocks = list(ExamSeatingBlock.objects.filter(session=session, is_preview=True))
+            preview_by_id = {str(block.id): block for block in preview_blocks}
+            enrollments = set(
+                session.module.students.order_by("enrollment").values_list("enrollment", flat=True)
+            )
+            updates = []
+            for item in payload:
+                block_id = str(item.get("id") or "")
+                start = (item.get("start") or "").strip()
+                end = (item.get("end") or "").strip()
+                block = preview_by_id.get(block_id)
+                if not block or not start or not end:
+                    continue
+                if enrollments and (start not in enrollments or end not in enrollments):
+                    continue
+                block.enrollment_start = start
+                block.enrollment_end = end
+                updates.append(block)
+            if updates:
+                ExamSeatingBlock.objects.bulk_update(updates, ["enrollment_start", "enrollment_end"])
+                messages.success(request, "Preview ranges updated.")
+            else:
+                messages.info(request, "No preview changes to update.")
             return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#seating-blocks")
 
         if action == "update_seating_block":

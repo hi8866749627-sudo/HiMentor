@@ -213,6 +213,7 @@
                     {% if preview_block_rows %}
                     <div class="border rounded p-2 mb-3">
                         <div class="fw-semibold mb-2">Preview Blocks (Edit then Finalize)</div>
+                        {{ enrollment_choices|json_script:"previewEnrollmentChoices" }}
                         <form method="post" class="d-flex flex-wrap gap-2 mb-2">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="finalize_seating_blocks">
@@ -235,6 +236,14 @@
                             </select>
                             <button class="btn btn-outline-danger btn-sm" type="submit">Discard Preview</button>
                         </form>
+                        <form method="post" id="previewBulkForm" class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="bulk_update_preview_ranges">
+                            <input type="hidden" name="session_id" value="{{ selected_session.id }}">
+                            <input type="hidden" name="payload" id="previewBulkPayload">
+                            <button class="btn btn-primary btn-sm" type="button" id="previewBulkSubmit">Update Preview Ranges</button>
+                            <span id="previewDirtyHint" class="small text-muted d-none">Pending changes</span>
+                        </form>
                         <div class="table-responsive">
                             <table class="table table-sm table-bordered align-middle">
                                 <thead>
@@ -252,7 +261,7 @@
                                 </thead>
                                 <tbody>
                                     {% for row in preview_block_rows %}
-                                    <tr>
+                                    <tr class="js-preview-row" data-block-id="{{ row.block.id }}" data-mode="{{ row.block.delivery_mode }}">
                                         <form method="post">
                                             {% csrf_token %}
                                             <input type="hidden" name="action" value="update_seating_block">
@@ -276,11 +285,11 @@
                                                 </select>
                                             </td>
                                             <td>
-                                                <input name="enrollment_start" class="form-control form-control-sm mb-1" value="{{ row.block.enrollment_start }}" placeholder="From">
-                                                <input name="enrollment_end" class="form-control form-control-sm" value="{{ row.block.enrollment_end }}" placeholder="To">
+                                                <input name="enrollment_start" class="form-control form-control-sm mb-1 js-preview-start" value="{{ row.block.enrollment_start }}" placeholder="From">
+                                                <input name="enrollment_end" class="form-control form-control-sm js-preview-end" value="{{ row.block.enrollment_end }}" placeholder="To">
                                                 <input name="manual_enrollments" class="form-control form-control-sm mt-1" value="{{ row.block.manual_enrollments }}" placeholder="Extra enrollments">
                                             </td>
-                                            <td>{{ row.student_count }}</td>
+                                            <td class="js-preview-count">{{ row.student_count }}</td>
                                             <td class="d-flex gap-1">
                                                 <button type="button" class="btn btn-outline-secondary btn-sm preview-shift-btn" data-block-id="{{ row.block.id }}" data-delta="-1">-</button>
                                                 <button type="button" class="btn btn-outline-secondary btn-sm preview-shift-btn" data-block-id="{{ row.block.id }}" data-delta="1">+</button>
@@ -291,12 +300,6 @@
                                     {% endfor %}
                                 </tbody>
                             </table>
-                            <form method="post" id="previewShiftForm" class="d-none">
-                                {% csrf_token %}
-                                <input type="hidden" name="action" value="shift_preview_block">
-                                <input type="hidden" name="seating_block_id" value="">
-                                <input type="hidden" name="delta" value="">
-                            </form>
                         </div>
                     </div>
                     {% endif %}
@@ -634,12 +637,96 @@
 
 document.querySelectorAll('.preview-shift-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-        const form = document.getElementById('previewShiftForm');
-        if (!form) return;
-        form.querySelector('input[name="seating_block_id"]').value = btn.dataset.blockId || '';
-        form.querySelector('input[name="delta"]').value = btn.dataset.delta || '';
-        form.submit();
+        const rows = Array.from(document.querySelectorAll('.js-preview-row'));
+        const enrollmentsEl = document.getElementById('previewEnrollmentChoices');
+        if (!rows.length || !enrollmentsEl) return;
+        const enrollments = JSON.parse(enrollmentsEl.textContent || '[]');
+        if (!enrollments.length) return;
+
+        const blockId = btn.dataset.blockId || '';
+        const delta = parseInt(btn.dataset.delta || '0', 10);
+        if (!blockId || !delta) return;
+
+        const clickedRow = rows.find(row => row.dataset.blockId === blockId);
+        if (!clickedRow) return;
+        const mode = clickedRow.dataset.mode || '';
+        const modeRows = rows.filter(row => (row.dataset.mode || '') === mode);
+        const rowIndex = modeRows.indexOf(clickedRow);
+        if (rowIndex < 0) return;
+
+        const getIndex = (value) => enrollments.indexOf(value);
+        const sizes = [];
+        let cursor = 0;
+
+        modeRows.forEach((row, idx) => {
+            const startInput = row.querySelector('.js-preview-start');
+            const endInput = row.querySelector('.js-preview-end');
+            let startIdx = getIndex(startInput ? startInput.value : '');
+            let endIdx = getIndex(endInput ? endInput.value : '');
+            if (startIdx < 0) startIdx = idx === 0 ? 0 : cursor;
+            if (endIdx < startIdx) endIdx = startIdx;
+            const size = Math.max(1, endIdx - startIdx + 1);
+            sizes.push(size);
+            cursor = startIdx + size;
+        });
+
+        if (delta === 1) {
+            if (sizes[sizes.length - 1] <= 1) {
+                alert('Cannot increase this block further.');
+                return;
+            }
+            for (let j = sizes.length - 1; j >= rowIndex + 1; j -= 1) {
+                sizes[j] -= 1;
+                sizes[j - 1] += 1;
+            }
+        } else {
+            if (sizes[rowIndex] <= 1) {
+                alert('Cannot reduce this block further.');
+                return;
+            }
+            for (let j = rowIndex; j < sizes.length - 1; j += 1) {
+                sizes[j] -= 1;
+                sizes[j + 1] += 1;
+            }
+        }
+
+        cursor = 0;
+        modeRows.forEach((row, idx) => {
+            const size = sizes[idx];
+            const start = enrollments[cursor] || '';
+            const end = enrollments[cursor + size - 1] || start;
+            cursor += size;
+            const startInput = row.querySelector('.js-preview-start');
+            const endInput = row.querySelector('.js-preview-end');
+            if (startInput) startInput.value = start;
+            if (endInput) endInput.value = end;
+            const countCell = row.querySelector('.js-preview-count');
+            if (countCell) countCell.textContent = String(size);
+        });
+
+        const hint = document.getElementById('previewDirtyHint');
+        if (hint) hint.classList.remove('d-none');
     });
 });
+
+const previewBulkSubmit = document.getElementById('previewBulkSubmit');
+if (previewBulkSubmit) {
+    previewBulkSubmit.addEventListener('click', () => {
+        const rows = Array.from(document.querySelectorAll('.js-preview-row'));
+        const payload = rows.map(row => {
+            const startInput = row.querySelector('.js-preview-start');
+            const endInput = row.querySelector('.js-preview-end');
+            return {
+                id: row.dataset.blockId,
+                start: startInput ? startInput.value : '',
+                end: endInput ? endInput.value : '',
+            };
+        });
+        const payloadInput = document.getElementById('previewBulkPayload');
+        if (!payloadInput) return;
+        payloadInput.value = JSON.stringify(payload);
+        document.getElementById('previewBulkForm').submit();
+    });
+}
 </script>
 {% endblock %}

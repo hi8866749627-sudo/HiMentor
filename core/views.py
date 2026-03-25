@@ -9618,45 +9618,45 @@ def coordinator_load_adjustment(request):
                     "cancelled_by": "",
                     "cancelled_at": None,
                 },
-            )
-            if conflict_entry and merge_room:
-                existing_conflict = LectureAdjustment.objects.filter(
-                    module=conflict_entry.module,
-                    date=selected_date,
-                    batch=conflict_entry.batch,
-                    lecture_no=conflict_entry.lecture_no,
-                    status=LectureAdjustment.STATUS_ACTIVE,
-                ).first()
-                if not existing_conflict or existing_conflict.adjustment_type == LectureAdjustment.TYPE_ROOM:
-                    LectureAdjustment.objects.update_or_create(
+                )
+                if conflict_entry and merge_room:
+                    existing_conflict = LectureAdjustment.objects.filter(
                         module=conflict_entry.module,
                         date=selected_date,
                         batch=conflict_entry.batch,
                         lecture_no=conflict_entry.lecture_no,
-                        defaults={
-                            "timetable_entry": conflict_entry,
-                            "adjustment_type": LectureAdjustment.TYPE_ROOM,
-                            "time_slot": conflict_entry.time_slot,
-                            "subject": conflict_entry.subject,
-                            "original_faculty": conflict_entry.faculty,
-                            "room": merge_room,
-                            "remarks": "Merge room override",
-                            "status": LectureAdjustment.STATUS_ACTIVE,
-                            "created_by": created_by,
-                        },
-                    )
-                    _sync_existing_session(
-                        conflict_entry.module,
-                        selected_date,
-                        conflict_entry.batch,
-                        conflict_entry.lecture_no,
-                        timetable_entry=conflict_entry,
-                        day_of_week=selected_date.weekday(),
-                        time_slot=conflict_entry.time_slot,
-                        subject=conflict_entry.subject,
-                        faculty=conflict_entry.faculty,
-                        room=merge_room,
-                    )
+                        status=LectureAdjustment.STATUS_ACTIVE,
+                    ).first()
+                    if not existing_conflict or existing_conflict.adjustment_type == LectureAdjustment.TYPE_ROOM:
+                        LectureAdjustment.objects.update_or_create(
+                            module=conflict_entry.module,
+                            date=selected_date,
+                            batch=conflict_entry.batch,
+                            lecture_no=conflict_entry.lecture_no,
+                            defaults={
+                                "timetable_entry": conflict_entry,
+                                "adjustment_type": LectureAdjustment.TYPE_ROOM,
+                                "time_slot": conflict_entry.time_slot,
+                                "subject": conflict_entry.subject,
+                                "original_faculty": conflict_entry.faculty,
+                                "room": merge_room,
+                                "remarks": "Merge room override",
+                                "status": LectureAdjustment.STATUS_ACTIVE,
+                                "created_by": created_by,
+                            },
+                        )
+                        _sync_existing_session(
+                            conflict_entry.module,
+                            selected_date,
+                            conflict_entry.batch,
+                            conflict_entry.lecture_no,
+                            timetable_entry=conflict_entry,
+                            day_of_week=selected_date.weekday(),
+                            time_slot=conflict_entry.time_slot,
+                            subject=conflict_entry.subject,
+                            faculty=conflict_entry.faculty,
+                            room=merge_room,
+                        )
                 _sync_existing_session(
                     module,
                     selected_date,
