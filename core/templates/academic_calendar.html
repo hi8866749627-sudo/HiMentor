@@ -156,6 +156,13 @@
                 <input type="text" name="holiday_label" class="form-control" placeholder="e.g. Holi">
             </div>
             {% if is_superadmin %}
+            <div class="col-md-2">
+                <label class="form-label">Apply All Modules</label>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="holiday_apply_all" value="1" id="holidayApplyAll">
+                    <label class="form-check-label" for="holidayApplyAll">All modules</label>
+                </div>
+            </div>
             <div class="col-md-12">
                 <label class="form-label">Apply To Departments (optional)</label>
                 <div class="d-flex flex-wrap gap-3">
@@ -188,8 +195,15 @@
             </div>
         </form>
 
+        <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-2">
+            <button class="btn btn-sm btn-outline-secondary" type="button" id="holidayEditToggle">Update All</button>
+            <button class="btn btn-sm btn-primary d-none" type="submit" form="holidayBulkForm" id="holidaySaveBulk">Save Updates</button>
+        </div>
         <div class="table-responsive">
-            <table class="table table-sm table-hover mb-0">
+            <form method="post" id="holidayBulkForm">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="holiday_bulk_update">
+                <table class="table table-sm table-hover mb-0">
                 <thead>
                     <tr>
                         <th>Date</th>
@@ -201,18 +215,14 @@
                 {% for h in holidays %}
                     <tr>
                         <td>
-                            <form method="post" class="d-flex align-items-center gap-2 mb-0">
-                                {% csrf_token %}
-                                <input type="hidden" name="action" value="holiday_update">
-                                <input type="hidden" name="holiday_id" value="{{ h.id }}">
-                                <input type="date" name="holiday_date" class="form-control form-control-sm" value="{{ h.date|date:'Y-m-d' }}">
+                            <input type="hidden" name="holiday_id" value="{{ h.id }}">
+                            <input type="hidden" name="holiday_original_date" value="{{ h.date|date:'Y-m-d' }}">
+                            <input type="date" name="holiday_date" class="form-control form-control-sm holiday-edit-field" value="{{ h.date|date:'Y-m-d' }}" disabled>
                         </td>
                         <td>
-                                <input type="text" name="holiday_label" class="form-control form-control-sm" value="{{ h.label }}">
+                            <input type="text" name="holiday_label" class="form-control form-control-sm holiday-edit-field" value="{{ h.label }}" disabled>
                         </td>
                         <td class="text-end">
-                                <button class="btn btn-sm btn-outline-primary me-2" type="submit">Edit</button>
-                            </form>
                             <form method="post" class="d-inline">
                                 {% csrf_token %}
                                 <input type="hidden" name="action" value="holiday_delete">
@@ -225,7 +235,8 @@
                     <tr><td colspan="3" class="text-center text-muted">No holidays added.</td></tr>
                 {% endfor %}
                 </tbody>
-            </table>
+                </table>
+            </form>
         </div>
     </div>
 </div>
@@ -239,6 +250,21 @@
         const shouldSelect = checks.some(c => !c.checked);
         checks.forEach(c => c.checked = shouldSelect);
         btn.textContent = shouldSelect ? "Clear All" : "Select All";
+    });
+})();
+(function(){
+    const toggleBtn = document.getElementById("holidayEditToggle");
+    const saveBtn = document.getElementById("holidaySaveBulk");
+    const fields = Array.from(document.querySelectorAll(".holiday-edit-field"));
+    if (!toggleBtn || !saveBtn || !fields.length) return;
+    toggleBtn.addEventListener("click", () => {
+        const enable = fields.some(f => f.disabled);
+        fields.forEach(f => f.disabled = !enable);
+        saveBtn.classList.toggle("d-none", !enable);
+        toggleBtn.textContent = enable ? "Cancel Update" : "Update All";
+        if (!enable) {
+            fields.forEach(f => f.setAttribute("data-reset", f.value));
+        }
     });
 })();
 </script>

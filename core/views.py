@@ -7673,8 +7673,11 @@ def academic_calendar(request):
             if holiday_date:
                 target_modules = [module]
                 if is_admin:
+                    apply_all = (request.POST.get("holiday_apply_all") or "").strip() == "1"
                     dept_keys = [d.strip().upper() for d in request.POST.getlist("holiday_depts") if d.strip()]
-                    if dept_keys:
+                    if apply_all:
+                        target_modules = list(modules_in_scope)
+                    elif dept_keys:
                         target_modules = [
                             m for m in modules_in_scope
                             if any(_dept_matches_module(m, key) for key in dept_keys)
@@ -7690,6 +7693,49 @@ def academic_calendar(request):
                 messages.success(request, "Holiday added.")
             else:
                 messages.error(request, "Select a valid holiday date.")
+            return redirect_response
+
+        if action == "holiday_bulk_update":
+            holiday_ids = request.POST.getlist("holiday_id")
+            holiday_dates = request.POST.getlist("holiday_date")
+            holiday_labels = request.POST.getlist("holiday_label")
+            holiday_original_dates = request.POST.getlist("holiday_original_date")
+            if not holiday_ids:
+                messages.info(request, "No holidays to update.")
+                return redirect_response
+            rows = list(zip(holiday_ids, holiday_dates, holiday_labels, holiday_original_dates))
+            if is_admin:
+                for holiday_id, new_date_raw, new_label, original_date_raw in rows:
+                    new_date = _parse_date_param(new_date_raw)
+                    original_date = _parse_date_param(original_date_raw)
+                    if not new_date:
+                        continue
+                    for target in modules_in_scope:
+                        if original_date and original_date != new_date:
+                            AcademicHoliday.objects.filter(module=target, date=original_date).exclude(date=new_date).delete()
+                        AcademicHoliday.objects.update_or_create(
+                            module=target,
+                            date=new_date,
+                            defaults={"label": new_label.strip(), "is_active": True},
+                        )
+                messages.success(request, "Holidays updated across modules.")
+            else:
+                updates = []
+                existing = {str(h.id): h for h in AcademicHoliday.objects.filter(module=module)}
+                for holiday_id, new_date_raw, new_label, _ in rows:
+                    holiday = existing.get(str(holiday_id))
+                    new_date = _parse_date_param(new_date_raw)
+                    if not holiday or not new_date:
+                        continue
+                    holiday.date = new_date
+                    holiday.label = (new_label or "").strip()
+                    holiday.is_active = True
+                    updates.append(holiday)
+                if updates:
+                    AcademicHoliday.objects.bulk_update(updates, ["date", "label", "is_active"])
+                    messages.success(request, "Holidays updated.")
+                else:
+                    messages.info(request, "No holidays updated.")
             return redirect_response
 
         if action == "holiday_update":
@@ -7727,6 +7773,7 @@ def academic_calendar(request):
             "holidays": holidays,
             "module": module,
             "is_admin": is_admin,
+            "is_superadmin": is_admin,
             "selected_year": selected_year,
             "year_choices": year_choices,
             "year_modules": year_modules,
