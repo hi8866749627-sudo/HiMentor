@@ -26,13 +26,20 @@
     .grid-toggle {
         border: 0;
         background: transparent;
-        font-size: 1rem;
+        font-size: 1.1rem;
+        font-weight: 800;
         line-height: 1;
         color: #495057;
         padding: 0.15rem 0.35rem;
+        min-width: 1.8rem;
     }
     .grid-toggle:hover {
         color: #0d6efd;
+    }
+    .grid-toggle-icon {
+        display: inline-block;
+        font-weight: 800;
+        transform-origin: center;
     }
     .compact-col {
         width: 5.5rem;
@@ -1174,6 +1181,22 @@ document.querySelectorAll('.js-subject-evaluator-row').forEach((row) => {
         input.addEventListener('change', refreshEvaluatorInputs);
     });
     refreshEvaluatorInputs();
+});
+
+const syncExamGridToggleIcons = () => {
+    document.querySelectorAll('.js-grid-toggle').forEach((btn) => {
+        const shell = btn.closest('.grid-shell, .subject-entry-shell');
+        if (!shell) return;
+        const isCompact = shell.classList.contains('is-compact');
+        btn.innerHTML = `<span class="grid-toggle-icon">${isCompact ? '▸' : '▾'}</span>`;
+    });
+};
+
+syncExamGridToggleIcons();
+document.querySelectorAll('.js-grid-toggle').forEach((btn) => {
+    btn.addEventListener('click', () => {
+        window.setTimeout(syncExamGridToggleIcons, 0);
+    });
 });
 </script>
 {% endblock %}
