@@ -7870,6 +7870,7 @@ def _schedule_entries_for_faculty(modules, selected_date, faculty_name, merge_ac
                 present_count = None
                 absent_count = None
                 total_count = None
+            is_merge = bool(adj and adj.adjustment_type == LectureAdjustment.TYPE_PROXY and adj.merge_room)
             entries.append(
                 {
                     "module": module,
@@ -7891,6 +7892,7 @@ def _schedule_entries_for_faculty(modules, selected_date, faculty_name, merge_ac
                     "absent_count": absent_count,
                     "present_count": present_count,
                     "row_highlight": row_highlight,
+                    "is_merge": is_merge,
                     "is_placeholder": False,
                 }
             )
@@ -7930,6 +7932,7 @@ def _schedule_entries_for_faculty(modules, selected_date, faculty_name, merge_ac
                         "absent_count": absent_count,
                         "present_count": present_count,
                         "row_highlight": "proxy",
+                        "is_merge": bool(adj.merge_room),
                         "is_placeholder": False,
                     }
                 )
@@ -7992,7 +7995,10 @@ def _merge_schedule_entries(entries):
                     return 3
                 return 4
             real_rows.sort(key=lambda r: (_priority(r), r.get("module_name", ""), r.get("batch", "")))
-            merged.append(real_rows[0])
+            if len(real_rows) > 1 and any(r.get("is_merge") for r in real_rows):
+                merged.extend(real_rows)
+            else:
+                merged.append(real_rows[0])
         else:
             placeholder = dict(group[0])
             placeholder.update(
@@ -8897,6 +8903,7 @@ def _build_attendance_batch_rows(module, selected_date, mentor=None, allow_overr
     alias_map = _subject_alias_map(module)
     adjustments = _active_adjustments_for_date(module, selected_date)
     adj_by_key = {(a.batch, a.lecture_no): a for a in adjustments}
+    merge_keys = {(a.batch, a.lecture_no) for a in adjustments if a.merge_room}
     merge_room_by_proxy = {
         (a.date, a.lecture_no, a.proxy_faculty.name.lower() if a.proxy_faculty else ""): a.merge_room
         for a in adjustments
@@ -9000,6 +9007,7 @@ def _build_attendance_batch_rows(module, selected_date, mentor=None, allow_overr
                     "absent_rolls": absent_rolls,
                     "form_id": f"form-{_norm_batch_key(batch)}-{entry.lecture_no}",
                     "adjustment": adj,
+                    "is_merge": bool(adj and adj.merge_room) or (batch, entry.lecture_no) in merge_keys,
                     "can_edit": allow_override or not (adj and adj.adjustment_type == LectureAdjustment.TYPE_PROXY and adj.proxy_faculty and mentor and adj.proxy_faculty.name != mentor.name),
                 }
             )
@@ -10457,8 +10465,6 @@ def save_lecture_attendance(request):
         if mentor:
             entry_qs = entry_qs.filter(faculty__iexact=mentor.name)
         entry = entry_qs.first()
-        if not entry:
-            return JsonResponse({"ok": False, "msg": "Timetable entry not found"}, status=404)
         active_adj = LectureAdjustment.objects.filter(
             module=module,
             date=date_val,
@@ -10466,6 +10472,18 @@ def save_lecture_attendance(request):
             lecture_no=lecture_no,
             status=LectureAdjustment.STATUS_ACTIVE,
         ).first()
+        if not entry and active_adj and mentor and active_adj.adjustment_type == LectureAdjustment.TYPE_PROXY:
+            if active_adj.proxy_faculty and active_adj.proxy_faculty.name.lower() == mentor.name.lower():
+                adjustment = active_adj
+                entry = active_adj.timetable_entry or TimetableEntry.objects.filter(
+                    module=module,
+                    day_of_week=date_val.weekday(),
+                    lecture_no=lecture_no,
+                    batch=batch,
+                    is_active=True,
+                ).first()
+        if not entry and not adjustment:
+            return JsonResponse({"ok": False, "msg": "Timetable entry not found"}, status=404)
         if (
             active_adj
             and active_adj.adjustment_type == LectureAdjustment.TYPE_PROXY

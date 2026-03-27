@@ -83,6 +83,9 @@
                             {% elif not e.is_placeholder and e.has_proxy %}
                                 <span class="badge bg-info text-dark ms-1">Proxy Assigned</span>
                             {% endif %}
+                            {% if not e.is_placeholder and e.is_merge %}
+                                <span class="badge bg-dark ms-1">Merge</span>
+                            {% endif %}
                         </td>
                         <td>{{ e.room }}</td>
                         <td class="text-center">{{ e.present_count|default:"-" }}</td>

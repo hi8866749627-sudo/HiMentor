@@ -162,6 +162,9 @@
                             {% if slot.adjustment and slot.adjustment.proxy_faculty %}
                                 · <span class="badge bg-warning text-dark">Proxy</span>
                             {% endif %}
+                            {% if slot.is_merge %}
+                                · <span class="badge bg-dark">Merge</span>
+                            {% endif %}
                         </div>
                         {% if slot.session %}
                         <div class="slot-sub mt-1">Last updated: {{ slot.session.updated_at|date:"d M Y H:i" }}</div>
