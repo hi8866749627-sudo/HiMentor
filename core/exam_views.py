@@ -32,6 +32,7 @@ from .models import (
     ExamSeatingBlock,
     ExamFacultyProfile,
     ExamMarkEntry,
+    ExamSubjectEvaluator,
     ExamTimetableEntry,
     Mentor,
     ModuleExamManager,
@@ -125,9 +126,12 @@ def _manager_candidate_users(module):
 
 
 def _infer_branch_label(student, module):
+    # Student Master stores branch in `batch`; `division` is a separate grouping field.
+    branch_value = (getattr(student, "batch", "") or "").strip()
+    if branch_value:
+        return branch_value.upper()
+
     candidates = [
-        (getattr(student, "division", "") or "").strip(),
-        (getattr(student, "batch", "") or "").strip(),
         (getattr(module, "variant", "") or "").strip(),
         (getattr(module, "name", "") or "").strip(),
     ]
@@ -187,6 +191,7 @@ def exam_section(request):
             "create_session",
             "assign_manager",
             "create_faculty_account",
+            "save_subject_evaluators",
             "create_entry",
             "create_seating_block",
             "copy_seating_blocks",
@@ -248,7 +253,43 @@ def exam_section(request):
                     mentor.save(update_fields=["full_name", "updated_at"])
                 ExamFacultyProfile.objects.create(user=user, mentor=mentor, short_code=short_code, full_name=full_name or mentor.full_name)
                 messages.success(request, f"Faculty account created. Username: {user.username}")
-            return redirect(f"/exam-section/?module_id={module.id}#faculty-directory")
+            redirect_anchor = (request.POST.get("redirect_anchor") or "faculty-directory").strip() or "faculty-directory"
+            return redirect(f"/exam-section/?module_id={module.id}#{redirect_anchor}")
+
+        if action == "save_subject_evaluators":
+            session = ModuleExamSession.objects.filter(id=request.POST.get("session_id"), module=module).first()
+            if not session:
+                messages.error(request, "Select a valid exam session.")
+                return redirect(f"/exam-section/?module_id={module.id}")
+            subject_ids = list(
+                module.subjects.filter(is_active=True).values_list("id", flat=True)
+            )
+            allowed_evaluator_ids = set(
+                ExamFacultyProfile.objects.filter(is_active=True).values_list("user_id", flat=True)
+            )
+            ExamSubjectEvaluator.objects.filter(session=session).delete()
+            creates = []
+            saved_count = 0
+            for subject_id in subject_ids:
+                selected_ids = [
+                    int(value)
+                    for value in request.POST.getlist(f"subject_eval_{subject_id}")
+                    if str(value).isdigit() and int(value) in allowed_evaluator_ids
+                ]
+                for evaluator_id in selected_ids:
+                    creates.append(
+                        ExamSubjectEvaluator(
+                            session=session,
+                            subject_id=subject_id,
+                            evaluator_id=evaluator_id,
+                            assigned_by=request.user,
+                        )
+                    )
+                    saved_count += 1
+            if creates:
+                ExamSubjectEvaluator.objects.bulk_create(creates, ignore_conflicts=True)
+            messages.success(request, f"Saved evaluator mapping for {session.test_name}.")
+            return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#evaluator-management")
 
         if action == "create_entry":
             session = ModuleExamSession.objects.filter(id=request.POST.get("session_id"), module=module).first()
@@ -766,6 +807,9 @@ def exam_section(request):
             if not entry or not evaluator:
                 messages.error(request, "Select a valid subject and evaluator.")
                 return redirect(f"/exam-section/?module_id={module.id}")
+            if not ExamSubjectEvaluator.objects.filter(session=entry.session, subject=entry.subject, evaluator=evaluator).exists():
+                messages.error(request, "This evaluator is not mapped to the selected subject.")
+                return redirect(f"/exam-section/?module_id={module.id}&test_name={entry.session.test_name}#entry-{entry.id}")
             seating_block = ExamSeatingBlock.objects.filter(id=seating_block_id, session=entry.session, is_preview=False).first()
             if not seating_block:
                 messages.error(request, "Select a valid seating block.")
@@ -846,13 +890,42 @@ def exam_section(request):
     if not selected_session and sessions:
         selected_session = sessions[0]
 
+    mentors, profiles, unregistered_names = _module_faculty_directory(module)
+    profile_by_user_id = {profile.user_id: profile for profile in profiles}
+    manager_candidates = _manager_candidate_users(module)
+    module_managers = list(ModuleExamManager.objects.filter(module=module).select_related("user").order_by("user__username"))
+    students = list(module.students.select_related("mentor").order_by("roll_no", "enrollment"))
+
     entries = []
+    session_subject_evaluator_map = {}
+    subject_evaluator_rows = []
     if selected_session:
         entries = list(
             ExamTimetableEntry.objects.filter(session=selected_session)
             .select_related("subject", "published_upload")
             .order_by("exam_date", "start_time", "subject__name")
         )
+        selected_subjects = list(module.subjects.filter(is_active=True).order_by("display_order", "name"))
+        subject_links = list(
+            ExamSubjectEvaluator.objects.filter(session=selected_session, subject__in=selected_subjects)
+            .select_related("subject", "evaluator")
+            .order_by("subject__display_order", "subject__name", "evaluator__username")
+        )
+        for link in subject_links:
+            session_subject_evaluator_map.setdefault(link.subject_id, []).append(link.evaluator_id)
+        for subject in selected_subjects:
+            selected_profiles = [
+                profile_by_user_id[user_id]
+                for user_id in session_subject_evaluator_map.get(subject.id, [])
+                if user_id in profile_by_user_id
+            ]
+            subject_evaluator_rows.append(
+                {
+                    "subject": subject,
+                    "selected_user_ids": set(session_subject_evaluator_map.get(subject.id, [])),
+                    "selected_profiles": selected_profiles,
+                }
+            )
     enrollment_choices = []
     enrollment_branch_map = {}
     available_branch_rows = []
@@ -986,10 +1059,6 @@ def exam_section(request):
                 if (room or "").strip()
             }
         )
-    mentors, profiles, unregistered_names = _module_faculty_directory(module)
-    manager_candidates = _manager_candidate_users(module)
-    module_managers = list(ModuleExamManager.objects.filter(module=module).select_related("user").order_by("user__username"))
-    students = list(module.students.select_related("mentor").order_by("roll_no", "enrollment"))
     available_subjects = []
     if selected_session:
         available_subjects = list(
@@ -998,6 +1067,11 @@ def exam_section(request):
     entry_cards = []
     for entry in entries:
         blocks = list(entry.blocks.select_related("evaluator").order_by("name", "id"))
+        allowed_profiles = [
+            profile_by_user_id[user_id]
+            for user_id in session_subject_evaluator_map.get(entry.subject_id, [])
+            if user_id in profile_by_user_id
+        ]
         total_students = ExamBlockStudent.objects.filter(block__timetable_entry=entry).count()
         entered_students = ExamMarkEntry.objects.filter(timetable_entry=entry).values("student_id").distinct().count()
         absent_students = ExamMarkEntry.objects.filter(timetable_entry=entry, is_absent=True).count()
@@ -1010,6 +1084,7 @@ def exam_section(request):
             {
                 "entry": entry,
                 "blocks": blocks,
+                "allowed_evaluators": allowed_profiles,
                 "stats": {
                     "total_students": total_students,
                     "entered_students": entered_students,
@@ -1037,6 +1112,7 @@ def exam_section(request):
             "unregistered_names": unregistered_names,
             "manager_candidates": manager_candidates,
             "module_managers": module_managers,
+            "subject_evaluator_rows": subject_evaluator_rows,
             "students": students,
             "available_subjects": available_subjects,
             "seating_blocks": seating_blocks,

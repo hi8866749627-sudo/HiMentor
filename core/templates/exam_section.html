@@ -20,6 +20,9 @@
     .grid-shell.is-compact .grid-body {
         display: none;
     }
+    .subject-entry-shell.is-compact .subject-entry-body {
+        display: none;
+    }
     .grid-toggle {
         border: 0;
         background: transparent;
@@ -190,7 +193,7 @@
                                 </div>
                                 <div class="small">
                                     {% for row in available_branch_rows %}
-                                    <span class="branch-pill">{{ row.label }}-{{ row.count }}</span>
+                                    <span class="branch-pill">{{ row.label }}</span>
                                     {% empty %}
                                     <span class="text-muted">No student pool found.</span>
                                     {% endfor %}
@@ -453,6 +456,106 @@
     {% endif %}
 
     {% if can_manage_exam and selected_session %}
+    <div class="row g-3 mb-4" id="evaluator-management">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <div class="grid-shell is-compact">
+                        <div class="grid-head">
+                            <div>
+                                <div class="fw-semibold">Evaluator Management</div>
+                                <div class="small text-muted">Map one or more evaluators to each subject for {{ selected_session.test_name }}.</div>
+                            </div>
+                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid">â–¸</button>
+                        </div>
+                        <div class="grid-body">
+                            <form method="post" class="mb-3">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="save_subject_evaluators">
+                                <input type="hidden" name="session_id" value="{{ selected_session.id }}">
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-bordered align-middle">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th style="min-width: 220px;">Subject</th>
+                                                <th>Mapped Evaluators</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for row in subject_evaluator_rows %}
+                                            <tr>
+                                                <td>
+                                                    <div class="fw-semibold">{{ row.subject.name }}</div>
+                                                    {% if row.subject.short_name %}
+                                                    <div class="small text-muted">{{ row.subject.short_name }}</div>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    <div class="d-flex flex-wrap gap-2">
+                                                        {% for profile in profiles %}
+                                                        <label class="form-check border rounded px-2 py-1 small mb-0">
+                                                            <input
+                                                                class="form-check-input me-1"
+                                                                type="checkbox"
+                                                                name="subject_eval_{{ row.subject.id }}"
+                                                                value="{{ profile.user_id }}"
+                                                                {% if profile.user_id in row.selected_user_ids %}checked{% endif %}
+                                                            >
+                                                            <span class="form-check-label">
+                                                                {{ profile.short_code }}{% if profile.full_name %} - {{ profile.full_name }}{% endif %}
+                                                            </span>
+                                                        </label>
+                                                        {% empty %}
+                                                        <span class="text-muted">No evaluator faculty found yet.</span>
+                                                        {% endfor %}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                            {% empty %}
+                                            <tr><td colspan="2" class="text-muted">No active subjects found for this module.</td></tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <button class="btn btn-primary" type="submit">Save Evaluator Mapping</button>
+                            </form>
+
+                            <div class="border rounded p-3">
+                                <div class="fw-semibold mb-2">Add New Evaluator</div>
+                                <form method="post" class="row g-2 align-items-end">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="create_faculty_account">
+                                    <input type="hidden" name="redirect_anchor" value="evaluator-management">
+                                    <div class="col-md-2">
+                                        <label class="form-label small">Short Code</label>
+                                        <input name="short_code" class="form-control" placeholder="ABC" required>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label small">Full Name</label>
+                                        <input name="full_name" class="form-control" placeholder="Faculty name">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label small">Email</label>
+                                        <input name="email" class="form-control" placeholder="Email (optional)">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label small">Password</label>
+                                        <input name="password" type="text" class="form-control" placeholder="Password" required>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <button class="btn btn-outline-dark w-100" type="submit">Create Evaluator</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if can_manage_exam and selected_session %}
     <div class="row g-3 mb-4">
         <div class="col-xl-5">
             <div class="card shadow-sm h-100">
@@ -498,15 +601,15 @@
                                         <td class="small">
                                             <div class="form-check">
                                                 <input class="form-check-input" type="radio" name="entry_mode" value="offline" id="mode-offline-new" checked>
-                                                <label class="form-check-label" for="mode-offline-new">Only Offline</label>
+                                                <label class="form-check-label" for="mode-offline-new">Offline</label>
                                             </div>
                                             <div class="form-check">
                                                 <input class="form-check-input" type="radio" name="entry_mode" value="both" id="mode-both-new">
-                                                <label class="form-check-label" for="mode-both-new">Also Online</label>
+                                                <label class="form-check-label" for="mode-both-new">Both</label>
                                             </div>
                                             <div class="form-check">
                                                 <input class="form-check-input" type="radio" name="entry_mode" value="online" id="mode-online-new">
-                                                <label class="form-check-label" for="mode-online-new">Only Online</label>
+                                                <label class="form-check-label" for="mode-online-new">Online</label>
                                             </div>
                                         </td>
                                         <td><input type="date" name="exam_date" class="form-control" required></td>
@@ -557,9 +660,11 @@
                     {% if entry.published_upload %}
                     <a class="btn btn-sm btn-outline-secondary" href="/view-results/?test={{ entry.session.test_name }}&subject={{ entry.subject.id }}">View Published</a>
                     {% endif %}
+                    <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid">▸</button>
                 </div>
             </div>
-
+            <div class="subject-entry-shell is-compact">
+                <div class="subject-entry-body">
             <div class="row g-2 mb-3">
                 <div class="col-md-2"><div class="border rounded p-2 small">Total: <strong>{{ stats.total_students }}</strong></div></div>
                 <div class="col-md-2"><div class="border rounded p-2 small">Entered: <strong>{{ stats.entered_students }}</strong></div></div>
@@ -578,15 +683,15 @@
                         <div class="small fw-semibold mb-1">Mode</div>
                         <div class="form-check">
                             <input class="form-check-input" type="radio" name="entry_mode" value="offline" id="mode-offline-{{ entry.id }}" {% if entry.mode == "offline" %}checked{% endif %}>
-                            <label class="form-check-label" for="mode-offline-{{ entry.id }}">Only Offline</label>
+                            <label class="form-check-label" for="mode-offline-{{ entry.id }}">Offline</label>
                         </div>
                         <div class="form-check">
                             <input class="form-check-input" type="radio" name="entry_mode" value="both" id="mode-both-{{ entry.id }}" {% if entry.mode == "both" %}checked{% endif %}>
-                            <label class="form-check-label" for="mode-both-{{ entry.id }}">Also Online</label>
+                            <label class="form-check-label" for="mode-both-{{ entry.id }}">Both</label>
                         </div>
                         <div class="form-check">
                             <input class="form-check-input" type="radio" name="entry_mode" value="online" id="mode-online-{{ entry.id }}" {% if entry.mode == "online" %}checked{% endif %}>
-                            <label class="form-check-label" for="mode-online-{{ entry.id }}">Only Online</label>
+                            <label class="form-check-label" for="mode-online-{{ entry.id }}">Online</label>
                         </div>
                     </div>
                 </div>
@@ -610,8 +715,8 @@
                 <input type="hidden" name="timetable_entry_id" value="{{ entry.id }}">
                 <div class="col-md-3">
                     <select name="evaluator_user_id" class="form-select" required>
-                        <option value="">Evaluator</option>
-                        {% for profile in profiles %}
+                        <option value="">{% if card.allowed_evaluators %}Evaluator{% else %}Map evaluator first{% endif %}</option>
+                        {% for profile in card.allowed_evaluators %}
                         <option value="{{ profile.user_id }}">{{ profile.short_code }}{% if profile.full_name %} - {{ profile.full_name }}{% endif %}</option>
                         {% endfor %}
                     </select>
@@ -626,7 +731,7 @@
                         {% endfor %}
                     </select>
                 </div>
-                <div class="col-md-2"><button class="btn btn-outline-primary w-100" type="submit">Assign</button></div>
+                <div class="col-md-2"><button class="btn btn-outline-primary w-100" type="submit" {% if not card.allowed_evaluators %}disabled{% endif %}>Assign</button></div>
             </form>
             {% endif %}
 
@@ -693,6 +798,8 @@
                 </form>
             </div>
             {% endif %}
+                </div>
+            </div>
         </div>
     </div>
     {% endwith %}
@@ -750,7 +857,7 @@
 
 document.querySelectorAll('.js-grid-toggle').forEach((btn) => {
     btn.addEventListener('click', () => {
-        const shell = btn.closest('.grid-shell');
+        const shell = btn.closest('.grid-shell, .subject-entry-shell');
         if (!shell) return;
         shell.classList.toggle('is-compact');
         btn.textContent = shell.classList.contains('is-compact') ? '▸' : '▾';
