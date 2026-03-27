@@ -14,6 +14,12 @@
 .schedule-row-swap {
     background: #e2d9f3;
 }
+.schedule-row-merge {
+    background: #BEEF9E;
+}
+.schedule-row-proxy {
+    background: #F3CEFF;
+}
 </style>
 
 <h4 class="mb-3">My Schedule</h4>
@@ -66,7 +72,7 @@
                 </thead>
                 <tbody>
                 {% for e in entries %}
-                    <tr class="{% if e.row_highlight == 'proxy' %}schedule-row-proxy{% elif e.row_highlight == 'proxy_created' %}schedule-row-proxy-created{% elif e.row_highlight == 'mass_bunk' %}schedule-row-mass-bunk{% elif e.row_highlight == 'swap' %}schedule-row-swap{% endif %}">
+                    <tr class="{% if e.row_highlight == 'merge' %}schedule-row-merge{% elif e.row_highlight == 'proxy' %}schedule-row-proxy{% elif e.row_highlight == 'proxy_created' %}schedule-row-proxy-created{% elif e.row_highlight == 'mass_bunk' %}schedule-row-mass-bunk{% elif e.row_highlight == 'swap' %}schedule-row-swap{% endif %}">
                         <td>{{ e.lecture_no }}</td>
                         <td>{{ e.time_slot }}</td>
                         <td>{{ e.dept_label }}</td>
@@ -80,7 +86,7 @@
                                 {% endif %}
                             {% elif not e.is_placeholder and e.status == "proxy" %}
                                 <span class="badge bg-warning text-dark ms-1">Proxy</span>
-                            {% elif not e.is_placeholder and e.has_proxy %}
+                            {% elif not e.is_placeholder and e.has_proxy and not e.is_merge %}
                                 <span class="badge bg-info text-dark ms-1">Proxy Assigned</span>
                             {% endif %}
                             {% if not e.is_placeholder and e.is_merge %}

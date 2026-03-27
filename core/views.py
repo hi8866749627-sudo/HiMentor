@@ -7834,6 +7834,7 @@ def _schedule_entries_for_faculty(modules, selected_date, faculty_name, merge_ac
                 and adj.adjustment_type == LectureAdjustment.TYPE_PROXY
                 and adj.proxy_faculty
                 and adj.proxy_faculty.name.lower() != faculty_name.lower()
+                and not adj.merge_room
             )
             subject_val = entry.subject
             time_slot_val = entry.time_slot
@@ -7862,6 +7863,8 @@ def _schedule_entries_for_faculty(modules, selected_date, faculty_name, merge_ac
                 row_highlight = "proxy_created"
             elif adj and adj.adjustment_type == LectureAdjustment.TYPE_PROXY and adj.proxy_faculty and adj.proxy_faculty.name.lower() == faculty_name.lower():
                 row_highlight = "proxy"
+            elif adj and adj.adjustment_type == LectureAdjustment.TYPE_PROXY and adj.merge_room:
+                row_highlight = "merge"
             elif (session and total_count and absent_count == total_count) or (
                 not session and (selected_date < today or (selected_date == today and _slot_has_started(selected_date, time_slot_val)))
             ):
@@ -7971,7 +7974,7 @@ def _schedule_entries_for_faculty(modules, selected_date, faculty_name, merge_ac
     has_proxy_alert = any(e.get("status") == "proxy" for e in entries)
     if merge_across_modules and len(modules) > 1:
         entries = _merge_schedule_entries(entries)
-    entries.sort(key=lambda x: (_slot_sort_key(x.get("time_slot")), x["lecture_no"], x.get("module_name", ""), x.get("batch", "")))
+    entries.sort(key=lambda x: (_slot_sort_key(x.get("time_slot")), x["lecture_no"], int(bool(x.get("status") == "proxy")), x.get("module_name", ""), x.get("batch", "")))
     return entries, has_proxy_alert, has_inactive_calendar
 
 
