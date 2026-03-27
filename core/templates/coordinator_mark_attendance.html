@@ -181,6 +181,7 @@
 
                     <div class="slot-actions">
                         <button type="button" class="btn btn-success btn-sm all-present-btn">All Present</button>
+                        <button type="button" class="btn btn-outline-danger btn-sm mass-bunk-btn">M</button>
                         <button type="button" class="btn btn-outline-secondary btn-sm clear-btn">Clear</button>
                         <button type="button" class="btn btn-outline-secondary btn-sm copy-prev-btn">Copy Prev</button>
                         <button type="button" class="btn btn-sm save-btn {% if slot.session %}btn-warning text-dark{% else %}btn-primary{% endif %}">{% if slot.session %}Saved{% else %}Save{% endif %}</button>
@@ -332,6 +333,7 @@ document.querySelectorAll('.attendance-form').forEach(form => {
     form.dataset.dirty = "0";
     const saveBtn = form.querySelector('.save-btn');
     const allPresentBtn = form.querySelector('.all-present-btn');
+    const massBunkBtn = form.querySelector('.mass-bunk-btn');
     const clearBtn = form.querySelector('.clear-btn');
     const copyPrevBtn = form.querySelector('.copy-prev-btn');
     const rollButtons = Array.from(form.querySelectorAll('.roll-btn'));
@@ -341,6 +343,12 @@ document.querySelectorAll('.attendance-form').forEach(form => {
         rollButtons.forEach(btn => setRollState(btn, false, true));
         markDirty(form);
     });
+    if (massBunkBtn) {
+        massBunkBtn.addEventListener('click', () => {
+            rollButtons.forEach(btn => setRollState(btn, true, false));
+            markDirty(form);
+        });
+    }
     if (clearBtn) {
         clearBtn.addEventListener('click', () => {
             rollButtons.forEach(btn => setRollState(btn, false, false));
@@ -362,7 +370,7 @@ document.querySelectorAll('.attendance-form').forEach(form => {
     rollButtons.forEach(btn => {
         btn.addEventListener('click', () => {
             const nextAbsent = btn.dataset.absent !== "1";
-            setRollState(btn, nextAbsent, false);
+            setRollState(btn, nextAbsent, !nextAbsent);
             markDirty(form);
         });
     });

@@ -198,6 +198,7 @@
                             <span class="text-muted small align-self-center">Proxy assigned. Attendance can be marked by {{ slot.adjustment.proxy_faculty.name }}.</span>
                         {% else %}
                             <button type="button" class="btn btn-success btn-sm all-present-btn">All Present</button>
+                            <button type="button" class="btn btn-outline-danger btn-sm mass-bunk-btn">M</button>
                             <button type="button" class="btn btn-outline-secondary btn-sm clear-btn">Clear</button>
                             {% if slot.can_copy_prev %}
                             <button type="button" class="btn btn-outline-secondary btn-sm copy-prev-btn">Copy Prev</button>
@@ -379,6 +380,7 @@ document.querySelectorAll('.attendance-form').forEach(form => {
     form.dataset.dirty = "0";
     const saveBtn = form.querySelector('.save-btn');
     const allPresentBtn = form.querySelector('.all-present-btn');
+    const massBunkBtn = form.querySelector('.mass-bunk-btn');
     const clearBtn = form.querySelector('.clear-btn');
     const copyPrevBtn = form.querySelector('.copy-prev-btn');
     const status = form.querySelector('.save-status');
@@ -388,6 +390,13 @@ document.querySelectorAll('.attendance-form').forEach(form => {
     if (allPresentBtn) {
         allPresentBtn.addEventListener('click', () => {
             rollButtons.forEach(btn => setRollState(btn, false, true));
+            markDirty(form);
+        });
+    }
+
+    if (massBunkBtn) {
+        massBunkBtn.addEventListener('click', () => {
+            rollButtons.forEach(btn => setRollState(btn, true, false));
             markDirty(form);
         });
     }
@@ -413,7 +422,7 @@ document.querySelectorAll('.attendance-form').forEach(form => {
     rollButtons.forEach(btn => {
         btn.addEventListener('click', () => {
             const nextAbsent = btn.dataset.absent !== "1";
-            setRollState(btn, nextAbsent, false);
+            setRollState(btn, nextAbsent, !nextAbsent);
             markDirty(form);
         });
     });
