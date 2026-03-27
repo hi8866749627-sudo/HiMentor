@@ -7886,7 +7886,7 @@ def _schedule_entries_for_faculty(modules, selected_date, faculty_name, merge_ac
                     "room": room_val,
                     "status": "original",
                     "proxy_faculty": adj.proxy_faculty.name if adj and adj.proxy_faculty else "",
-                    "has_proxy": bool(adj),
+                    "has_proxy": bool(adj and adj.adjustment_type == LectureAdjustment.TYPE_PROXY and adj.proxy_faculty),
                     "proxy_created": proxy_created,
                     "adjustment_type": adj.adjustment_type if adj else "",
                     "swap_with": f"{adj.swap_batch} L{adj.swap_lecture_no}" if adj and adj.adjustment_type == LectureAdjustment.TYPE_SWAP and adj.swap_batch and adj.swap_lecture_no else "",
