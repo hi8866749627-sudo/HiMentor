@@ -10494,15 +10494,19 @@ def save_lecture_attendance(request):
         ):
             return JsonResponse({"ok": False, "msg": "Proxy assigned. Original faculty cannot mark attendance."}, status=403)
 
+    base_entry = entry
+    if not base_entry and adjustment:
+        base_entry = adjustment.timetable_entry
+
     session, _ = LectureSession.objects.update_or_create(
         module=module,
         date=date_val,
         lecture_no=lecture_no,
         batch=batch,
         defaults={
-            "timetable_entry": entry or adjustment.timetable_entry if adjustment else entry,
+            "timetable_entry": base_entry,
             "day_of_week": date_val.weekday(),
-            "time_slot": (adjustment.time_slot if adjustment else entry.time_slot),
+            "time_slot": (adjustment.time_slot if adjustment else (base_entry.time_slot if base_entry else "")),
             "subject": (
                 _resolve_proxy_subject(
                     module,
@@ -10512,18 +10516,18 @@ def save_lecture_attendance(request):
                     day_of_week=date_val.weekday(),
                 )
                 if adjustment and adjustment.adjustment_type == LectureAdjustment.TYPE_PROXY and adjustment.proxy_faculty
-                else (adjustment.subject if adjustment else entry.subject)
-            ) or (adjustment.subject if adjustment else entry.subject),
+                else (adjustment.subject if adjustment else (base_entry.subject if base_entry else ""))
+            ) or (adjustment.subject if adjustment else (base_entry.subject if base_entry else "")),
             "faculty": (
                 (
                     adjustment.proxy_faculty.name
                     if adjustment and adjustment.adjustment_type == LectureAdjustment.TYPE_PROXY and adjustment.proxy_faculty
-                    else (mentor.name if mentor else entry.faculty)
+                    else (mentor.name if mentor else (base_entry.faculty if base_entry else ""))
                 )
                 if adjustment
-                else entry.faculty
+                else (base_entry.faculty if base_entry else "")
             ),
-            "room": (adjustment.room if adjustment else entry.room),
+            "room": (adjustment.room if adjustment else (base_entry.room if base_entry else "")),
             "marked_by": mentor if mentor else None,
         },
     )
