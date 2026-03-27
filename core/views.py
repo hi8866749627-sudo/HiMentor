@@ -10450,6 +10450,7 @@ def save_lecture_attendance(request):
             and adjustment.adjustment_type == LectureAdjustment.TYPE_PROXY
             and mentor
             and (not adjustment.proxy_faculty or adjustment.proxy_faculty.name.lower() != mentor.name.lower())
+            and not adjustment.merge_room
         ):
             adjustment = None
         if not adjustment:
@@ -10489,6 +10490,7 @@ def save_lecture_attendance(request):
             and active_adj.adjustment_type == LectureAdjustment.TYPE_PROXY
             and mentor
             and (not active_adj.proxy_faculty or active_adj.proxy_faculty.name.lower() != mentor.name.lower())
+            and not active_adj.merge_room
         ):
             return JsonResponse({"ok": False, "msg": "Proxy assigned. Original faculty cannot mark attendance."}, status=403)
 
