@@ -513,18 +513,15 @@
                                                 </td>
                                                 {% for selected_user_id in row.selected_slot_user_ids %}
                                                 <td>
-                                                    <select
+                                                    <input
                                                         name="subject_eval_{{ row.subject.id }}_{{ forloop.counter }}"
-                                                        class="form-select form-select-sm js-evaluator-slot"
+                                                        class="form-control form-control-sm js-evaluator-slot"
+                                                        list="evaluator-options"
+                                                        autocomplete="off"
+                                                        placeholder="{% if forloop.first %}Type short name{% else %}Optional{% endif %}"
+                                                        value="{{ selected_user_id }}"
                                                         {% if forloop.first %}required{% endif %}
                                                     >
-                                                        <option value="">{% if forloop.first %}Select evaluator{% else %}Optional{% endif %}</option>
-                                                        {% for profile in profiles %}
-                                                        <option value="{{ profile.user_id }}" {% if selected_user_id == profile.user_id %}selected{% endif %}>
-                                                            {{ profile.short_code }}{% if profile.full_name %} - {{ profile.full_name }}{% endif %}
-                                                        </option>
-                                                        {% endfor %}
-                                                    </select>
                                                 </td>
                                                 {% endfor %}
                                             </tr>
@@ -537,6 +534,11 @@
                                 {% if not profiles %}
                                 <div class="small text-muted mb-2">No faculty accounts are ready for evaluator mapping yet. Create one below.</div>
                                 {% endif %}
+                                <datalist id="evaluator-options">
+                                    {% for profile in profiles %}
+                                    <option value="{{ profile.short_code }}" label="{{ profile.full_name|default:profile.short_code }} - {{ profile.short_code }}"></option>
+                                    {% endfor %}
+                                </datalist>
                                 <button class="btn btn-primary" type="submit">Save Evaluator Mapping</button>
                             </form>
 
@@ -1151,27 +1153,27 @@ const previewBulkSubmit = document.getElementById('previewBulkSubmit');
         }
 
 document.querySelectorAll('.js-subject-evaluator-row').forEach((row) => {
-    const selects = Array.from(row.querySelectorAll('.js-evaluator-slot'));
-    const refreshEvaluatorOptions = () => {
-        const selectedValues = selects.map((select) => select.value).filter(Boolean);
-        selects.forEach((select) => {
-            const current = select.value;
-            Array.from(select.options).forEach((option) => {
-                if (!option.value) {
-                    option.hidden = false;
-                    option.disabled = false;
-                    return;
-                }
-                const usedElsewhere = selectedValues.includes(option.value) && option.value !== current;
-                option.hidden = usedElsewhere;
-                option.disabled = usedElsewhere;
-            });
+    const inputs = Array.from(row.querySelectorAll('.js-evaluator-slot'));
+    const refreshEvaluatorInputs = () => {
+        const selectedValues = inputs
+            .map((input) => (input.value || '').trim().toUpperCase())
+            .filter(Boolean);
+        inputs.forEach((input) => {
+            input.value = (input.value || '').trim().toUpperCase();
+            const current = input.value;
+            const duplicateCount = selectedValues.filter((value) => value === current).length;
+            if (current && duplicateCount > 1) {
+                input.setCustomValidity('Same evaluator cannot be selected twice in one subject.');
+            } else {
+                input.setCustomValidity('');
+            }
         });
     };
-    selects.forEach((select) => {
-        select.addEventListener('change', refreshEvaluatorOptions);
+    inputs.forEach((input) => {
+        input.addEventListener('input', refreshEvaluatorInputs);
+        input.addEventListener('change', refreshEvaluatorInputs);
     });
-    refreshEvaluatorOptions();
+    refreshEvaluatorInputs();
 });
 </script>
 {% endblock %}

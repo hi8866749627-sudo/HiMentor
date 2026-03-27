@@ -30,6 +30,7 @@ from .exam_services import (
     parse_exam_mark,
     publish_locked_entry,
     resolve_block_students,
+    sync_exam_blocks_from_seating,
 )
 from .models import (
     AcademicModule,
@@ -109,7 +110,7 @@ def _module_faculty_directory(module):
     )
     profile_mentor_ids = {profile.mentor_id for profile in profiles if profile.mentor_id}
     unregistered_names = [
-        (mentor.full_name or mentor.name or "").strip()
+        (mentor.name or "").strip().upper()
         for mentor in mentors
         if mentor.id not in profile_mentor_ids
     ]
@@ -477,6 +478,10 @@ def exam_section(request):
             allowed_evaluator_ids = set(
                 ExamFacultyProfile.objects.filter(is_active=True).values_list("user_id", flat=True)
             )
+            profile_by_code = {
+                profile.short_code.upper(): profile
+                for profile in ExamFacultyProfile.objects.filter(is_active=True).select_related("user")
+            }
             ExamSubjectEvaluator.objects.filter(session=session).delete()
             creates = []
             validation_failed = False
@@ -484,10 +489,13 @@ def exam_section(request):
                 selected_ids = []
                 seen = set()
                 for slot in range(1, 6):
-                    value = (request.POST.get(f"subject_eval_{subject_id}_{slot}") or "").strip()
-                    if not value.isdigit():
+                    value = (request.POST.get(f"subject_eval_{subject_id}_{slot}") or "").strip().upper()
+                    if not value:
                         continue
-                    evaluator_id = int(value)
+                    profile = profile_by_code.get(value)
+                    if not profile:
+                        continue
+                    evaluator_id = profile.user_id
                     if evaluator_id not in allowed_evaluator_ids or evaluator_id in seen:
                         continue
                     selected_ids.append(evaluator_id)
@@ -909,6 +917,8 @@ def exam_section(request):
                     name_bits.append(f"Block {block.block_number}")
                 block.name = " ".join(name_bits).strip()
             block.save()
+            for entry in ExamTimetableEntry.objects.filter(session=block.session):
+                sync_exam_blocks_from_seating(entry)
             messages.success(request, "Seating block updated.")
             return redirect(f"/exam-section/?module_id={module.id}&test_name={block.session.test_name}#seating-blocks")
 
@@ -924,6 +934,8 @@ def exam_section(request):
                 return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#seating-blocks")
             ExamSeatingBlock.objects.filter(session=session, delivery_mode=delivery_mode, is_preview=False).delete()
             preview_qs.update(is_preview=False)
+            for entry in ExamTimetableEntry.objects.filter(session=session):
+                sync_exam_blocks_from_seating(entry)
             messages.success(request, "Seating blocks finalized.")
             return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#seating-blocks")
 
@@ -939,6 +951,8 @@ def exam_section(request):
             for mode in preview_qs.values_list("delivery_mode", flat=True).distinct():
                 ExamSeatingBlock.objects.filter(session=session, delivery_mode=mode, is_preview=False).delete()
             preview_qs.update(is_preview=False)
+            for entry in ExamTimetableEntry.objects.filter(session=session):
+                sync_exam_blocks_from_seating(entry)
             messages.success(request, "Offline and online preview blocks finalized.")
             return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#seating-blocks")
 
@@ -1152,7 +1166,7 @@ def exam_section(request):
         for subject in selected_subjects:
             selected_user_ids = [user_id for user_id in session_subject_evaluator_map.get(subject.id, []) if user_id in profile_by_user_id][:5]
             selected_profiles = [profile_by_user_id[user_id] for user_id in selected_user_ids]
-            selected_slot_user_ids = [str(user_id) for user_id in selected_user_ids] + [""] * max(0, 5 - len(selected_user_ids))
+            selected_slot_user_ids = [profile_by_user_id[user_id].short_code for user_id in selected_user_ids] + [""] * max(0, 5 - len(selected_user_ids))
             subject_evaluator_rows.append(
                 {
                     "subject": subject,
@@ -1314,6 +1328,7 @@ def exam_section(request):
         )
     entry_cards = []
     for entry in entries:
+        sync_exam_blocks_from_seating(entry)
         blocks = list(entry.blocks.select_related("evaluator").order_by("name", "id"))
         allowed_profiles = [
             profile_by_user_id[user_id]
@@ -1407,6 +1422,11 @@ def exam_marks_entry(request, block_id):
 
     editable = can_enter_exam_block(request.user, block)
     can_edit_now, edit_message = can_edit_entry_now(block.timetable_entry)
+    sync_exam_blocks_from_seating(block.timetable_entry)
+    block = get_object_or_404(
+        ExamBlock.objects.select_related("timetable_entry", "timetable_entry__session", "timetable_entry__subject", "evaluator"),
+        id=block_id,
+    )
     if request.method == "POST":
         if not editable:
             return HttpResponseForbidden("Unauthorized")

@@ -4,7 +4,7 @@ from datetime import datetime
 from django.db import transaction
 from django.utils import timezone
 
-from .models import ExamBlockStudent, ExamMarkEntry, ExamTimetableEntry, ResultCallRecord, ResultUpload, StudentResult
+from .models import ExamBlock, ExamBlockStudent, ExamMarkEntry, ExamSeatingBlock, ExamTimetableEntry, ResultCallRecord, ResultUpload, StudentResult
 
 
 def exam_phase_defaults(test_name):
@@ -161,6 +161,72 @@ def compiled_rows_for_entry(entry):
             }
         )
     return rows
+
+
+def _manual_student_ids_from_seating_block(module, seating_block):
+    manual_enrollments = [
+        value.strip()
+        for value in (seating_block.manual_enrollments or "").replace("\n", ",").split(",")
+        if value.strip()
+    ]
+    if not manual_enrollments:
+        return []
+    return list(module.students.filter(enrollment__in=manual_enrollments).values_list("id", flat=True))
+
+
+def sync_exam_blocks_from_seating(entry):
+    seating_map = {
+        (block.delivery_mode, (block.block_number or "").strip()): block
+        for block in ExamSeatingBlock.objects.filter(session=entry.session, is_preview=False)
+    }
+    exam_blocks = list(entry.blocks.select_related("evaluator").order_by("delivery_mode", "block_number", "id"))
+    assigned_student_ids = set()
+
+    for block in exam_blocks:
+        seating_block = seating_map.get((block.delivery_mode, (block.block_number or "").strip()))
+        if not seating_block:
+            continue
+
+        block.room = seating_block.room
+        block.lab = seating_block.lab
+        block.block_type = seating_block.block_type
+        block.name = seating_block.name or block.name
+        block.batch = seating_block.batch
+        block.enrollment_start = seating_block.enrollment_start
+        block.enrollment_end = seating_block.enrollment_end
+        block.save(update_fields=["room", "lab", "block_type", "name", "batch", "enrollment_start", "enrollment_end"])
+
+        selected_students = resolve_block_students(
+            entry.session.module,
+            seating_block.block_type,
+            seating_block.batch,
+            seating_block.enrollment_start,
+            seating_block.enrollment_end,
+            manual_student_ids=_manual_student_ids_from_seating_block(entry.session.module, seating_block),
+        )
+        final_student_ids = []
+        for student in selected_students:
+            if student.id in assigned_student_ids:
+                continue
+            final_student_ids.append(student.id)
+            assigned_student_ids.add(student.id)
+
+        current_ids = set(block.student_links.values_list("student_id", flat=True))
+        target_ids = set(final_student_ids)
+
+        stale_ids = current_ids - target_ids
+        if stale_ids:
+            ExamMarkEntry.objects.filter(block=block, student_id__in=stale_ids).delete()
+            ExamBlockStudent.objects.filter(block=block, student_id__in=stale_ids).delete()
+
+        new_ids = target_ids - current_ids
+        if new_ids:
+            ExamBlockStudent.objects.bulk_create(
+                [ExamBlockStudent(block=block, student_id=student_id) for student_id in final_student_ids if student_id in new_ids],
+                ignore_conflicts=True,
+            )
+
+    return exam_blocks
 
 
 def _previous_mark(upload, student, test_name):
