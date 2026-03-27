@@ -1,6 +1,7 @@
 from datetime import datetime
 import json
 from decimal import Decimal
+from math import ceil
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -121,6 +122,51 @@ def _manager_candidate_users(module):
         seen.add(user.id)
         candidates.append({"id": user.id, "label": label})
     return sorted(candidates, key=lambda item: item["label"].lower())
+
+
+def _infer_branch_label(student, module):
+    candidates = [
+        (getattr(student, "division", "") or "").strip(),
+        (getattr(student, "batch", "") or "").strip(),
+        (getattr(module, "variant", "") or "").strip(),
+        (getattr(module, "name", "") or "").strip(),
+    ]
+    branch_tokens = [
+        "AIML",
+        "AI",
+        "CSE",
+        "CE",
+        "IT",
+        "ME",
+        "EC",
+        "ECE",
+        "EE",
+        "CIVIL",
+    ]
+    for candidate in candidates:
+        upper = candidate.upper()
+        for token in branch_tokens:
+            if token in upper:
+                return token
+    return (getattr(module, "variant", "") or getattr(module, "year_level", "") or "GEN").split("-")[-1].upper()
+
+
+def _branch_count_summary(students, module):
+    counts = {}
+    for student in students:
+        label = _infer_branch_label(student, module)
+        counts[label] = counts.get(label, 0) + 1
+    summary_rows = [
+        {"branch": branch, "count": count, "label": f"{branch}-{count:02d}"}
+        for branch, count in sorted(counts.items())
+    ]
+    if not summary_rows:
+        display = "-"
+    elif len(summary_rows) == 1:
+        display = summary_rows[0]["label"]
+    else:
+        display = "\n".join(row["label"] for row in summary_rows)
+    return summary_rows, display
 
 
 @login_required
@@ -808,10 +854,22 @@ def exam_section(request):
             .order_by("exam_date", "start_time", "subject__name")
         )
     enrollment_choices = []
+    enrollment_branch_map = {}
+    available_branch_rows = []
+    available_students_total = 0
+    required_offline_blocks = 0
+    required_online_blocks = 0
     if module:
-        enrollment_choices = list(
-            module.students.order_by("enrollment").values_list("enrollment", flat=True).distinct()
-        )
+        module_students_for_summary = list(module.students.order_by("enrollment"))
+        enrollment_choices = [student.enrollment for student in module_students_for_summary]
+        available_branch_rows, _ = _branch_count_summary(module_students_for_summary, module)
+        available_students_total = len(module_students_for_summary)
+        required_offline_blocks = ceil(available_students_total / 20) if available_students_total else 0
+        required_online_blocks = ceil(available_students_total / 12) if available_students_total else 0
+        enrollment_branch_map = {
+            student.enrollment: _infer_branch_label(student, module)
+            for student in module_students_for_summary
+        }
     dept_label_default = ""
     if module and module.variant:
         variant = module.variant.split("-")[0].strip()
@@ -867,7 +925,15 @@ def exam_section(request):
                 block.enrollment_end,
                 manual_student_ids=manual_ids,
             )
-            seating_block_rows.append({"block": block, "student_count": len(students)})
+            branch_rows, branch_display = _branch_count_summary(students, selected_session.module)
+            seating_block_rows.append(
+                {
+                    "block": block,
+                    "student_count": len(students),
+                    "branch_rows": branch_rows,
+                    "branch_display": branch_display,
+                }
+            )
         for block in preview_blocks:
             manual_ids = []
             manual_enrollments = [
@@ -887,7 +953,15 @@ def exam_section(request):
                 block.enrollment_end,
                 manual_student_ids=manual_ids,
             )
-            preview_block_rows.append({"block": block, "student_count": len(students)})
+            branch_rows, branch_display = _branch_count_summary(students, selected_session.module)
+            preview_block_rows.append(
+                {
+                    "block": block,
+                    "student_count": len(students),
+                    "branch_rows": branch_rows,
+                    "branch_display": branch_display,
+                }
+            )
         if seating_blocks and enrollment_choices:
             last_end = ""
             for block in reversed(seating_blocks):
@@ -974,6 +1048,11 @@ def exam_section(request):
             "next_enrollment_start": next_enrollment_start,
             "next_enrollment_end": next_enrollment_end,
             "year_rooms": year_rooms,
+            "available_branch_rows": available_branch_rows,
+            "available_students_total": available_students_total,
+            "required_offline_blocks": required_offline_blocks,
+            "required_online_blocks": required_online_blocks,
+            "enrollment_branch_map": enrollment_branch_map,
             "phase_defaults": (exam_phase_defaults(selected_session.test_name) if selected_session else {}),
         },
     )

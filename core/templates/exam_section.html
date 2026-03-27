@@ -1,5 +1,58 @@
 {% extends "base.html" %}
 {% block content %}
+<style>
+    .grid-shell {
+        border: 1px solid var(--bs-border-color, #dee2e6);
+        border-radius: 0.75rem;
+        background: #fff;
+    }
+    .grid-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.65rem 0.85rem;
+        border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+    }
+    .grid-body {
+        padding: 0.85rem;
+    }
+    .grid-shell.is-compact .grid-body {
+        display: none;
+    }
+    .grid-toggle {
+        border: 0;
+        background: transparent;
+        font-size: 1rem;
+        line-height: 1;
+        color: #495057;
+        padding: 0.15rem 0.35rem;
+    }
+    .grid-toggle:hover {
+        color: #0d6efd;
+    }
+    .compact-col {
+        width: 5.5rem;
+        min-width: 5.5rem;
+    }
+    .compact-col-wide {
+        width: 7rem;
+        min-width: 7rem;
+    }
+    .branch-lines {
+        white-space: pre-line;
+        min-width: 6.5rem;
+    }
+    .branch-pill {
+        display: inline-block;
+        padding: 0.2rem 0.45rem;
+        border-radius: 999px;
+        background: #f1f3f5;
+        border: 1px solid #dee2e6;
+        font-size: 0.8rem;
+        margin: 0.1rem 0.2rem 0.1rem 0;
+    }
+</style>
 <div class="container-fluid py-3">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
         <div>
@@ -126,8 +179,26 @@
                             <button class="btn btn-outline-secondary btn-sm" type="submit">Copy</button>
                         </form>
                     </div>
-                    <div class="border rounded p-2 mb-3">
-                        <div class="fw-semibold mb-2">Auto Generate Blocks (Preview)</div>
+                    <div class="grid-shell is-compact mb-3">
+                        <div class="grid-head">
+                            <div>
+                                <div class="fw-semibold">Auto Generate Blocks (Preview)</div>
+                                <div class="small text-muted">
+                                    Total {{ available_students_total }} students
+                                    | Offline blocks {{ required_offline_blocks }}
+                                    | Online blocks {{ required_online_blocks }}
+                                </div>
+                                <div class="small">
+                                    {% for row in available_branch_rows %}
+                                    <span class="branch-pill">{{ row.label }}-{{ row.count }}</span>
+                                    {% empty %}
+                                    <span class="text-muted">No student pool found.</span>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid">▸</button>
+                        </div>
+                        <div class="grid-body">
                         <form method="post" class="row g-2 align-items-end">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="auto_generate_blocks">
@@ -166,8 +237,15 @@
                                 <button class="btn btn-outline-primary w-100" type="submit">Generate Preview</button>
                             </div>
                         </form>
+                        </div>
                     </div>
-                    <form method="post" class="row g-2 mb-3">
+                    <div class="grid-shell is-compact mb-3">
+                        <div class="grid-head">
+                            <div class="fw-semibold">Create Seating Block Manually</div>
+                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid">▸</button>
+                        </div>
+                        <div class="grid-body">
+                    <form method="post" class="row g-2 mb-0">
                         {% csrf_token %}
                         <input type="hidden" name="action" value="create_seating_block">
                         <input type="hidden" name="session_id" value="{{ selected_session.id }}">
@@ -210,10 +288,17 @@
                             <button class="btn btn-outline-primary w-100" type="submit">Save</button>
                         </div>
                     </form>
+                        </div>
+                    </div>
                     {% if preview_block_rows %}
-                    <div class="border rounded p-2 mb-3">
-                        <div class="fw-semibold mb-2">Preview Blocks (Edit then Finalize)</div>
+                    <div class="grid-shell is-compact mb-3">
+                        <div class="grid-head">
+                            <div class="fw-semibold">Preview Blocks (Edit then Finalize)</div>
+                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid">▸</button>
+                        </div>
+                        <div class="grid-body">
                         {{ enrollment_choices|json_script:"previewEnrollmentChoices" }}
+                        {{ enrollment_branch_map|json_script:"previewEnrollmentBranches" }}
                         <form method="post" class="d-flex flex-wrap gap-2 mb-2">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="finalize_seating_blocks">
@@ -249,16 +334,17 @@
                             <table class="table table-sm table-bordered align-middle">
                                 <thead>
                                     <tr>
-                                        <th>Block #</th>
-                                        <th>Dept</th>
-                                        <th>Mode</th>
-                                        <th>Room/Lab</th>
-                                        <th>Type</th>
+                                        <th class="compact-col">Block #</th>
+                                        <th class="compact-col">Dept</th>
+                                        <th class="compact-col">Mode</th>
+                                        <th class="compact-col-wide">Room/Lab</th>
+                                        <th class="compact-col">Type</th>
                                         <th>Range</th>
-                                    <th>Students</th>
-                                    <th>Adjust</th>
-                                    <th>Update</th>
-                                </tr>
+                                        <th class="compact-col">Students</th>
+                                        <th>Branch</th>
+                                        <th class="compact-col">Adjust</th>
+                                        <th class="compact-col">Update</th>
+                                    </tr>
                                 </thead>
                                 <tbody>
                                     {% for row in preview_block_rows %}
@@ -291,6 +377,7 @@
                                                 <input name="manual_enrollments" class="form-control form-control-sm mt-1" value="{{ row.block.manual_enrollments }}" placeholder="Extra enrollments">
                                             </td>
                                             <td class="js-preview-count">{{ row.student_count }}</td>
+                                            <td class="branch-lines js-preview-branches">{{ row.branch_display }}</td>
                                             <td class="d-flex gap-1">
                                                 <button type="button" class="btn btn-outline-secondary btn-sm preview-shift-btn" data-block-id="{{ row.block.id }}" data-delta="-1">-</button>
                                                 <button type="button" class="btn btn-outline-secondary btn-sm preview-shift-btn" data-block-id="{{ row.block.id }}" data-delta="1">+</button>
@@ -302,8 +389,15 @@
                                 </tbody>
                             </table>
                         </div>
+                        </div>
                     </div>
                     {% endif %}
+                    <div class="grid-shell is-compact">
+                        <div class="grid-head">
+                            <div class="fw-semibold">Finalized Seating Blocks</div>
+                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid">▸</button>
+                        </div>
+                        <div class="grid-body">
                     <div class="table-responsive">
                         <table class="table table-sm table-bordered align-middle">
                             <thead>
@@ -350,6 +444,8 @@
                             </tbody>
                         </table>
                     </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -366,6 +462,12 @@
                         {% csrf_token %}
                         <input type="hidden" name="action" value="create_entry">
                         <input type="hidden" name="session_id" value="{{ selected_session.id }}">
+                        <div class="grid-shell is-compact">
+                            <div class="grid-head">
+                                <div class="fw-semibold">Create Subject Timetable</div>
+                                <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid">▸</button>
+                            </div>
+                            <div class="grid-body">
                         <div class="table-responsive">
                             <table class="table table-sm table-bordered align-middle">
                                 <thead class="table-light">
@@ -419,6 +521,8 @@
                                     </tr>
                                 </tbody>
                             </table>
+                        </div>
+                            </div>
                         </div>
                         {% if not available_subjects %}
                         <div class="small text-muted mb-2">All subjects already have an exam entry for this test.</div>
@@ -526,6 +630,12 @@
             </form>
             {% endif %}
 
+            <div class="grid-shell is-compact">
+                <div class="grid-head">
+                    <div class="fw-semibold">Assigned Evaluator Blocks</div>
+                    <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid">▸</button>
+                </div>
+                <div class="grid-body">
             <div class="table-responsive">
                 <table class="table table-sm table-bordered align-middle">
                     <thead>
@@ -563,6 +673,8 @@
                         {% endfor %}
                     </tbody>
                 </table>
+            </div>
+                </div>
             </div>
 
             {% if can_manage_exam %}
@@ -636,13 +748,94 @@
     }
 })();
 
+document.querySelectorAll('.js-grid-toggle').forEach((btn) => {
+    btn.addEventListener('click', () => {
+        const shell = btn.closest('.grid-shell');
+        if (!shell) return;
+        shell.classList.toggle('is-compact');
+        btn.textContent = shell.classList.contains('is-compact') ? '▸' : '▾';
+    });
+});
+
+const previewEnrollmentChoices = (() => {
+    const el = document.getElementById('previewEnrollmentChoices');
+    return el ? JSON.parse(el.textContent || '[]') : [];
+})();
+const previewEnrollmentBranches = (() => {
+    const el = document.getElementById('previewEnrollmentBranches');
+    return el ? JSON.parse(el.textContent || '{}') : {};
+})();
+
+const updatePreviewBranchSummary = (row) => {
+    if (!row) return;
+    const startInput = row.querySelector('.js-preview-start');
+    const endInput = row.querySelector('.js-preview-end');
+    const manualInput = row.querySelector('input[name="manual_enrollments"]');
+    const startIndex = previewEnrollmentChoices.indexOf(startInput ? startInput.value : '');
+    const endIndex = previewEnrollmentChoices.indexOf(endInput ? endInput.value : '');
+    const counts = {};
+
+    if (startIndex >= 0 && endIndex >= startIndex) {
+        previewEnrollmentChoices.slice(startIndex, endIndex + 1).forEach((enrollment) => {
+            const label = previewEnrollmentBranches[enrollment] || 'GEN';
+            counts[label] = (counts[label] || 0) + 1;
+        });
+    }
+
+    const manualValues = (manualInput && manualInput.value ? manualInput.value : '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+    manualValues.forEach((enrollment) => {
+        const label = previewEnrollmentBranches[enrollment] || 'GEN';
+        counts[label] = (counts[label] || 0) + 1;
+    });
+
+    const lines = Object.entries(counts)
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([label, count]) => `${label}-${String(count).padStart(2, '0')}`);
+    const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
+
+    const countCell = row.querySelector('.js-preview-count');
+    if (countCell) countCell.textContent = String(total);
+    const branchCell = row.querySelector('.js-preview-branches');
+    if (branchCell) branchCell.textContent = lines.join('\n');
+};
+
+const refreshPreviewRows = (mode, sizes) => {
+    let cursor = 0;
+    const updatedRows = Array.from(document.querySelectorAll('.js-preview-row')).filter(row => (row.dataset.mode || '') === mode);
+    updatedRows.forEach((row, idx) => {
+        const size = sizes[idx];
+        const start = previewEnrollmentChoices[cursor] || '';
+        const end = previewEnrollmentChoices[cursor + size - 1] || start;
+        cursor += size;
+        const startInput = row.querySelector('.js-preview-start');
+        const endInput = row.querySelector('.js-preview-end');
+        if (startInput) startInput.value = start;
+        if (endInput) endInput.value = end;
+        updatePreviewBranchSummary(row);
+    });
+
+    const hint = document.getElementById('previewDirtyHint');
+    if (hint) hint.classList.remove('d-none');
+};
+
+document.querySelectorAll('.js-preview-row').forEach((row) => {
+    ['.js-preview-start', '.js-preview-end', 'input[name="manual_enrollments"]'].forEach((selector) => {
+        const input = row.querySelector(selector);
+        if (input) {
+            input.addEventListener('input', () => updatePreviewBranchSummary(row));
+            input.addEventListener('change', () => updatePreviewBranchSummary(row));
+        }
+    });
+    updatePreviewBranchSummary(row);
+});
+
 document.querySelectorAll('.preview-shift-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         const rows = Array.from(document.querySelectorAll('.js-preview-row'));
-        const enrollmentsEl = document.getElementById('previewEnrollmentChoices');
-        if (!rows.length || !enrollmentsEl) return;
-        const enrollments = JSON.parse(enrollmentsEl.textContent || '[]');
-        if (!enrollments.length) return;
+        if (!rows.length || !previewEnrollmentChoices.length) return;
 
         const blockId = btn.dataset.blockId || '';
         const delta = parseInt(btn.dataset.delta || '0', 10);
@@ -655,7 +848,7 @@ document.querySelectorAll('.preview-shift-btn').forEach(btn => {
         const rowIndex = modeRows.indexOf(clickedRow);
         if (rowIndex < 0) return;
 
-        const getIndex = (value) => enrollments.indexOf(value);
+        const getIndex = (value) => previewEnrollmentChoices.indexOf(value);
         const sizes = [];
         let cursor = 0;
 
@@ -673,7 +866,6 @@ document.querySelectorAll('.preview-shift-btn').forEach(btn => {
 
         const removedIds = window.previewRemovedIds || [];
         const capacity = (mode === 'online') ? 12 : 20;
-        let createdRow = null;
         if (delta === 1) {
             if (sizes[sizes.length - 1] <= 1) {
                 const lastRow = modeRows[modeRows.length - 1];
@@ -732,7 +924,7 @@ document.querySelectorAll('.preview-shift-btn').forEach(btn => {
                         blockNum.value = String(nextNum);
                     }
                     sourceRow.parentElement.insertBefore(cloned, sourceRow.nextSibling);
-                    createdRow = cloned;
+                    updatePreviewBranchSummary(cloned);
                 }
             }
         }
@@ -765,28 +957,13 @@ document.querySelectorAll('.preview-shift-btn').forEach(btn => {
                             blockNum.value = String(nextNum);
                         }
                         sourceRow.parentElement.insertBefore(cloned, sourceRow.nextSibling);
-                        createdRow = cloned;
+                        updatePreviewBranchSummary(cloned);
                     }
                 }
             }
         }
-        cursor = 0;
-        const updatedRows = Array.from(document.querySelectorAll('.js-preview-row')).filter(row => (row.dataset.mode || '') === mode);
-        updatedRows.forEach((row, idx) => {
-            const size = sizes[idx];
-            const start = enrollments[cursor] || '';
-            const end = enrollments[cursor + size - 1] || start;
-            cursor += size;
-            const startInput = row.querySelector('.js-preview-start');
-            const endInput = row.querySelector('.js-preview-end');
-            if (startInput) startInput.value = start;
-            if (endInput) endInput.value = end;
-            const countCell = row.querySelector('.js-preview-count');
-            if (countCell) countCell.textContent = String(size);
-        });
 
-        const hint = document.getElementById('previewDirtyHint');
-        if (hint) hint.classList.remove('d-none');
+        refreshPreviewRows(mode, sizes);
     });
 });
 
