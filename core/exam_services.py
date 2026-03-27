@@ -132,6 +132,37 @@ def exam_stats_for_block(block):
     }
 
 
+def compiled_rows_for_entry(entry):
+    result_rows = _result_payload_for_entry(entry)
+    result_map = {row["student"].id: row for row in result_rows}
+    rows = []
+    links = (
+        ExamBlockStudent.objects.filter(block__timetable_entry=entry)
+        .select_related("student", "student__mentor", "block")
+        .order_by("student__roll_no", "student__enrollment", "student__name")
+    )
+    for index, link in enumerate(links, start=1):
+        student = link.student
+        result_row = result_map.get(student.id, {})
+        current_mark = result_row.get("current_mark")
+        total_mark = result_row.get("mtotal")
+        rows.append(
+            {
+                "sr_no": index,
+                "branch": (student.batch or "").strip(),
+                "enrollment": student.enrollment,
+                "name": student.name,
+                "roll_no": student.roll_no,
+                "division": (student.division or "").strip(),
+                "mentor_short_name": getattr(student.mentor, "name", "") or "",
+                "marks_display": "AB" if result_row.get("is_absent") else (current_mark if current_mark is not None else ""),
+                "cumulative_display": "" if result_row.get("is_absent") else (total_mark if total_mark is not None else ""),
+                "is_absent": bool(result_row.get("is_absent")),
+            }
+        )
+    return rows
+
+
 def _previous_mark(upload, student, test_name):
     previous_upload = (
         ResultUpload.objects.filter(

@@ -17,6 +17,17 @@
         <a href="/exam-section/?module_id={{ block.timetable_entry.session.module_id }}&test_name={{ block.timetable_entry.session.test_name }}" class="btn btn-outline-secondary">Back to Exam Section</a>
     </div>
 
+    <div class="card shadow-sm mb-3">
+        <div class="card-body py-3">
+            <div class="fw-semibold">{{ entry_header.college_name }}</div>
+            <div class="small">{{ entry_header.batch_line }}</div>
+            <div class="small">{{ entry_header.year_line }}</div>
+            <div class="small mt-2">Subject Name : {{ entry_header.subject_line }}</div>
+            <div class="small">Subject Code : {{ entry_header.code_line|default:"" }}</div>
+            <div class="small">Name of Subject Faculty (For All Division) : {{ entry_header.faculty_line|default:"" }}</div>
+        </div>
+    </div>
+
     <div class="row g-3 mb-3">
         <div class="col-md-2"><div class="border rounded p-2 small">Total: <strong>{{ stats.total }}</strong></div></div>
         <div class="col-md-2"><div class="border rounded p-2 small">Appeared: <strong>{{ stats.appeared }}</strong></div></div>
@@ -36,26 +47,33 @@
             <table class="table table-sm table-bordered align-middle">
                 <thead>
                     <tr>
-                        <th>Enrollment</th>
-                        <th>Roll</th>
-                        <th>Name</th>
-                        <th>Mentor</th>
+                        <th>Sr No</th>
+                        <th>Branch</th>
+                        <th>ENROLLMENT NO</th>
+                        <th>NAME OF STUDENT</th>
+                        <th>Roll No</th>
+                        <th>Div</th>
+                        <th>Short Name of Mentor</th>
                         {% if entry.mode == "both" %}
                         <th>Offline</th>
                         <th>Online</th>
-                        <th>Total</th>
+                        <th>{{ entry_header.current_total_label }}</th>
                         {% else %}
-                        <th>Marks / AB</th>
+                        <th>{{ entry_header.current_total_label }}</th>
                         {% endif %}
+                        <th>{{ entry_header.cumulative_label }}</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for row in mark_rows %}
-                    {% with link=row.link mark=row.mark %}
+                    {% with link=row.link mark=row.mark compiled=row.compiled %}
                     <tr>
+                        <td>{{ forloop.counter }}</td>
+                        <td>{{ link.student.batch }}</td>
                         <td>{{ link.student.enrollment }}</td>
-                        <td>{{ link.student.roll_no }}</td>
                         <td>{{ link.student.name }}</td>
+                        <td>{{ link.student.roll_no }}</td>
+                        <td>{{ link.student.division }}</td>
                         <td>{{ link.student.mentor.name }}</td>
                         {% if entry.mode == "both" %}
                         <td>
@@ -94,6 +112,13 @@
                             >
                         </td>
                         {% endif %}
+                        <td class="small">
+                            {% if compiled.is_absent %}
+                                AB
+                            {% else %}
+                                {{ compiled.cumulative_display|default:"-" }}
+                            {% endif %}
+                        </td>
                     </tr>
                     {% endwith %}
                     {% endfor %}

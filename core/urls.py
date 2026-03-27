@@ -1,5 +1,5 @@
 from django.urls import path
-from .exam_views import exam_marks_entry, exam_section
+from .exam_views import exam_compiled_export, exam_marks_entry, exam_section
 from .views import (
     login_page,
     admin_home,
@@ -225,6 +225,7 @@ urlpatterns = [
     path("result-reports/", coordinator_result_report),
     path("exam-section/", exam_section),
     path("exam-section/marks/<int:block_id>/", exam_marks_entry),
+    path("exam-section/export/<int:entry_id>/<str:export_format>/", exam_compiled_export),
     path("manage-mentors/", manage_mentors),
     path("manage-mentors/debug/", manage_mentors_debug),
     path("feature-roadmap/", feature_roadmap),

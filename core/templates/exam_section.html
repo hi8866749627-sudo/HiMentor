@@ -324,15 +324,23 @@
                             </select>
                             <button class="btn btn-outline-danger btn-sm" type="submit">Discard Preview</button>
                         </form>
-                        <form method="post" id="previewBulkForm" class="d-flex flex-wrap gap-2 align-items-center mb-2">
-                            {% csrf_token %}
-                            <input type="hidden" name="action" value="bulk_update_preview_ranges">
-                            <input type="hidden" name="session_id" value="{{ selected_session.id }}">
-                            <input type="hidden" name="payload" id="previewBulkPayload">
-                            <input type="hidden" name="remove_ids" id="previewBulkRemoveIds">
-                            <button class="btn btn-primary btn-sm" type="button" id="previewBulkSubmit">Update Preview Ranges</button>
-                            <span id="previewDirtyHint" class="small text-muted d-none">Pending changes</span>
-                        </form>
+                        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                            <form method="post" id="previewBulkForm" class="d-flex flex-wrap gap-2 align-items-center">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="bulk_update_preview_ranges">
+                                <input type="hidden" name="session_id" value="{{ selected_session.id }}">
+                                <input type="hidden" name="payload" id="previewBulkPayload">
+                                <input type="hidden" name="remove_ids" id="previewBulkRemoveIds">
+                                <button class="btn btn-primary btn-sm" type="button" id="previewBulkSubmit">Update Preview Ranges</button>
+                                <span id="previewDirtyHint" class="small text-muted d-none">Pending changes</span>
+                            </form>
+                            <form method="post" class="d-flex">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="finalize_all_seating_blocks">
+                                <input type="hidden" name="session_id" value="{{ selected_session.id }}">
+                                <button class="btn btn-success btn-sm" type="submit">Finalize Both Modes</button>
+                            </form>
+                        </div>
                         <div class="table-responsive">
                             <table class="table table-sm table-bordered align-middle">
                                 <thead>
@@ -398,6 +406,15 @@
                     <div class="grid-shell is-compact">
                         <div class="grid-head">
                             <div class="fw-semibold">Finalized Seating Blocks</div>
+                            <form method="get" class="d-flex gap-2 align-items-center">
+                                <input type="hidden" name="module_id" value="{{ module.id }}">
+                                <input type="hidden" name="test_name" value="{{ selected_session.test_name }}">
+                                <select name="block_view_mode" class="form-select form-select-sm">
+                                    <option value="offline" {% if selected_block_view_mode == "offline" %}selected{% endif %}>Offline</option>
+                                    <option value="online" {% if selected_block_view_mode == "online" %}selected{% endif %}>Online</option>
+                                </select>
+                                <button class="btn btn-outline-secondary btn-sm" type="submit">View</button>
+                            </form>
                             <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid">▸</button>
                         </div>
                         <div class="grid-body">
@@ -405,42 +422,42 @@
                         <table class="table table-sm table-bordered align-middle">
                             <thead>
                                 <tr>
-                                    <th>Block #</th>
-                                    <th>Dept</th>
-                                    <th>Mode</th>
-                                    <th>Block #</th>
-                                    <th>Room/Lab</th>
-                                    <th>Type</th>
+                                    <th style="width: 72px;">Block #</th>
+                                    <th style="width: 92px;">Dept</th>
+                                    <th style="width: 88px;">Mode</th>
+                                    <th style="width: 140px;">Branch</th>
+                                    <th style="width: 110px;">Room/Lab</th>
+                                    <th style="width: 90px;">Type</th>
                                     <th>Range</th>
-                                    <th>Students</th>
+                                    <th style="width: 86px;">Students</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for row in seating_block_rows %}
-                                <tr>
-                                    <td>{{ row.block.block_number|default:"-" }}</td>
-                                    <td>{{ row.block.dept_label|default:"-" }}</td>
-                                    <td>{{ row.block.get_delivery_mode_display }}</td>
-                                    <td>{{ row.block.block_number|default:"-" }}</td>
-                                    <td>
-                                        {% if row.block.delivery_mode == "offline" %}
-                                            {{ row.block.room|default:"-" }}
-                                        {% else %}
-                                            {{ row.block.lab|default:"-" }}
+                                    {% for branch_row in row.branch_detail_rows %}
+                                    <tr>
+                                        {% if forloop.first %}
+                                        <td rowspan="{{ row.branch_rowspan }}">{{ row.block.block_number|default:"-" }}</td>
+                                        <td rowspan="{{ row.branch_rowspan }}">{{ row.block.dept_label|default:"-" }}</td>
+                                        <td rowspan="{{ row.branch_rowspan }}">{{ row.block.get_delivery_mode_display }}</td>
                                         {% endif %}
-                                    </td>
-                                    <td>{{ row.block.get_block_type_display }}</td>
-                                    <td>
-                                        {% if row.block.block_type == "range" %}
-                                            {{ row.block.enrollment_start|default:"-" }} - {{ row.block.enrollment_end|default:"-" }}
-                                        {% elif row.block.block_type == "manual" %}
-                                            Manual
-                                        {% else %}
-                                            -
+                                        <td>{{ branch_row.label }}</td>
+                                        {% if forloop.first %}
+                                        <td rowspan="{{ row.branch_rowspan }}">
+                                            {% if row.block.delivery_mode == "offline" %}
+                                                {{ row.block.room|default:"-" }}
+                                            {% else %}
+                                                {{ row.block.lab|default:"-" }}
+                                            {% endif %}
+                                        </td>
+                                        <td rowspan="{{ row.branch_rowspan }}">{{ row.block.get_block_type_display }}</td>
                                         {% endif %}
-                                    </td>
-                                    <td>{{ row.student_count }}</td>
-                                </tr>
+                                        <td>{{ branch_row.range_display }}</td>
+                                        {% if forloop.first %}
+                                        <td rowspan="{{ row.branch_rowspan }}">{{ row.student_count }}</td>
+                                        {% endif %}
+                                    </tr>
+                                    {% endfor %}
                                 {% empty %}
                                 <tr><td colspan="8" class="text-muted">No seating blocks yet.</td></tr>
                                 {% endfor %}
@@ -478,45 +495,48 @@
                                         <thead class="table-light">
                                             <tr>
                                                 <th style="min-width: 220px;">Subject</th>
-                                                <th>Mapped Evaluators</th>
+                                                <th style="min-width: 180px;">Evaluator 1</th>
+                                                <th style="min-width: 180px;">Evaluator 2</th>
+                                                <th style="min-width: 180px;">Evaluator 3</th>
+                                                <th style="min-width: 180px;">Evaluator 4</th>
+                                                <th style="min-width: 180px;">Evaluator 5</th>
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {% for row in subject_evaluator_rows %}
-                                            <tr>
+                                            <tr class="js-subject-evaluator-row">
                                                 <td>
                                                     <div class="fw-semibold">{{ row.subject.name }}</div>
                                                     {% if row.subject.short_name %}
                                                     <div class="small text-muted">{{ row.subject.short_name }}</div>
                                                     {% endif %}
                                                 </td>
+                                                {% for selected_user_id in row.selected_slot_user_ids %}
                                                 <td>
-                                                    <div class="d-flex flex-wrap gap-2">
+                                                    <select
+                                                        name="subject_eval_{{ row.subject.id }}_{{ forloop.counter }}"
+                                                        class="form-select form-select-sm js-evaluator-slot"
+                                                        {% if forloop.first %}required{% endif %}
+                                                    >
+                                                        <option value="">{% if forloop.first %}Select evaluator{% else %}Optional{% endif %}</option>
                                                         {% for profile in profiles %}
-                                                        <label class="form-check border rounded px-2 py-1 small mb-0">
-                                                            <input
-                                                                class="form-check-input me-1"
-                                                                type="checkbox"
-                                                                name="subject_eval_{{ row.subject.id }}"
-                                                                value="{{ profile.user_id }}"
-                                                                {% if profile.user_id in row.selected_user_ids %}checked{% endif %}
-                                                            >
-                                                            <span class="form-check-label">
-                                                                {{ profile.short_code }}{% if profile.full_name %} - {{ profile.full_name }}{% endif %}
-                                                            </span>
-                                                        </label>
-                                                        {% empty %}
-                                                        <span class="text-muted">No evaluator faculty found yet.</span>
+                                                        <option value="{{ profile.user_id }}" {% if selected_user_id == profile.user_id %}selected{% endif %}>
+                                                            {{ profile.short_code }}{% if profile.full_name %} - {{ profile.full_name }}{% endif %}
+                                                        </option>
                                                         {% endfor %}
-                                                    </div>
+                                                    </select>
                                                 </td>
+                                                {% endfor %}
                                             </tr>
                                             {% empty %}
-                                            <tr><td colspan="2" class="text-muted">No active subjects found for this module.</td></tr>
+                                            <tr><td colspan="6" class="text-muted">No active subjects found for this module.</td></tr>
                                             {% endfor %}
                                         </tbody>
                                     </table>
                                 </div>
+                                {% if not profiles %}
+                                <div class="small text-muted mb-2">No faculty accounts are ready for evaluator mapping yet. Create one below.</div>
+                                {% endif %}
                                 <button class="btn btn-primary" type="submit">Save Evaluator Mapping</button>
                             </form>
 
@@ -671,7 +691,25 @@
                 <div class="col-md-2"><div class="border rounded p-2 small">Absent: <strong>{{ stats.absent_students }}</strong></div></div>
                 <div class="col-md-2"><div class="border rounded p-2 small">Fail: <strong>{{ stats.failed_students }}</strong></div></div>
                 <div class="col-md-2"><div class="border rounded p-2 small">Pending: <strong>{{ stats.pending_students }}</strong></div></div>
+                <div class="col-md-2"><div class="border rounded p-2 small">Blocks Done: <strong>{{ stats.completed_blocks }}</strong></div></div>
+                <div class="col-md-2"><div class="border rounded p-2 small">Blocks Pending: <strong>{{ stats.pending_blocks }}</strong></div></div>
             </div>
+
+            {% if card.completed_blocks %}
+            <div class="alert alert-success py-2 small">
+                Completed blocks:
+                {% for row in card.completed_blocks %}
+                    <span class="me-2">Block {{ row.block.block_number|default:row.block.id }} by {{ row.block.evaluator.username }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if can_manage_exam %}
+            <div class="d-flex flex-wrap gap-2 mb-3">
+                <a class="btn btn-sm btn-outline-success" href="/exam-section/export/{{ entry.id }}/excel/">Compiled Excel</a>
+                <a class="btn btn-sm btn-outline-danger" href="/exam-section/export/{{ entry.id }}/pdf/">Compiled PDF</a>
+            </div>
+            {% endif %}
 
             {% if can_manage_exam %}
             <form method="post" class="row g-2 mb-3">
@@ -751,12 +789,15 @@
                             <th>Room/Lab</th>
                             <th>Evaluator</th>
                             <th>Students</th>
+                            <th>Done</th>
+                            <th>Pending</th>
                             <th>Type</th>
                             <th>Action</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for block in blocks %}
+                        {% for status_row in card.block_status_rows %}
+                        {% with block=status_row.block %}
                         <tr>
                             <td>{{ block.name }}</td>
                             <td>{{ block.get_delivery_mode_display }}</td>
@@ -770,11 +811,14 @@
                             </td>
                             <td>{{ block.evaluator.username }}</td>
                             <td>{{ block.student_links.count }}</td>
+                            <td>{{ status_row.completed_count }}</td>
+                            <td>{{ status_row.stats.pending }}</td>
                             <td>{{ block.get_block_type_display }}</td>
                             <td><a class="btn btn-sm btn-outline-dark" href="/exam-section/marks/{{ block.id }}/">Open</a></td>
                         </tr>
+                        {% endwith %}
                         {% empty %}
-                        <tr><td colspan="8" class="text-muted">No evaluator blocks yet.</td></tr>
+                        <tr><td colspan="10" class="text-muted">No evaluator blocks yet.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -1105,5 +1149,29 @@ const previewBulkSubmit = document.getElementById('previewBulkSubmit');
                 document.getElementById('previewBulkForm').submit();
             });
         }
+
+document.querySelectorAll('.js-subject-evaluator-row').forEach((row) => {
+    const selects = Array.from(row.querySelectorAll('.js-evaluator-slot'));
+    const refreshEvaluatorOptions = () => {
+        const selectedValues = selects.map((select) => select.value).filter(Boolean);
+        selects.forEach((select) => {
+            const current = select.value;
+            Array.from(select.options).forEach((option) => {
+                if (!option.value) {
+                    option.hidden = false;
+                    option.disabled = false;
+                    return;
+                }
+                const usedElsewhere = selectedValues.includes(option.value) && option.value !== current;
+                option.hidden = usedElsewhere;
+                option.disabled = usedElsewhere;
+            });
+        });
+    };
+    selects.forEach((select) => {
+        select.addEventListener('change', refreshEvaluatorOptions);
+    });
+    refreshEvaluatorOptions();
+});
 </script>
 {% endblock %}

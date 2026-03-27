@@ -2,21 +2,28 @@ from datetime import datetime
 import json
 from decimal import Decimal
 from math import ceil
+from io import BytesIO
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.db.models import Count, Q
-from django.http import HttpResponseForbidden
+from django.http import HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
+from openpyxl import Workbook
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import SimpleDocTemplate, Spacer, Table, TableStyle, Paragraph
 
 from .access import can_manage_module, modules_for_user
 from .exam_access import can_enter_exam_block, can_manage_exam_module, exam_modules_for_user, has_exam_section_access
 from .exam_services import (
     build_block_students,
     can_edit_entry_now,
+    compiled_rows_for_entry,
     entry_opens_at,
     exam_phase_defaults,
     exam_stats_for_block,
@@ -66,34 +73,46 @@ def _selected_exam_module(request):
 def _module_faculty_directory(module):
     if not module:
         return [], [], []
-    year_modules = AcademicModule.objects.filter(is_active=True)
-    if module.year_scope_id:
-        year_modules = year_modules.filter(year_scope=module.year_scope)
-    else:
-        year_modules = year_modules.filter(id=module.id)
-    faculty_names = sorted(
-        {
-            (name or "").strip().upper()
-            for name in TimetableEntry.objects.filter(module__in=year_modules, is_active=True).values_list("faculty", flat=True)
-            if (name or "").strip()
-        }
-    )
-    mentors = list(
-        Mentor.objects.filter(
-            Q(name__in=faculty_names)
-            | Q(student__module__in=year_modules)
-            | Q(module_accesses__module__in=year_modules)
+
+    mentors = list(Mentor.objects.order_by("full_name", "name"))
+    mentor_name_map = {(mentor.name or "").strip().lower(): mentor for mentor in mentors if (mentor.name or "").strip()}
+    matching_users = {
+        user.username.lower(): user
+        for user in User.objects.filter(username__in=list(mentor_name_map.keys())).order_by("username")
+    }
+
+    auto_create_profiles = []
+    used_short_codes = set(ExamFacultyProfile.objects.values_list("short_code", flat=True))
+    for username, mentor in mentor_name_map.items():
+        if hasattr(mentor, "exam_faculty_profile"):
+            continue
+        user = matching_users.get(username)
+        short_code = (mentor.name or "").strip().upper()
+        if not user or not short_code or short_code in used_short_codes:
+            continue
+        auto_create_profiles.append(
+            ExamFacultyProfile(
+                user=user,
+                mentor=mentor,
+                short_code=short_code,
+                full_name=(mentor.full_name or "").strip(),
+            )
         )
-        .distinct()
-        .order_by("name")
-    )
+        used_short_codes.add(short_code)
+    if auto_create_profiles:
+        ExamFacultyProfile.objects.bulk_create(auto_create_profiles, ignore_conflicts=True)
+
     profiles = list(
-        ExamFacultyProfile.objects.filter(Q(mentor__in=mentors) | Q(short_code__in=faculty_names))
+        ExamFacultyProfile.objects.filter(is_active=True)
         .select_related("user", "mentor")
-        .order_by("short_code")
+        .order_by("full_name", "short_code")
     )
-    profile_codes = {profile.short_code for profile in profiles}
-    unregistered_names = [name for name in faculty_names if name not in profile_codes]
+    profile_mentor_ids = {profile.mentor_id for profile in profiles if profile.mentor_id}
+    unregistered_names = [
+        (mentor.full_name or mentor.name or "").strip()
+        for mentor in mentors
+        if mentor.id not in profile_mentor_ids
+    ]
     return mentors, profiles, unregistered_names
 
 
@@ -173,6 +192,196 @@ def _branch_count_summary(students, module):
     return summary_rows, display
 
 
+def _branch_detail_rows(students, module):
+    grouped = {}
+    for student in students:
+        label = _infer_branch_label(student, module)
+        grouped.setdefault(label, []).append(student)
+
+    detail_rows = []
+    for branch in sorted(grouped):
+        branch_students = grouped[branch]
+        enrollments = sorted(
+            [(getattr(student, "enrollment", "") or "").strip() for student in branch_students if (getattr(student, "enrollment", "") or "").strip()]
+        )
+        if enrollments:
+            range_display = f"{enrollments[0]} - {enrollments[-1]}"
+        else:
+            range_display = "-"
+        detail_rows.append(
+            {
+                "branch": branch,
+                "count": len(branch_students),
+                "label": f"{branch}-{len(branch_students):02d}",
+                "range_display": range_display,
+            }
+        )
+    return detail_rows
+
+
+def _subject_code_for_entry(entry):
+    short_name = (entry.subject.short_name or "").strip()
+    if short_name:
+        return short_name
+    return ""
+
+
+def _subject_faculty_names(entry):
+    names = sorted(
+        {
+            (faculty or "").strip()
+            for faculty in TimetableEntry.objects.filter(module=entry.session.module, subject__iexact=entry.subject.name, is_active=True)
+            .values_list("faculty", flat=True)
+            if (faculty or "").strip()
+        }
+    )
+    return ", ".join(names)
+
+
+def _entry_compiled_header(entry, module):
+    college_name = ""
+    if getattr(module, "year_scope_id", None) and getattr(module.year_scope, "college_id", None):
+        college_name = (module.year_scope.college.name or "").upper()
+    if not college_name:
+        college_name = "L J INSTITUTE OF ENGINEERING AND TECHNOLOGY, AHMEDABAD"
+    batch_line = module.name
+    year_line = f"Engineering Students Result_{module.semester}-{module.academic_batch}"
+    subject_line = entry.subject.name
+    code_line = _subject_code_for_entry(entry)
+    faculty_line = _subject_faculty_names(entry)
+    current_total_label = f"Marks (/{entry.max_marks})"
+    cumulative_total = "100"
+    if entry.session.test_name == "T1":
+        cumulative_total = "25"
+    elif entry.session.test_name == "T2":
+        cumulative_total = "50"
+    elif entry.session.test_name == "T3":
+        cumulative_total = "75"
+    return {
+        "college_name": college_name,
+        "batch_line": batch_line,
+        "year_line": year_line,
+        "subject_line": subject_line,
+        "code_line": code_line,
+        "faculty_line": faculty_line,
+        "current_total_label": current_total_label,
+        "cumulative_label": f"Cummulative(/ {cumulative_total})",
+    }
+
+
+def _entry_block_statuses(entry):
+    rows = []
+    for block in entry.blocks.select_related("evaluator").order_by("delivery_mode", "block_number", "id"):
+        stats = exam_stats_for_block(block)
+        is_done = stats["total"] > 0 and stats["pending"] == 0
+        rows.append(
+            {
+                "block": block,
+                "stats": stats,
+                "is_done": is_done,
+                "completed_count": max(stats["total"] - stats["pending"], 0),
+            }
+        )
+    return rows
+
+
+def _render_entry_compiled_excel(entry):
+    rows = compiled_rows_for_entry(entry)
+    meta = _entry_compiled_header(entry, entry.session.module)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Compiled"
+    ws.append([meta["college_name"]])
+    ws.append([meta["batch_line"]])
+    ws.append([meta["year_line"]])
+    ws.append([f"Subject Name : {meta['subject_line']}"])
+    ws.append([f"Subject Code : {meta['code_line']}"])
+    ws.append([f"Name of Subject Faculty (For All Division) : {meta['faculty_line']}"])
+    ws.append([])
+    ws.append([
+        "Sr No",
+        "Branch",
+        "ENROLLMENT NO",
+        "NAME OF STUDENT",
+        "Roll No",
+        "Div",
+        "Short Name of Mentor",
+        meta["current_total_label"],
+        meta["cumulative_label"],
+    ])
+    for row in rows:
+        ws.append([
+            row["sr_no"],
+            row["branch"],
+            row["enrollment"],
+            row["name"],
+            row["roll_no"],
+            row["division"],
+            row["mentor_short_name"],
+            row["marks_display"],
+            row["cumulative_display"],
+        ])
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    response["Content-Disposition"] = f'attachment; filename="compiled_{entry.session.test_name}_{entry.subject.name}.xlsx"'
+    wb.save(response)
+    return response
+
+
+def _render_entry_compiled_pdf(entry):
+    rows = compiled_rows_for_entry(entry)
+    meta = _entry_compiled_header(entry, entry.session.module)
+    response = HttpResponse(content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="compiled_{entry.session.test_name}_{entry.subject.name}.pdf"'
+    doc = SimpleDocTemplate(response, pagesize=landscape(A4), leftMargin=12, rightMargin=12, topMargin=12, bottomMargin=12)
+    styles = getSampleStyleSheet()
+    story = [
+        Paragraph(meta["college_name"], styles["Heading3"]),
+        Paragraph(meta["batch_line"], styles["BodyText"]),
+        Paragraph(meta["year_line"], styles["BodyText"]),
+        Spacer(1, 6),
+        Paragraph(f"Subject Name : {meta['subject_line']}", styles["BodyText"]),
+        Paragraph(f"Subject Code : {meta['code_line']}", styles["BodyText"]),
+        Paragraph(f"Name of Subject Faculty (For All Division) : {meta['faculty_line']}", styles["BodyText"]),
+        Spacer(1, 10),
+    ]
+    table_data = [[
+        "Sr No",
+        "Branch",
+        "ENROLLMENT NO",
+        "NAME OF STUDENT",
+        "Roll No",
+        "Div",
+        "Short Name of Mentor",
+        meta["current_total_label"],
+        meta["cumulative_label"],
+    ]]
+    for row in rows:
+        table_data.append([
+            row["sr_no"],
+            row["branch"],
+            row["enrollment"],
+            row["name"],
+            row["roll_no"] or "",
+            row["division"],
+            row["mentor_short_name"],
+            row["marks_display"],
+            row["cumulative_display"],
+        ])
+    table = Table(table_data, repeatRows=1, colWidths=[40, 60, 95, 170, 45, 45, 80, 70, 85])
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    story.append(table)
+    doc.build(story)
+    return response
+
+
 @login_required
 @require_http_methods(["GET", "POST"])
 def exam_section(request):
@@ -197,6 +406,7 @@ def exam_section(request):
             "copy_seating_blocks",
             "shift_preview_block",
             "bulk_update_preview_ranges",
+            "finalize_all_seating_blocks",
             "assign_block",
             "lock_entry",
             "unlock_entry",
@@ -269,13 +479,22 @@ def exam_section(request):
             )
             ExamSubjectEvaluator.objects.filter(session=session).delete()
             creates = []
-            saved_count = 0
+            validation_failed = False
             for subject_id in subject_ids:
-                selected_ids = [
-                    int(value)
-                    for value in request.POST.getlist(f"subject_eval_{subject_id}")
-                    if str(value).isdigit() and int(value) in allowed_evaluator_ids
-                ]
+                selected_ids = []
+                seen = set()
+                for slot in range(1, 6):
+                    value = (request.POST.get(f"subject_eval_{subject_id}_{slot}") or "").strip()
+                    if not value.isdigit():
+                        continue
+                    evaluator_id = int(value)
+                    if evaluator_id not in allowed_evaluator_ids or evaluator_id in seen:
+                        continue
+                    selected_ids.append(evaluator_id)
+                    seen.add(evaluator_id)
+                if not selected_ids:
+                    validation_failed = True
+                    break
                 for evaluator_id in selected_ids:
                     creates.append(
                         ExamSubjectEvaluator(
@@ -285,7 +504,9 @@ def exam_section(request):
                             assigned_by=request.user,
                         )
                     )
-                    saved_count += 1
+            if validation_failed:
+                messages.error(request, "Map at least one evaluator for every subject.")
+                return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#evaluator-management")
             if creates:
                 ExamSubjectEvaluator.objects.bulk_create(creates, ignore_conflicts=True)
             messages.success(request, f"Saved evaluator mapping for {session.test_name}.")
@@ -706,6 +927,21 @@ def exam_section(request):
             messages.success(request, "Seating blocks finalized.")
             return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#seating-blocks")
 
+        if action == "finalize_all_seating_blocks":
+            session = ModuleExamSession.objects.filter(id=request.POST.get("session_id"), module=module).first()
+            if not session:
+                messages.error(request, "Select a valid exam session.")
+                return redirect(f"/exam-section/?module_id={module.id}")
+            preview_qs = ExamSeatingBlock.objects.filter(session=session, is_preview=True)
+            if not preview_qs.exists():
+                messages.error(request, "No preview blocks to finalize.")
+                return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#seating-blocks")
+            for mode in preview_qs.values_list("delivery_mode", flat=True).distinct():
+                ExamSeatingBlock.objects.filter(session=session, delivery_mode=mode, is_preview=False).delete()
+            preview_qs.update(is_preview=False)
+            messages.success(request, "Offline and online preview blocks finalized.")
+            return redirect(f"/exam-section/?module_id={module.id}&test_name={session.test_name}#seating-blocks")
+
         if action == "discard_seating_preview":
             session = ModuleExamSession.objects.filter(id=request.POST.get("session_id"), module=module).first()
             delivery_mode = (request.POST.get("delivery_mode") or "").strip()
@@ -914,16 +1150,15 @@ def exam_section(request):
         for link in subject_links:
             session_subject_evaluator_map.setdefault(link.subject_id, []).append(link.evaluator_id)
         for subject in selected_subjects:
-            selected_profiles = [
-                profile_by_user_id[user_id]
-                for user_id in session_subject_evaluator_map.get(subject.id, [])
-                if user_id in profile_by_user_id
-            ]
+            selected_user_ids = [user_id for user_id in session_subject_evaluator_map.get(subject.id, []) if user_id in profile_by_user_id][:5]
+            selected_profiles = [profile_by_user_id[user_id] for user_id in selected_user_ids]
+            selected_slot_user_ids = [str(user_id) for user_id in selected_user_ids] + [""] * max(0, 5 - len(selected_user_ids))
             subject_evaluator_rows.append(
                 {
                     "subject": subject,
-                    "selected_user_ids": set(session_subject_evaluator_map.get(subject.id, [])),
+                    "selected_user_ids": set(selected_user_ids),
                     "selected_profiles": selected_profiles,
+                    "selected_slot_user_ids": selected_slot_user_ids,
                 }
             )
     enrollment_choices = []
@@ -952,6 +1187,7 @@ def exam_section(request):
     seating_blocks = []
     seating_block_rows = []
     preview_block_rows = []
+    selected_block_view_mode = (request.GET.get("block_view_mode") or "").strip().lower()
     next_block_number = 1
     next_enrollment_start = ""
     next_enrollment_end = ""
@@ -999,14 +1235,26 @@ def exam_section(request):
                 manual_student_ids=manual_ids,
             )
             branch_rows, branch_display = _branch_count_summary(students, selected_session.module)
+            branch_detail_rows = _branch_detail_rows(students, selected_session.module) or [
+                {"branch": "-", "count": 0, "label": "-", "range_display": "-"}
+            ]
             seating_block_rows.append(
                 {
                     "block": block,
                     "student_count": len(students),
                     "branch_rows": branch_rows,
                     "branch_display": branch_display,
+                    "branch_detail_rows": branch_detail_rows,
+                    "branch_rowspan": len(branch_detail_rows),
                 }
             )
+        available_final_modes = sorted({row["block"].delivery_mode for row in seating_block_rows})
+        if selected_block_view_mode not in available_final_modes:
+            selected_block_view_mode = available_final_modes[0] if available_final_modes else ""
+        if selected_block_view_mode:
+            seating_block_rows = [
+                row for row in seating_block_rows if row["block"].delivery_mode == selected_block_view_mode
+            ]
         for block in preview_blocks:
             manual_ids = []
             manual_enrollments = [
@@ -1072,6 +1320,7 @@ def exam_section(request):
             for user_id in session_subject_evaluator_map.get(entry.subject_id, [])
             if user_id in profile_by_user_id
         ]
+        block_status_rows = _entry_block_statuses(entry)
         total_students = ExamBlockStudent.objects.filter(block__timetable_entry=entry).count()
         entered_students = ExamMarkEntry.objects.filter(timetable_entry=entry).values("student_id").distinct().count()
         absent_students = ExamMarkEntry.objects.filter(timetable_entry=entry, is_absent=True).count()
@@ -1080,17 +1329,24 @@ def exam_section(request):
             is_absent=False,
             marks_obtained__lt=entry.pass_marks,
         ).count()
+        completed_blocks = [row for row in block_status_rows if row["is_done"]]
+        pending_blocks = [row for row in block_status_rows if not row["is_done"]]
         entry_cards.append(
             {
                 "entry": entry,
                 "blocks": blocks,
                 "allowed_evaluators": allowed_profiles,
+                "block_status_rows": block_status_rows,
+                "completed_blocks": completed_blocks,
+                "pending_blocks": pending_blocks,
                 "stats": {
                     "total_students": total_students,
                     "entered_students": entered_students,
                     "absent_students": absent_students,
                     "failed_students": failed_students,
                     "pending_students": max(total_students - entered_students, 0),
+                    "completed_blocks": len(completed_blocks),
+                    "pending_blocks": len(pending_blocks),
                     "opens_at": entry_opens_at(entry),
                 },
             }
@@ -1118,6 +1374,7 @@ def exam_section(request):
             "seating_blocks": seating_blocks,
             "seating_block_rows": seating_block_rows,
             "preview_block_rows": preview_block_rows,
+            "selected_block_view_mode": selected_block_view_mode,
             "enrollment_choices": enrollment_choices,
             "dept_label_default": dept_label_default,
             "next_block_number": next_block_number,
@@ -1238,7 +1495,11 @@ def exam_marks_entry(request, block_id):
                     "is_absent": is_absent,
                 },
             )
-        messages.success(request, "Marks saved.")
+        block_stats = exam_stats_for_block(block)
+        if block_stats["total"] and block_stats["pending"] == 0:
+            messages.success(request, f"Block no. {block.block_number or block.id} marks entry done.")
+        else:
+            messages.success(request, "Marks saved.")
         return redirect(f"/exam-section/marks/{block.id}/")
 
     student_links = list(block.student_links.select_related("student", "student__mentor").order_by("student__roll_no", "student__name"))
@@ -1246,8 +1507,13 @@ def exam_marks_entry(request, block_id):
         row.student_id: row
         for row in ExamMarkEntry.objects.filter(block=block).select_related("student")
     }
-    mark_rows = [{"link": link, "mark": marks_map.get(link.student_id)} for link in student_links]
+    compiled_rows_map = {row["enrollment"]: row for row in compiled_rows_for_entry(block.timetable_entry)}
+    mark_rows = [
+        {"link": link, "mark": marks_map.get(link.student_id), "compiled": compiled_rows_map.get(link.student.enrollment, {})}
+        for link in student_links
+    ]
     stats = exam_stats_for_block(block)
+    entry_header = _entry_compiled_header(block.timetable_entry, block.timetable_entry.session.module)
     return render(
         request,
         "exam_marks_entry.html",
@@ -1255,8 +1521,25 @@ def exam_marks_entry(request, block_id):
             "block": block,
             "mark_rows": mark_rows,
             "entry": block.timetable_entry,
+            "entry_header": entry_header,
             "editable": editable and can_edit_now,
             "edit_message": "" if editable and can_edit_now else edit_message,
             "stats": stats,
         },
     )
+
+
+@login_required
+@require_http_methods(["GET"])
+def exam_compiled_export(request, entry_id, export_format):
+    entry = get_object_or_404(
+        ExamTimetableEntry.objects.select_related("session", "session__module", "subject"),
+        id=entry_id,
+    )
+    if not (can_manage_module(request.user, entry.session.module) or can_manage_exam_module(request.user, entry.session.module)):
+        return HttpResponseForbidden("Unauthorized")
+    if export_format == "excel":
+        return _render_entry_compiled_excel(entry)
+    if export_format == "pdf":
+        return _render_entry_compiled_pdf(entry)
+    return HttpResponseForbidden("Invalid export format")
