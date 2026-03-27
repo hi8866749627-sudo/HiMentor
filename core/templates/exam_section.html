@@ -121,44 +121,58 @@
         <div class="col-lg-4">
             <div class="card shadow-sm h-100">
                 <div class="card-body">
-                    <h5 class="card-title">Create Exam</h5>
-                    <form method="post" class="d-grid gap-2">
-                        {% csrf_token %}
-                        <input type="hidden" name="action" value="create_session">
-                        <select name="test_name" class="form-select" required>
-                            <option value="">Select exam</option>
-                            <option value="T1">T1</option>
-                            <option value="T2">T2</option>
-                            <option value="T3">T3</option>
-                            <option value="T4">T4</option>
-                        </select>
-                        <input name="title" class="form-control" placeholder="Optional title">
-                        <button class="btn btn-primary" type="submit">Save Exam</button>
-                    </form>
+                    <div class="grid-shell is-compact">
+                        <div class="grid-head">
+                            <div class="fw-semibold">Create Exam</div>
+                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid"><span class="grid-toggle-icon"></span></button>
+                        </div>
+                        <div class="grid-body">
+                            <form method="post" class="d-grid gap-2">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="create_session">
+                                <select name="test_name" class="form-select" required>
+                                    <option value="">Select exam</option>
+                                    <option value="T1">T1</option>
+                                    <option value="T2">T2</option>
+                                    <option value="T3">T3</option>
+                                    <option value="T4">T4</option>
+                                </select>
+                                <input name="title" class="form-control" placeholder="Optional title">
+                                <button class="btn btn-primary" type="submit">Save Exam</button>
+                            </form>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
         <div class="col-lg-4">
             <div class="card shadow-sm h-100">
                 <div class="card-body">
-                    <h5 class="card-title">Assign Exam Manager</h5>
-                    <form method="post" class="d-grid gap-2">
-                        {% csrf_token %}
-                        <input type="hidden" name="action" value="assign_manager">
-                        <select name="manager_user_id" class="form-select" required>
-                            <option value="">Select faculty</option>
-                            {% for user in manager_candidates %}
-                            <option value="{{ user.id }}">{{ user.label }}</option>
-                            {% endfor %}
-                        </select>
-                        <button class="btn btn-outline-primary" type="submit">Assign</button>
-                    </form>
-                    <div class="small text-muted mt-2">
-                        {% for manager in module_managers %}
-                        <span class="badge bg-secondary">{{ manager.user.username }}</span>
-                        {% empty %}
-                        No extra exam managers yet.
-                        {% endfor %}
+                    <div class="grid-shell is-compact">
+                        <div class="grid-head">
+                            <div class="fw-semibold">Assign Exam Manager</div>
+                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid"><span class="grid-toggle-icon"></span></button>
+                        </div>
+                        <div class="grid-body">
+                            <form method="post" class="d-grid gap-2">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="assign_manager">
+                                <select name="manager_user_id" class="form-select" required>
+                                    <option value="">Select faculty</option>
+                                    {% for user in manager_candidates %}
+                                    <option value="{{ user.id }}">{{ user.label }}</option>
+                                    {% endfor %}
+                                </select>
+                                <button class="btn btn-outline-primary" type="submit">Assign</button>
+                            </form>
+                            <div class="small text-muted mt-2">
+                                {% for manager in module_managers %}
+                                <span class="badge bg-secondary">{{ manager.user.username }}</span>
+                                {% empty %}
+                                No extra exam managers yet.
+                                {% endfor %}
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -166,24 +180,31 @@
         <div class="col-lg-4" id="faculty-directory">
             <div class="card shadow-sm h-100">
                 <div class="card-body">
-                    <h5 class="card-title">Create Faculty Login</h5>
-                    <form method="post" class="d-grid gap-2">
-                        {% csrf_token %}
-                        <input type="hidden" name="action" value="create_faculty_account">
-                        <input name="short_code" class="form-control" placeholder="3-letter short code" required>
-                        <input name="full_name" class="form-control" placeholder="Full name">
-                        <input name="email" class="form-control" placeholder="Email (optional)">
-                        <input name="password" type="text" class="form-control" placeholder="Password" required>
-                        <button class="btn btn-outline-dark" type="submit">Create Faculty</button>
-                    </form>
-                    <div class="mt-2 small text-muted">
-                        Existing year faculty:
-                        {% for profile in profiles %}
-                        <span class="badge bg-light text-dark border">{{ profile.short_code }}</span>
-                        {% endfor %}
-                        {% for name in unregistered_names %}
-                        <span class="badge text-bg-warning">{{ name }}</span>
-                        {% endfor %}
+                    <div class="grid-shell is-compact">
+                        <div class="grid-head">
+                            <div class="fw-semibold">Create Faculty Login</div>
+                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid"><span class="grid-toggle-icon"></span></button>
+                        </div>
+                        <div class="grid-body">
+                            <form method="post" class="d-grid gap-2">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="create_faculty_account">
+                                <input name="short_code" class="form-control" placeholder="3-letter short code" required>
+                                <input name="full_name" class="form-control" placeholder="Full name">
+                                <input name="email" class="form-control" placeholder="Email (optional)">
+                                <input name="password" type="text" class="form-control" placeholder="Password" required>
+                                <button class="btn btn-outline-dark" type="submit">Create Faculty</button>
+                            </form>
+                            <div class="mt-2 small text-muted">
+                                Existing year faculty:
+                                {% for profile in profiles %}
+                                <span class="badge bg-light text-dark border">{{ profile.short_code }}</span>
+                                {% endfor %}
+                                {% for name in unregistered_names %}
+                                <span class="badge text-bg-warning">{{ name }}</span>
+                                {% endfor %}
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -243,7 +264,7 @@
                                     {% endfor %}
                                 </div>
                             </div>
-                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid">▸</button>
+                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid"><span class="grid-toggle-icon"></span></button>
                         </div>
                         <div class="grid-body">
                         <form method="post" class="row g-2 align-items-end">
@@ -289,7 +310,7 @@
                     <div class="grid-shell is-compact mb-3">
                         <div class="grid-head">
                             <div class="fw-semibold">Create Seating Block Manually</div>
-                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid">▸</button>
+                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid"><span class="grid-toggle-icon"></span></button>
                         </div>
                         <div class="grid-body">
                     <form method="post" class="row g-2 mb-0">
@@ -341,7 +362,7 @@
                     <div class="grid-shell is-compact mb-3">
                         <div class="grid-head">
                             <div class="fw-semibold">Preview Blocks (Edit then Finalize)</div>
-                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid">▸</button>
+                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid"><span class="grid-toggle-icon"></span></button>
                         </div>
                         <div class="grid-body">
                         {{ enrollment_choices|json_script:"previewEnrollmentChoices" }}
@@ -459,7 +480,7 @@
                                 </select>
                                 <button class="btn btn-outline-secondary btn-sm" type="submit">View</button>
                             </form>
-                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid">▸</button>
+                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid"><span class="grid-toggle-icon"></span></button>
                         </div>
                         <div class="grid-body">
                     <div class="table-responsive">
@@ -527,7 +548,7 @@
                                 <div class="fw-semibold">Evaluator Management</div>
                                 <div class="small text-muted">Map one or more evaluators to each subject for {{ selected_session.test_name }}.</div>
                             </div>
-                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid">â–¸</button>
+                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid"><span class="grid-toggle-icon"></span></button>
                         </div>
                         <div class="grid-body">
                             <form method="post" class="mb-3">
@@ -579,7 +600,7 @@
                                     </table>
                                 </div>
                                 {% if not profiles %}
-                                <div class="small text-muted mb-2">No faculty accounts are ready for evaluator mapping yet. Create one below.</div>
+                                <div class="small text-muted mb-2">No evaluator profiles are ready yet. Use the form below to add one.</div>
                                 {% endif %}
                                 {{ evaluator_search_options|json_script:"evaluatorSearchOptions" }}
                                 <button class="btn btn-primary" type="submit">Save Evaluator Mapping</button>
@@ -633,7 +654,7 @@
                         <div class="grid-shell is-compact">
                             <div class="grid-head">
                                 <div class="fw-semibold">Create Subject Timetable</div>
-                                <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid">▸</button>
+                                <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid"><span class="grid-toggle-icon"></span></button>
                             </div>
                             <div class="grid-body">
                         <div class="table-responsive">
@@ -725,7 +746,7 @@
                     {% if entry.published_upload %}
                     <a class="btn btn-sm btn-outline-secondary" href="/view-results/?test={{ entry.session.test_name }}&subject={{ entry.subject.id }}">View Published</a>
                     {% endif %}
-                    <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid">▸</button>
+                    <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid"><span class="grid-toggle-icon"></span></button>
                 </div>
             </div>
             <div class="subject-entry-shell is-compact">
@@ -821,7 +842,7 @@
             <div class="grid-shell is-compact">
                 <div class="grid-head">
                     <div class="fw-semibold">Assigned Evaluator Blocks</div>
-                    <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid">▸</button>
+                    <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid"><span class="grid-toggle-icon"></span></button>
                 </div>
                 <div class="grid-body">
             <div class="table-responsive">
@@ -944,14 +965,13 @@
     }
 })();
 
-document.querySelectorAll('.js-grid-toggle').forEach((btn) => {
-    btn.addEventListener('click', () => {
-        const shell = btn.closest('.grid-shell, .subject-entry-shell');
-        if (!shell) return;
-        shell.classList.toggle('is-compact');
-        btn.textContent = shell.classList.contains('is-compact') ? '▸' : '▾';
-    });
-});
+const resolveToggleShell = (btn) => {
+    const directShell = btn.closest('.grid-shell, .subject-entry-shell');
+    if (directShell) return directShell;
+    const card = btn.closest('.card, .card-body');
+    if (!card) return null;
+    return card.querySelector('.subject-entry-shell, .grid-shell');
+};
 
 const previewEnrollmentChoices = (() => {
     const el = document.getElementById('previewEnrollmentChoices');
@@ -1289,7 +1309,7 @@ document.querySelectorAll('.js-subject-evaluator-row').forEach((row) => {
 
 const syncExamGridToggleIcons = () => {
     document.querySelectorAll('.js-grid-toggle').forEach((btn) => {
-        const shell = btn.closest('.grid-shell, .subject-entry-shell');
+        const shell = resolveToggleShell(btn);
         if (!shell) return;
         const isCompact = shell.classList.contains('is-compact');
         btn.innerHTML = `<span class="grid-toggle-icon">${isCompact ? '▸' : '▾'}</span>`;
@@ -1299,7 +1319,10 @@ const syncExamGridToggleIcons = () => {
 syncExamGridToggleIcons();
 document.querySelectorAll('.js-grid-toggle').forEach((btn) => {
     btn.addEventListener('click', () => {
-        window.setTimeout(syncExamGridToggleIcons, 0);
+        const shell = resolveToggleShell(btn);
+        if (!shell) return;
+        shell.classList.toggle('is-compact');
+        syncExamGridToggleIcons();
     });
 });
 </script>

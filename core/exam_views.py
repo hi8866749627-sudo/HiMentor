@@ -43,6 +43,7 @@ from .models import (
     ExamSubjectEvaluator,
     ExamTimetableEntry,
     Mentor,
+    MentorPassword,
     ModuleExamManager,
     ModuleExamSession,
     Student,
@@ -81,6 +82,10 @@ def _module_faculty_directory(module):
         user.username.lower(): user
         for user in User.objects.filter(username__in=list(mentor_name_map.keys())).order_by("username")
     }
+    mentor_passwords = {
+        credential.mentor_id: credential
+        for credential in MentorPassword.objects.filter(mentor__in=mentors).select_related("mentor")
+    }
 
     auto_create_profiles = []
     used_short_codes = set(ExamFacultyProfile.objects.values_list("short_code", flat=True))
@@ -88,6 +93,31 @@ def _module_faculty_directory(module):
         if hasattr(mentor, "exam_faculty_profile"):
             continue
         user = matching_users.get(username)
+        if not user:
+            password_credential = mentor_passwords.get(mentor.id)
+            if password_credential:
+                user = User.objects.create(
+                    username=username,
+                    email=(mentor.email or "").strip(),
+                    first_name=(mentor.full_name or "").strip(),
+                    is_active=True,
+                    is_staff=False,
+                    is_superuser=False,
+                    password=password_credential.password_hash,
+                )
+                matching_users[username] = user
+            else:
+                user = User.objects.create(
+                    username=username,
+                    email=(mentor.email or "").strip(),
+                    first_name=(mentor.full_name or "").strip(),
+                    is_active=True,
+                    is_staff=False,
+                    is_superuser=False,
+                )
+                user.set_unusable_password()
+                user.save(update_fields=["password"])
+                matching_users[username] = user
         short_code = (mentor.name or "").strip().upper()
         if not user or not short_code or short_code in used_short_codes:
             continue
@@ -466,18 +496,42 @@ def exam_section(request):
                 messages.error(request, "Enter a valid short code.")
             elif not password:
                 messages.error(request, "Password is required.")
-            elif ExamFacultyProfile.objects.filter(short_code=short_code).exists():
-                messages.error(request, "Short code already exists.")
-            elif User.objects.filter(username__iexact=short_code.lower()).exists():
-                messages.error(request, "Username already exists.")
             else:
-                user = User.objects.create_user(username=short_code.lower(), password=password, email=email, is_active=True)
                 mentor, _ = Mentor.objects.get_or_create(name=short_code, defaults={"full_name": full_name, "faculty_type": "Faculty"})
+                mentor_changed = False
                 if full_name and mentor.full_name != full_name:
                     mentor.full_name = full_name
-                    mentor.save(update_fields=["full_name", "updated_at"])
-                ExamFacultyProfile.objects.create(user=user, mentor=mentor, short_code=short_code, full_name=full_name or mentor.full_name)
-                messages.success(request, f"Faculty account created. Username: {user.username}")
+                    mentor_changed = True
+                if email and mentor.email != email:
+                    mentor.email = email
+                    mentor_changed = True
+                if mentor_changed:
+                    mentor.save(update_fields=["full_name", "email", "updated_at"])
+
+                profile = ExamFacultyProfile.objects.filter(short_code=short_code).select_related("user", "mentor").first()
+                user = User.objects.filter(username__iexact=short_code.lower()).first()
+
+                if profile and not user:
+                    user = profile.user
+                if not user:
+                    user = User.objects.create_user(username=short_code.lower(), password=password, email=email, is_active=True)
+                else:
+                    user.email = email or user.email
+                    user.first_name = full_name or user.first_name
+                    user.is_active = True
+                    user.set_password(password)
+                    user.save(update_fields=["email", "first_name", "is_active", "password"])
+
+                if profile:
+                    profile.user = user
+                    profile.mentor = mentor
+                    profile.full_name = full_name or mentor.full_name
+                    profile.is_active = True
+                    profile.save(update_fields=["user", "mentor", "full_name", "is_active"])
+                else:
+                    ExamFacultyProfile.objects.create(user=user, mentor=mentor, short_code=short_code, full_name=full_name or mentor.full_name)
+
+                messages.success(request, f"Faculty login ready. Username: {user.username}")
             redirect_anchor = (request.POST.get("redirect_anchor") or "faculty-directory").strip() or "faculty-directory"
             return redirect(f"/exam-section/?module_id={module.id}#{redirect_anchor}")
 
