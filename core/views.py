@@ -10306,9 +10306,51 @@ def attendance_fill_status(request):
             module=module, day_of_week=day_of_week, is_active=True
         )
         expected_map = {}
+        expected_keys = {}
         for entry in expected_entries:
             faculty = (entry.faculty or "").strip().upper()
             expected_map.setdefault(faculty, []).append(entry)
+            expected_keys.setdefault(faculty, set()).add((entry.batch, entry.lecture_no))
+
+        adjustments = _active_adjustments_for_date(module, date_val)
+        for adj in adjustments:
+            if adj.adjustment_type != LectureAdjustment.TYPE_PROXY:
+                continue
+            proxy_name = (adj.proxy_faculty.name if adj.proxy_faculty else "").strip().upper()
+            if not proxy_name:
+                continue
+            original_name = (adj.original_faculty or "").strip().upper()
+            if not original_name and adj.timetable_entry:
+                original_name = (adj.timetable_entry.faculty or "").strip().upper()
+            key = (adj.batch, adj.lecture_no)
+            if original_name:
+                expected_keys.get(original_name, set()).discard(key)
+                if original_name in expected_map:
+                    expected_map[original_name] = [
+                        e for e in expected_map[original_name]
+                        if (e.batch, e.lecture_no) != key
+                    ]
+            expected_keys.setdefault(proxy_name, set()).add(key)
+            entry_obj = adj.timetable_entry or TimetableEntry.objects.filter(
+                module=module,
+                day_of_week=day_of_week,
+                lecture_no=adj.lecture_no,
+                batch=adj.batch,
+                is_active=True,
+            ).first()
+            if entry_obj:
+                if proxy_name not in expected_map:
+                    expected_map[proxy_name] = []
+                if all((e.batch, e.lecture_no) != key for e in expected_map[proxy_name]):
+                    expected_map[proxy_name].append(entry_obj)
+            else:
+                expected_map.setdefault(proxy_name, []).append(
+                    SimpleNamespace(
+                        batch=adj.batch,
+                        lecture_no=adj.lecture_no,
+                        subject=adj.subject or "",
+                    )
+                )
 
         sessions = LectureSession.objects.filter(module=module, date=date_val)
         session_map = {}
@@ -10320,13 +10362,14 @@ def attendance_fill_status(request):
         for faculty, entries in expected_map.items():
             marked = session_map.get(faculty, [])
             marked_keys = {(m.batch, m.lecture_no) for m in marked}
-            missing = [e for e in entries if (e.batch, e.lecture_no) not in marked_keys]
+            expected_for_faculty = expected_keys.get(faculty, {(e.batch, e.lecture_no) for e in entries})
+            missing = [e for e in entries if (e.batch, e.lecture_no) in expected_for_faculty and (e.batch, e.lecture_no) not in marked_keys]
             rows.append(
                 {
                     "faculty": faculty,
-                    "expected": len(entries),
+                    "expected": len(expected_for_faculty),
                     "marked": len(marked),
-                    "pending": len(missing),
+                    "pending": max(len(expected_for_faculty) - len(marked), 0),
                     "missing": missing,
                 }
             )
