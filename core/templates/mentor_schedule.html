@@ -69,7 +69,8 @@
                 </thead>
                 <tbody>
                 {% for e in entries %}
-                    <tr class="{% if e.row_highlight == 'merge' %}schedule-row-merge{% elif e.row_highlight == 'proxy' %}schedule-row-proxy{% elif e.row_highlight == 'proxy_created' %}schedule-row-proxy-created{% elif e.row_highlight == 'mass_bunk' %}schedule-row-mass-bunk{% elif e.row_highlight == 'swap' %}schedule-row-swap{% endif %}">
+                    <tr class="{% if e.row_highlight == 'merge' %}schedule-row-merge{% elif e.row_highlight == 'proxy' %}schedule-row-proxy{% elif e.row_highlight == 'proxy_created' %}schedule-row-proxy-created{% elif e.row_highlight == 'mass_bunk' %}schedule-row-mass-bunk{% elif e.row_highlight == 'swap' %}schedule-row-swap{% endif %}"
+                        {% if e.row_highlight == 'merge' %}style="background:#BEEF9E !important;"{% elif e.row_highlight == 'proxy' %}style="background:#F3CEFF !important;"{% endif %}>
                         <td>{{ e.lecture_no }}</td>
                         <td>{{ e.time_slot }}</td>
                         <td>{{ e.dept_label }}</td>
