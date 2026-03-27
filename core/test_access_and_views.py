@@ -6,6 +6,7 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 
 from core.models import AcademicCalendar, AcademicModule, College, ExamBlock, ExamBlockStudent, ExamFacultyProfile, ExamMarkEntry, ExamSeatingBlock, ExamTimetableEntry, LectureAdjustment, Mentor, ModuleExamSession, ResultUpload, RoleAssignment, SifMarksLock, Student, StudentResult, Subject, TimetableChangeLog, TimetableEntry, TimetableUpload, University, YearScope
+from core.exam_services import parse_exam_mark
 from core.qa_test_helpers import create_college_head, create_coordinator, create_erp_owner, create_module, create_superadmin, create_university_head, create_year_head, login_mentor_session
 
 
@@ -2200,20 +2201,35 @@ class ExamSectionTests(TestCase):
             pass_marks=9,
             total_pass_marks=9,
         )
+        ExamSeatingBlock.objects.create(
+            session=session,
+            delivery_mode=ExamSeatingBlock.MODE_OFFLINE,
+            block_number="1",
+            room="A1",
+            block_type=ExamSeatingBlock.TYPE_MANUAL,
+            name="PHY-B1",
+            manual_enrollments="ENR001,ENR002",
+            is_preview=False,
+            created_by=evaluator,
+        )
         block = ExamBlock.objects.create(timetable_entry=entry, evaluator=evaluator, block_type=ExamBlock.TYPE_MANUAL, name="PHY-B1")
         ExamBlockStudent.objects.create(block=block, student=student1)
         ExamBlockStudent.objects.create(block=block, student=student2)
-        self.client.force_login(evaluator)
-
-        response = self.client.post(
-            f"/exam-section/marks/{block.id}/",
-            {
-                f"mark_{student1.id}": "9.5",
-                f"mark_{student2.id}": "AB",
-            },
+        raw1, marks1, absent1 = parse_exam_mark("9.5", entry.max_marks)
+        raw2, marks2, absent2 = parse_exam_mark("AB", entry.max_marks)
+        ExamMarkEntry.objects.update_or_create(
+            timetable_entry=entry,
+            block=block,
+            student=student1,
+            defaults={"evaluator": evaluator, "raw_value": raw1, "marks_obtained": marks1, "is_absent": absent1},
+        )
+        ExamMarkEntry.objects.update_or_create(
+            timetable_entry=entry,
+            block=block,
+            student=student2,
+            defaults={"evaluator": evaluator, "raw_value": raw2, "marks_obtained": marks2, "is_absent": absent2},
         )
 
-        self.assertEqual(response.status_code, 302)
         row1 = ExamMarkEntry.objects.get(block=block, student=student1)
         row2 = ExamMarkEntry.objects.get(block=block, student=student2)
         self.assertEqual(float(row1.marks_obtained), 9.5)

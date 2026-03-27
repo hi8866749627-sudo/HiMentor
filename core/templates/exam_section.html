@@ -62,6 +62,43 @@
         font-size: 0.8rem;
         margin: 0.1rem 0.2rem 0.1rem 0;
     }
+    .eval-search-wrap {
+        position: relative;
+    }
+    .eval-suggestion-box {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: calc(100% + 2px);
+        z-index: 30;
+        background: #fff;
+        border: 1px solid var(--bs-border-color, #dee2e6);
+        border-radius: 0.5rem;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+        max-height: 180px;
+        overflow: auto;
+        display: none;
+    }
+    .eval-suggestion-box.is-open {
+        display: block;
+    }
+    .eval-suggestion-item {
+        width: 100%;
+        border: 0;
+        background: #fff;
+        text-align: left;
+        padding: 0.45rem 0.6rem;
+        font-size: 0.85rem;
+    }
+    .eval-suggestion-item:hover {
+        background: #f8f9fa;
+    }
+    .eval-chip {
+        display: inline-block;
+        margin-top: 0.3rem;
+        font-size: 0.75rem;
+        color: #6c757d;
+    }
 </style>
 <div class="container-fluid py-3">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
@@ -520,15 +557,18 @@
                                                 </td>
                                                 {% for selected_user_id in row.selected_slot_user_ids %}
                                                 <td>
-                                                    <input
-                                                        name="subject_eval_{{ row.subject.id }}_{{ forloop.counter }}"
-                                                        class="form-control form-control-sm js-evaluator-slot"
-                                                        list="evaluator-options"
-                                                        autocomplete="off"
-                                                        placeholder="{% if forloop.first %}Type short name{% else %}Optional{% endif %}"
-                                                        value="{{ selected_user_id }}"
-                                                        {% if forloop.first %}required{% endif %}
-                                                    >
+                                                    <div class="eval-search-wrap">
+                                                        <input
+                                                            name="subject_eval_{{ row.subject.id }}_{{ forloop.counter }}"
+                                                            class="form-control form-control-sm js-evaluator-slot"
+                                                            autocomplete="off"
+                                                            placeholder="{% if forloop.first %}Type short/full name{% else %}Optional{% endif %}"
+                                                            value="{{ selected_user_id }}"
+                                                            {% if forloop.first %}required{% endif %}
+                                                        >
+                                                        <div class="eval-suggestion-box js-evaluator-suggestions"></div>
+                                                        <div class="eval-chip js-evaluator-chip"></div>
+                                                    </div>
                                                 </td>
                                                 {% endfor %}
                                             </tr>
@@ -541,11 +581,7 @@
                                 {% if not profiles %}
                                 <div class="small text-muted mb-2">No faculty accounts are ready for evaluator mapping yet. Create one below.</div>
                                 {% endif %}
-                                <datalist id="evaluator-options">
-                                    {% for profile in profiles %}
-                                    <option value="{{ profile.short_code }}" label="{{ profile.full_name|default:profile.short_code }} - {{ profile.short_code }}"></option>
-                                    {% endfor %}
-                                </datalist>
+                                {{ evaluator_search_options|json_script:"evaluatorSearchOptions" }}
                                 <button class="btn btn-primary" type="submit">Save Evaluator Mapping</button>
                             </form>
 
@@ -1161,6 +1197,65 @@ const previewBulkSubmit = document.getElementById('previewBulkSubmit');
 
 document.querySelectorAll('.js-subject-evaluator-row').forEach((row) => {
     const inputs = Array.from(row.querySelectorAll('.js-evaluator-slot'));
+    const options = (() => {
+        const el = document.getElementById('evaluatorSearchOptions');
+        return el ? JSON.parse(el.textContent || '[]') : [];
+    })();
+    const findOption = (value) => {
+        const normalized = (value || '').trim().toUpperCase();
+        return options.find((option) => {
+            const shortCode = (option.short_code || '').trim().toUpperCase();
+            const fullName = (option.full_name || '').trim().toUpperCase();
+            const label = (option.label || '').trim().toUpperCase();
+            return normalized && [shortCode, fullName, label].includes(normalized);
+        });
+    };
+    const renderSuggestions = (input) => {
+        const wrap = input.closest('.eval-search-wrap');
+        const box = wrap ? wrap.querySelector('.js-evaluator-suggestions') : null;
+        const chip = wrap ? wrap.querySelector('.js-evaluator-chip') : null;
+        if (!box) return;
+        const query = (input.value || '').trim().toUpperCase();
+        const selectedValues = inputs
+            .filter((el) => el !== input)
+            .map((el) => (el.value || '').trim().toUpperCase())
+            .filter(Boolean);
+        const exact = findOption(input.value);
+        if (chip) {
+            chip.textContent = exact ? exact.label : '';
+        }
+        if (!query) {
+            box.innerHTML = '';
+            box.classList.remove('is-open');
+            return;
+        }
+        const matches = options.filter((option) => {
+            const shortCode = (option.short_code || '').trim().toUpperCase();
+            const fullName = (option.full_name || '').trim().toUpperCase();
+            const label = (option.label || '').trim().toUpperCase();
+            return (
+                !selectedValues.includes(shortCode) &&
+                (shortCode.includes(query) || fullName.includes(query) || label.includes(query))
+            );
+        }).slice(0, 8);
+        if (!matches.length) {
+            box.innerHTML = '';
+            box.classList.remove('is-open');
+            return;
+        }
+        box.innerHTML = matches.map((option) => (
+            `<button class="eval-suggestion-item" type="button" data-short-code="${option.short_code}">${option.label}</button>`
+        )).join('');
+        box.classList.add('is-open');
+        box.querySelectorAll('.eval-suggestion-item').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                input.value = btn.dataset.shortCode || '';
+                box.classList.remove('is-open');
+                refreshEvaluatorInputs();
+                renderSuggestions(input);
+            });
+        });
+    };
     const refreshEvaluatorInputs = () => {
         const selectedValues = inputs
             .map((input) => (input.value || '').trim().toUpperCase())
@@ -1174,11 +1269,20 @@ document.querySelectorAll('.js-subject-evaluator-row').forEach((row) => {
             } else {
                 input.setCustomValidity('');
             }
+            renderSuggestions(input);
         });
     };
     inputs.forEach((input) => {
         input.addEventListener('input', refreshEvaluatorInputs);
         input.addEventListener('change', refreshEvaluatorInputs);
+        input.addEventListener('focus', () => renderSuggestions(input));
+        input.addEventListener('blur', () => {
+            window.setTimeout(() => {
+                const wrap = input.closest('.eval-search-wrap');
+                const box = wrap ? wrap.querySelector('.js-evaluator-suggestions') : null;
+                if (box) box.classList.remove('is-open');
+            }, 120);
+        });
     });
     refreshEvaluatorInputs();
 });

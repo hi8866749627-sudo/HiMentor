@@ -220,6 +220,20 @@ def _branch_detail_rows(students, module):
     return detail_rows
 
 
+def _resolve_evaluator_profile(value, profiles):
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    normalized = raw.upper()
+    for profile in profiles:
+        short_code = (profile.short_code or "").strip().upper()
+        full_name = (profile.full_name or getattr(profile.mentor, "full_name", "") or "").strip().upper()
+        combined = f"{short_code} - {full_name}".strip(" -")
+        if normalized in {short_code, full_name, combined}:
+            return profile
+    return None
+
+
 def _subject_code_for_entry(entry):
     short_name = (entry.subject.short_name or "").strip()
     if short_name:
@@ -475,13 +489,8 @@ def exam_section(request):
             subject_ids = list(
                 module.subjects.filter(is_active=True).values_list("id", flat=True)
             )
-            allowed_evaluator_ids = set(
-                ExamFacultyProfile.objects.filter(is_active=True).values_list("user_id", flat=True)
-            )
-            profile_by_code = {
-                profile.short_code.upper(): profile
-                for profile in ExamFacultyProfile.objects.filter(is_active=True).select_related("user")
-            }
+            active_profiles = list(ExamFacultyProfile.objects.filter(is_active=True).select_related("user", "mentor"))
+            allowed_evaluator_ids = {profile.user_id for profile in active_profiles}
             ExamSubjectEvaluator.objects.filter(session=session).delete()
             creates = []
             validation_failed = False
@@ -492,7 +501,7 @@ def exam_section(request):
                     value = (request.POST.get(f"subject_eval_{subject_id}_{slot}") or "").strip().upper()
                     if not value:
                         continue
-                    profile = profile_by_code.get(value)
+                    profile = _resolve_evaluator_profile(value, active_profiles)
                     if not profile:
                         continue
                     evaluator_id = profile.user_id
@@ -1142,6 +1151,14 @@ def exam_section(request):
 
     mentors, profiles, unregistered_names = _module_faculty_directory(module)
     profile_by_user_id = {profile.user_id: profile for profile in profiles}
+    evaluator_search_options = [
+        {
+            "short_code": profile.short_code,
+            "full_name": (profile.full_name or getattr(profile.mentor, "full_name", "") or "").strip(),
+            "label": f"{profile.short_code} - {(profile.full_name or getattr(profile.mentor, 'full_name', '') or profile.short_code).strip()}",
+        }
+        for profile in profiles
+    ]
     manager_candidates = _manager_candidate_users(module)
     module_managers = list(ModuleExamManager.objects.filter(module=module).select_related("user").order_by("user__username"))
     students = list(module.students.select_related("mentor").order_by("roll_no", "enrollment"))
@@ -1379,6 +1396,7 @@ def exam_section(request):
             "entries": entries,
             "entry_cards": entry_cards,
             "profiles": profiles,
+            "evaluator_search_options": evaluator_search_options,
             "mentors": mentors,
             "unregistered_names": unregistered_names,
             "manager_candidates": manager_candidates,
@@ -1422,7 +1440,8 @@ def exam_marks_entry(request, block_id):
 
     editable = can_enter_exam_block(request.user, block)
     can_edit_now, edit_message = can_edit_entry_now(block.timetable_entry)
-    sync_exam_blocks_from_seating(block.timetable_entry)
+    if ExamSeatingBlock.objects.filter(session=block.timetable_entry.session, is_preview=False).exists():
+        sync_exam_blocks_from_seating(block.timetable_entry)
     block = get_object_or_404(
         ExamBlock.objects.select_related("timetable_entry", "timetable_entry__session", "timetable_entry__subject", "evaluator"),
         id=block_id,
