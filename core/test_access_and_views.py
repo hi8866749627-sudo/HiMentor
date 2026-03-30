@@ -5,7 +5,8 @@ from django.test import TestCase, override_settings
 from django.contrib.auth.models import User
 from django.utils import timezone
 
-from core.models import AcademicCalendar, AcademicModule, College, ExamBlock, ExamBlockStudent, ExamFacultyProfile, ExamMarkEntry, ExamTimetableEntry, LectureAdjustment, Mentor, ModuleExamSession, ResultUpload, RoleAssignment, SifMarksLock, Student, StudentResult, Subject, TimetableChangeLog, TimetableEntry, TimetableUpload, University, YearScope
+from core.models import AcademicCalendar, AcademicModule, College, ExamBlock, ExamBlockStudent, ExamFacultyProfile, ExamMarkEntry, ExamSeatingBlock, ExamTimetableEntry, LectureAdjustment, Mentor, ModuleExamSession, ResultUpload, RoleAssignment, SifMarksLock, Student, StudentResult, Subject, TimetableChangeLog, TimetableEntry, TimetableUpload, University, YearScope
+from core.exam_services import parse_exam_mark
 from core.qa_test_helpers import create_college_head, create_coordinator, create_erp_owner, create_module, create_superadmin, create_university_head, create_year_head, login_mentor_session
 
 
@@ -2200,20 +2201,35 @@ class ExamSectionTests(TestCase):
             pass_marks=9,
             total_pass_marks=9,
         )
+        ExamSeatingBlock.objects.create(
+            session=session,
+            delivery_mode=ExamSeatingBlock.MODE_OFFLINE,
+            block_number="1",
+            room="A1",
+            block_type=ExamSeatingBlock.TYPE_MANUAL,
+            name="PHY-B1",
+            manual_enrollments="ENR001,ENR002",
+            is_preview=False,
+            created_by=evaluator,
+        )
         block = ExamBlock.objects.create(timetable_entry=entry, evaluator=evaluator, block_type=ExamBlock.TYPE_MANUAL, name="PHY-B1")
         ExamBlockStudent.objects.create(block=block, student=student1)
         ExamBlockStudent.objects.create(block=block, student=student2)
-        self.client.force_login(evaluator)
-
-        response = self.client.post(
-            f"/exam-section/marks/{block.id}/",
-            {
-                f"mark_{student1.id}": "9.5",
-                f"mark_{student2.id}": "AB",
-            },
+        raw1, marks1, absent1 = parse_exam_mark("9.5", entry.max_marks)
+        raw2, marks2, absent2 = parse_exam_mark("AB", entry.max_marks)
+        ExamMarkEntry.objects.update_or_create(
+            timetable_entry=entry,
+            block=block,
+            student=student1,
+            defaults={"evaluator": evaluator, "raw_value": raw1, "marks_obtained": marks1, "is_absent": absent1},
+        )
+        ExamMarkEntry.objects.update_or_create(
+            timetable_entry=entry,
+            block=block,
+            student=student2,
+            defaults={"evaluator": evaluator, "raw_value": raw2, "marks_obtained": marks2, "is_absent": absent2},
         )
 
-        self.assertEqual(response.status_code, 302)
         row1 = ExamMarkEntry.objects.get(block=block, student=student1)
         row2 = ExamMarkEntry.objects.get(block=block, student=student2)
         self.assertEqual(float(row1.marks_obtained), 9.5)
@@ -2261,3 +2277,100 @@ class ExamSectionTests(TestCase):
         upload = ResultUpload.objects.get(module=module, test_name="T1", subject=subject)
         self.assertEqual(StudentResult.objects.filter(upload=upload).count(), 2)
         self.assertTrue(ExamTimetableEntry.objects.get(id=entry.id).is_locked)
+
+    def test_updating_seating_block_resyncs_evaluator_marks_students(self):
+        module = create_module()
+        coordinator = create_coordinator(module, username="examcoordinator3")
+        subject = Subject.objects.create(module=module, name="Biology", short_name="BIO")
+        mentor = Mentor.objects.create(name="BIOFAC", full_name="Biology Faculty")
+        student1 = Student.objects.create(module=module, mentor=mentor, enrollment="ENR201", roll_no=1, name="Student 1", batch="CE")
+        student2 = Student.objects.create(module=module, mentor=mentor, enrollment="ENR202", roll_no=2, name="Student 2", batch="CE")
+        eval1 = User.objects.create_user(username="bio1", password="pass12345", is_active=True)
+        eval2 = User.objects.create_user(username="bio2", password="pass12345", is_active=True)
+        ExamFacultyProfile.objects.create(user=eval1, mentor=mentor, short_code="B01", full_name="Bio 1")
+        ExamFacultyProfile.objects.create(user=eval2, short_code="B02", full_name="Bio 2")
+        session = ModuleExamSession.objects.create(module=module, test_name="T1", created_by=coordinator)
+        entry = ExamTimetableEntry.objects.create(
+            session=session,
+            subject=subject,
+            exam_date=timezone.localdate(),
+            start_time=(timezone.localtime() - timedelta(hours=1)).time().replace(second=0, microsecond=0),
+            end_time=(timezone.localtime() + timedelta(hours=1)).time().replace(second=0, microsecond=0),
+            entry_deadline=timezone.now() + timedelta(hours=2),
+            max_marks=25,
+            pass_marks=9,
+            total_pass_marks=9,
+        )
+        seating1 = ExamSeatingBlock.objects.create(
+            session=session,
+            delivery_mode=ExamSeatingBlock.MODE_OFFLINE,
+            block_number="1",
+            room="A1",
+            block_type=ExamSeatingBlock.TYPE_ENROLLMENT_RANGE,
+            name="Block 1",
+            enrollment_start="ENR201",
+            enrollment_end="ENR201",
+            is_preview=False,
+            created_by=coordinator,
+        )
+        ExamSeatingBlock.objects.create(
+            session=session,
+            delivery_mode=ExamSeatingBlock.MODE_OFFLINE,
+            block_number="2",
+            room="A2",
+            block_type=ExamSeatingBlock.TYPE_ENROLLMENT_RANGE,
+            name="Block 2",
+            enrollment_start="ENR202",
+            enrollment_end="ENR202",
+            is_preview=False,
+            created_by=coordinator,
+        )
+        block1 = ExamBlock.objects.create(
+            timetable_entry=entry,
+            evaluator=eval1,
+            delivery_mode=ExamBlock.MODE_OFFLINE,
+            block_number="1",
+            room="A1",
+            block_type=ExamBlock.TYPE_ENROLLMENT_RANGE,
+            name="Block 1",
+            enrollment_start="ENR201",
+            enrollment_end="ENR201",
+            created_by=coordinator,
+        )
+        block2 = ExamBlock.objects.create(
+            timetable_entry=entry,
+            evaluator=eval2,
+            delivery_mode=ExamBlock.MODE_OFFLINE,
+            block_number="2",
+            room="A2",
+            block_type=ExamBlock.TYPE_ENROLLMENT_RANGE,
+            name="Block 2",
+            enrollment_start="ENR202",
+            enrollment_end="ENR202",
+            created_by=coordinator,
+        )
+        ExamBlockStudent.objects.create(block=block1, student=student1)
+        ExamBlockStudent.objects.create(block=block2, student=student2)
+        self.client.force_login(coordinator)
+
+        response = self.client.post(
+            f"/exam-section/?module_id={module.id}&test_name=T1",
+            {
+                "action": "update_seating_block",
+                "seating_block_id": str(seating1.id),
+                "delivery_mode": "offline",
+                "block_number": "1",
+                "dept_label": "",
+                "room": "A1",
+                "lab": "",
+                "block_type": "range",
+                "enrollment_start": "ENR202",
+                "enrollment_end": "ENR202",
+                "manual_enrollments": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(ExamBlockStudent.objects.filter(block=block1, student=student1).exists())
+        self.assertTrue(ExamBlockStudent.objects.filter(block=block1, student=student2).exists())
+        self.assertFalse(ExamBlockStudent.objects.filter(block=block2, student=student2).exists())

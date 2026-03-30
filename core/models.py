@@ -884,9 +884,9 @@ class ExamTimetableEntry(models.Model):
     MODE_ONLINE = "online"
     MODE_BOTH = "both"
     MODE_CHOICES = [
-        (MODE_OFFLINE, "Only Offline"),
-        (MODE_ONLINE, "Only Online"),
-        (MODE_BOTH, "Also Online"),
+        (MODE_OFFLINE, "Offline"),
+        (MODE_ONLINE, "Online"),
+        (MODE_BOTH, "Both"),
     ]
 
     session = models.ForeignKey(ModuleExamSession, on_delete=models.CASCADE, related_name="entries")
@@ -928,6 +928,27 @@ class ExamTimetableEntry(models.Model):
 
     def __str__(self):
         return f"{self.session} - {self.subject.name}"
+
+
+class ExamSubjectEvaluator(models.Model):
+    session = models.ForeignKey(ModuleExamSession, on_delete=models.CASCADE, related_name="subject_evaluators")
+    subject = models.ForeignKey(Subject, on_delete=models.CASCADE, related_name="exam_subject_evaluators")
+    evaluator = models.ForeignKey(User, on_delete=models.CASCADE, related_name="exam_subject_evaluator_links")
+    assigned_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_exam_subject_evaluators",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("session", "subject", "evaluator")
+        ordering = ["session__test_name", "subject__name", "evaluator__username"]
+
+    def __str__(self):
+        return f"{self.session} - {self.subject.name} - {self.evaluator.username}"
 
 
 class ExamBlock(models.Model):

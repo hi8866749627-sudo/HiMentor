@@ -1,5 +1,105 @@
 {% extends "base.html" %}
 {% block content %}
+<style>
+    .grid-shell {
+        border: 1px solid var(--bs-border-color, #dee2e6);
+        border-radius: 0.75rem;
+        background: #fff;
+    }
+    .grid-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.65rem 0.85rem;
+        border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+    }
+    .grid-body {
+        padding: 0.85rem;
+    }
+    .grid-shell.is-compact .grid-body {
+        display: none;
+    }
+    .subject-entry-shell.is-compact .subject-entry-body {
+        display: none;
+    }
+    .grid-toggle {
+        border: 0;
+        background: transparent;
+        font-size: 1.1rem;
+        font-weight: 800;
+        line-height: 1;
+        color: #495057;
+        padding: 0.15rem 0.35rem;
+        min-width: 1.8rem;
+    }
+    .grid-toggle:hover {
+        color: #0d6efd;
+    }
+    .grid-toggle-icon {
+        display: inline-block;
+        font-weight: 800;
+        transform-origin: center;
+    }
+    .compact-col {
+        width: 5.5rem;
+        min-width: 5.5rem;
+    }
+    .compact-col-wide {
+        width: 7rem;
+        min-width: 7rem;
+    }
+    .branch-lines {
+        white-space: pre-line;
+        min-width: 6.5rem;
+    }
+    .branch-pill {
+        display: inline-block;
+        padding: 0.2rem 0.45rem;
+        border-radius: 999px;
+        background: #f1f3f5;
+        border: 1px solid #dee2e6;
+        font-size: 0.8rem;
+        margin: 0.1rem 0.2rem 0.1rem 0;
+    }
+    .eval-search-wrap {
+        position: relative;
+    }
+    .eval-suggestion-box {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: calc(100% + 2px);
+        z-index: 30;
+        background: #fff;
+        border: 1px solid var(--bs-border-color, #dee2e6);
+        border-radius: 0.5rem;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+        max-height: 180px;
+        overflow: auto;
+        display: none;
+    }
+    .eval-suggestion-box.is-open {
+        display: block;
+    }
+    .eval-suggestion-item {
+        width: 100%;
+        border: 0;
+        background: #fff;
+        text-align: left;
+        padding: 0.45rem 0.6rem;
+        font-size: 0.85rem;
+    }
+    .eval-suggestion-item:hover {
+        background: #f8f9fa;
+    }
+    .eval-chip {
+        display: inline-block;
+        margin-top: 0.3rem;
+        font-size: 0.75rem;
+        color: #6c757d;
+    }
+</style>
 <div class="container-fluid py-3">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
         <div>
@@ -21,44 +121,58 @@
         <div class="col-lg-4">
             <div class="card shadow-sm h-100">
                 <div class="card-body">
-                    <h5 class="card-title">Create Exam</h5>
-                    <form method="post" class="d-grid gap-2">
-                        {% csrf_token %}
-                        <input type="hidden" name="action" value="create_session">
-                        <select name="test_name" class="form-select" required>
-                            <option value="">Select exam</option>
-                            <option value="T1">T1</option>
-                            <option value="T2">T2</option>
-                            <option value="T3">T3</option>
-                            <option value="T4">T4</option>
-                        </select>
-                        <input name="title" class="form-control" placeholder="Optional title">
-                        <button class="btn btn-primary" type="submit">Save Exam</button>
-                    </form>
+                    <div class="grid-shell is-compact">
+                        <div class="grid-head">
+                            <div class="fw-semibold">Create Exam</div>
+                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid"><span class="grid-toggle-icon"></span></button>
+                        </div>
+                        <div class="grid-body">
+                            <form method="post" class="d-grid gap-2">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="create_session">
+                                <select name="test_name" class="form-select" required>
+                                    <option value="">Select exam</option>
+                                    <option value="T1">T1</option>
+                                    <option value="T2">T2</option>
+                                    <option value="T3">T3</option>
+                                    <option value="T4">T4</option>
+                                </select>
+                                <input name="title" class="form-control" placeholder="Optional title">
+                                <button class="btn btn-primary" type="submit">Save Exam</button>
+                            </form>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
         <div class="col-lg-4">
             <div class="card shadow-sm h-100">
                 <div class="card-body">
-                    <h5 class="card-title">Assign Exam Manager</h5>
-                    <form method="post" class="d-grid gap-2">
-                        {% csrf_token %}
-                        <input type="hidden" name="action" value="assign_manager">
-                        <select name="manager_user_id" class="form-select" required>
-                            <option value="">Select faculty</option>
-                            {% for user in manager_candidates %}
-                            <option value="{{ user.id }}">{{ user.label }}</option>
-                            {% endfor %}
-                        </select>
-                        <button class="btn btn-outline-primary" type="submit">Assign</button>
-                    </form>
-                    <div class="small text-muted mt-2">
-                        {% for manager in module_managers %}
-                        <span class="badge bg-secondary">{{ manager.user.username }}</span>
-                        {% empty %}
-                        No extra exam managers yet.
-                        {% endfor %}
+                    <div class="grid-shell is-compact">
+                        <div class="grid-head">
+                            <div class="fw-semibold">Assign Exam Manager</div>
+                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid"><span class="grid-toggle-icon"></span></button>
+                        </div>
+                        <div class="grid-body">
+                            <form method="post" class="d-grid gap-2">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="assign_manager">
+                                <select name="manager_user_id" class="form-select" required>
+                                    <option value="">Select faculty</option>
+                                    {% for user in manager_candidates %}
+                                    <option value="{{ user.id }}">{{ user.label }}</option>
+                                    {% endfor %}
+                                </select>
+                                <button class="btn btn-outline-primary" type="submit">Assign</button>
+                            </form>
+                            <div class="small text-muted mt-2">
+                                {% for manager in module_managers %}
+                                <span class="badge bg-secondary">{{ manager.user.username }}</span>
+                                {% empty %}
+                                No extra exam managers yet.
+                                {% endfor %}
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -66,24 +180,31 @@
         <div class="col-lg-4" id="faculty-directory">
             <div class="card shadow-sm h-100">
                 <div class="card-body">
-                    <h5 class="card-title">Create Faculty Login</h5>
-                    <form method="post" class="d-grid gap-2">
-                        {% csrf_token %}
-                        <input type="hidden" name="action" value="create_faculty_account">
-                        <input name="short_code" class="form-control" placeholder="3-letter short code" required>
-                        <input name="full_name" class="form-control" placeholder="Full name">
-                        <input name="email" class="form-control" placeholder="Email (optional)">
-                        <input name="password" type="text" class="form-control" placeholder="Password" required>
-                        <button class="btn btn-outline-dark" type="submit">Create Faculty</button>
-                    </form>
-                    <div class="mt-2 small text-muted">
-                        Existing year faculty:
-                        {% for profile in profiles %}
-                        <span class="badge bg-light text-dark border">{{ profile.short_code }}</span>
-                        {% endfor %}
-                        {% for name in unregistered_names %}
-                        <span class="badge text-bg-warning">{{ name }}</span>
-                        {% endfor %}
+                    <div class="grid-shell is-compact">
+                        <div class="grid-head">
+                            <div class="fw-semibold">Create Faculty Login</div>
+                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid"><span class="grid-toggle-icon"></span></button>
+                        </div>
+                        <div class="grid-body">
+                            <form method="post" class="d-grid gap-2">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="create_faculty_account">
+                                <input name="short_code" class="form-control" placeholder="3-letter short code" required>
+                                <input name="full_name" class="form-control" placeholder="Full name">
+                                <input name="email" class="form-control" placeholder="Email (optional)">
+                                <input name="password" type="text" class="form-control" placeholder="Password" required>
+                                <button class="btn btn-outline-dark" type="submit">Create Faculty</button>
+                            </form>
+                            <div class="mt-2 small text-muted">
+                                Existing year faculty:
+                                {% for profile in profiles %}
+                                <span class="badge bg-light text-dark border">{{ profile.short_code }}</span>
+                                {% endfor %}
+                                {% for name in unregistered_names %}
+                                <span class="badge text-bg-warning">{{ name }}</span>
+                                {% endfor %}
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -126,8 +247,26 @@
                             <button class="btn btn-outline-secondary btn-sm" type="submit">Copy</button>
                         </form>
                     </div>
-                    <div class="border rounded p-2 mb-3">
-                        <div class="fw-semibold mb-2">Auto Generate Blocks (Preview)</div>
+                    <div class="grid-shell is-compact mb-3">
+                        <div class="grid-head">
+                            <div>
+                                <div class="fw-semibold">Auto Generate Blocks (Preview)</div>
+                                <div class="small text-muted">
+                                    Total {{ available_students_total }} students
+                                    | Offline blocks {{ required_offline_blocks }}
+                                    | Online blocks {{ required_online_blocks }}
+                                </div>
+                                <div class="small">
+                                    {% for row in available_branch_rows %}
+                                    <span class="branch-pill">{{ row.label }}</span>
+                                    {% empty %}
+                                    <span class="text-muted">No student pool found.</span>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid"><span class="grid-toggle-icon"></span></button>
+                        </div>
+                        <div class="grid-body">
                         <form method="post" class="row g-2 align-items-end">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="auto_generate_blocks">
@@ -166,8 +305,15 @@
                                 <button class="btn btn-outline-primary w-100" type="submit">Generate Preview</button>
                             </div>
                         </form>
+                        </div>
                     </div>
-                    <form method="post" class="row g-2 mb-3">
+                    <div class="grid-shell is-compact mb-3">
+                        <div class="grid-head">
+                            <div class="fw-semibold">Create Seating Block Manually</div>
+                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid"><span class="grid-toggle-icon"></span></button>
+                        </div>
+                        <div class="grid-body">
+                    <form method="post" class="row g-2 mb-0">
                         {% csrf_token %}
                         <input type="hidden" name="action" value="create_seating_block">
                         <input type="hidden" name="session_id" value="{{ selected_session.id }}">
@@ -210,10 +356,17 @@
                             <button class="btn btn-outline-primary w-100" type="submit">Save</button>
                         </div>
                     </form>
+                        </div>
+                    </div>
                     {% if preview_block_rows %}
-                    <div class="border rounded p-2 mb-3">
-                        <div class="fw-semibold mb-2">Preview Blocks (Edit then Finalize)</div>
+                    <div class="grid-shell is-compact mb-3">
+                        <div class="grid-head">
+                            <div class="fw-semibold">Preview Blocks (Edit then Finalize)</div>
+                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid"><span class="grid-toggle-icon"></span></button>
+                        </div>
+                        <div class="grid-body">
                         {{ enrollment_choices|json_script:"previewEnrollmentChoices" }}
+                        {{ enrollment_branch_map|json_script:"previewEnrollmentBranches" }}
                         <form method="post" class="d-flex flex-wrap gap-2 mb-2">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="finalize_seating_blocks">
@@ -236,29 +389,38 @@
                             </select>
                             <button class="btn btn-outline-danger btn-sm" type="submit">Discard Preview</button>
                         </form>
-                        <form method="post" id="previewBulkForm" class="d-flex flex-wrap gap-2 align-items-center mb-2">
-                            {% csrf_token %}
-                            <input type="hidden" name="action" value="bulk_update_preview_ranges">
-                            <input type="hidden" name="session_id" value="{{ selected_session.id }}">
-                            <input type="hidden" name="payload" id="previewBulkPayload">
-                            <input type="hidden" name="remove_ids" id="previewBulkRemoveIds">
-                            <button class="btn btn-primary btn-sm" type="button" id="previewBulkSubmit">Update Preview Ranges</button>
-                            <span id="previewDirtyHint" class="small text-muted d-none">Pending changes</span>
-                        </form>
+                        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                            <form method="post" id="previewBulkForm" class="d-flex flex-wrap gap-2 align-items-center">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="bulk_update_preview_ranges">
+                                <input type="hidden" name="session_id" value="{{ selected_session.id }}">
+                                <input type="hidden" name="payload" id="previewBulkPayload">
+                                <input type="hidden" name="remove_ids" id="previewBulkRemoveIds">
+                                <button class="btn btn-primary btn-sm" type="button" id="previewBulkSubmit">Update Preview Ranges</button>
+                                <span id="previewDirtyHint" class="small text-muted d-none">Pending changes</span>
+                            </form>
+                            <form method="post" class="d-flex">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="finalize_all_seating_blocks">
+                                <input type="hidden" name="session_id" value="{{ selected_session.id }}">
+                                <button class="btn btn-success btn-sm" type="submit">Finalize Both Modes</button>
+                            </form>
+                        </div>
                         <div class="table-responsive">
                             <table class="table table-sm table-bordered align-middle">
                                 <thead>
                                     <tr>
-                                        <th>Block #</th>
-                                        <th>Dept</th>
-                                        <th>Mode</th>
-                                        <th>Room/Lab</th>
-                                        <th>Type</th>
+                                        <th class="compact-col">Block #</th>
+                                        <th class="compact-col">Dept</th>
+                                        <th class="compact-col">Mode</th>
+                                        <th class="compact-col-wide">Room/Lab</th>
+                                        <th class="compact-col">Type</th>
                                         <th>Range</th>
-                                    <th>Students</th>
-                                    <th>Adjust</th>
-                                    <th>Update</th>
-                                </tr>
+                                        <th class="compact-col">Students</th>
+                                        <th>Branch</th>
+                                        <th class="compact-col">Adjust</th>
+                                        <th class="compact-col">Update</th>
+                                    </tr>
                                 </thead>
                                 <tbody>
                                     {% for row in preview_block_rows %}
@@ -291,6 +453,7 @@
                                                 <input name="manual_enrollments" class="form-control form-control-sm mt-1" value="{{ row.block.manual_enrollments }}" placeholder="Extra enrollments">
                                             </td>
                                             <td class="js-preview-count">{{ row.student_count }}</td>
+                                            <td class="branch-lines js-preview-branches">{{ row.branch_display }}</td>
                                             <td class="d-flex gap-1">
                                                 <button type="button" class="btn btn-outline-secondary btn-sm preview-shift-btn" data-block-id="{{ row.block.id }}" data-delta="-1">-</button>
                                                 <button type="button" class="btn btn-outline-secondary btn-sm preview-shift-btn" data-block-id="{{ row.block.id }}" data-delta="1">+</button>
@@ -302,53 +465,175 @@
                                 </tbody>
                             </table>
                         </div>
+                        </div>
                     </div>
                     {% endif %}
+                    <div class="grid-shell is-compact">
+                        <div class="grid-head">
+                            <div class="fw-semibold">Finalized Seating Blocks</div>
+                            <form method="get" class="d-flex gap-2 align-items-center">
+                                <input type="hidden" name="module_id" value="{{ module.id }}">
+                                <input type="hidden" name="test_name" value="{{ selected_session.test_name }}">
+                                <select name="block_view_mode" class="form-select form-select-sm">
+                                    <option value="offline" {% if selected_block_view_mode == "offline" %}selected{% endif %}>Offline</option>
+                                    <option value="online" {% if selected_block_view_mode == "online" %}selected{% endif %}>Online</option>
+                                </select>
+                                <button class="btn btn-outline-secondary btn-sm" type="submit">View</button>
+                            </form>
+                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid"><span class="grid-toggle-icon"></span></button>
+                        </div>
+                        <div class="grid-body">
                     <div class="table-responsive">
                         <table class="table table-sm table-bordered align-middle">
                             <thead>
                                 <tr>
-                                    <th>Block #</th>
-                                    <th>Dept</th>
-                                    <th>Mode</th>
-                                    <th>Block #</th>
-                                    <th>Room/Lab</th>
-                                    <th>Type</th>
+                                    <th style="width: 72px;">Block #</th>
+                                    <th style="width: 92px;">Dept</th>
+                                    <th style="width: 88px;">Mode</th>
+                                    <th style="width: 140px;">Branch</th>
+                                    <th style="width: 110px;">Room/Lab</th>
+                                    <th style="width: 90px;">Type</th>
                                     <th>Range</th>
-                                    <th>Students</th>
+                                    <th style="width: 86px;">Students</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for row in seating_block_rows %}
-                                <tr>
-                                    <td>{{ row.block.block_number|default:"-" }}</td>
-                                    <td>{{ row.block.dept_label|default:"-" }}</td>
-                                    <td>{{ row.block.get_delivery_mode_display }}</td>
-                                    <td>{{ row.block.block_number|default:"-" }}</td>
-                                    <td>
-                                        {% if row.block.delivery_mode == "offline" %}
-                                            {{ row.block.room|default:"-" }}
-                                        {% else %}
-                                            {{ row.block.lab|default:"-" }}
+                                    {% for branch_row in row.branch_detail_rows %}
+                                    <tr>
+                                        {% if forloop.first %}
+                                        <td rowspan="{{ row.branch_rowspan }}">{{ row.block.block_number|default:"-" }}</td>
+                                        <td rowspan="{{ row.branch_rowspan }}">{{ row.block.dept_label|default:"-" }}</td>
+                                        <td rowspan="{{ row.branch_rowspan }}">{{ row.block.get_delivery_mode_display }}</td>
                                         {% endif %}
-                                    </td>
-                                    <td>{{ row.block.get_block_type_display }}</td>
-                                    <td>
-                                        {% if row.block.block_type == "range" %}
-                                            {{ row.block.enrollment_start|default:"-" }} - {{ row.block.enrollment_end|default:"-" }}
-                                        {% elif row.block.block_type == "manual" %}
-                                            Manual
-                                        {% else %}
-                                            -
+                                        <td>{{ branch_row.label }}</td>
+                                        {% if forloop.first %}
+                                        <td rowspan="{{ row.branch_rowspan }}">
+                                            {% if row.block.delivery_mode == "offline" %}
+                                                {{ row.block.room|default:"-" }}
+                                            {% else %}
+                                                {{ row.block.lab|default:"-" }}
+                                            {% endif %}
+                                        </td>
+                                        <td rowspan="{{ row.branch_rowspan }}">{{ row.block.get_block_type_display }}</td>
                                         {% endif %}
-                                    </td>
-                                    <td>{{ row.student_count }}</td>
-                                </tr>
+                                        <td>{{ branch_row.range_display }}</td>
+                                        {% if forloop.first %}
+                                        <td rowspan="{{ row.branch_rowspan }}">{{ row.student_count }}</td>
+                                        {% endif %}
+                                    </tr>
+                                    {% endfor %}
                                 {% empty %}
                                 <tr><td colspan="8" class="text-muted">No seating blocks yet.</td></tr>
                                 {% endfor %}
                             </tbody>
                         </table>
+                    </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if can_manage_exam and selected_session %}
+    <div class="row g-3 mb-4" id="evaluator-management">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <div class="grid-shell is-compact">
+                        <div class="grid-head">
+                            <div>
+                                <div class="fw-semibold">Evaluator Management</div>
+                                <div class="small text-muted">Map one or more evaluators to each subject for {{ selected_session.test_name }}.</div>
+                            </div>
+                            <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid"><span class="grid-toggle-icon"></span></button>
+                        </div>
+                        <div class="grid-body">
+                            <form method="post" class="mb-3">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="save_subject_evaluators">
+                                <input type="hidden" name="session_id" value="{{ selected_session.id }}">
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-bordered align-middle">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th style="min-width: 220px;">Subject</th>
+                                                <th style="min-width: 180px;">Evaluator 1</th>
+                                                <th style="min-width: 180px;">Evaluator 2</th>
+                                                <th style="min-width: 180px;">Evaluator 3</th>
+                                                <th style="min-width: 180px;">Evaluator 4</th>
+                                                <th style="min-width: 180px;">Evaluator 5</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for row in subject_evaluator_rows %}
+                                            <tr class="js-subject-evaluator-row">
+                                                <td>
+                                                    <div class="fw-semibold">{{ row.subject.name }}</div>
+                                                    {% if row.subject.short_name %}
+                                                    <div class="small text-muted">{{ row.subject.short_name }}</div>
+                                                    {% endif %}
+                                                </td>
+                                                {% for selected_user_id in row.selected_slot_user_ids %}
+                                                <td>
+                                                    <div class="eval-search-wrap">
+                                                        <input
+                                                            name="subject_eval_{{ row.subject.id }}_{{ forloop.counter }}"
+                                                            class="form-control form-control-sm js-evaluator-slot"
+                                                            autocomplete="off"
+                                                            placeholder="{% if forloop.first %}Type short/full name{% else %}Optional{% endif %}"
+                                                            value="{{ selected_user_id }}"
+                                                            {% if forloop.first %}required{% endif %}
+                                                        >
+                                                        <div class="eval-suggestion-box js-evaluator-suggestions"></div>
+                                                        <div class="eval-chip js-evaluator-chip"></div>
+                                                    </div>
+                                                </td>
+                                                {% endfor %}
+                                            </tr>
+                                            {% empty %}
+                                            <tr><td colspan="6" class="text-muted">No active subjects found for this module.</td></tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% if not profiles %}
+                                <div class="small text-muted mb-2">No evaluator profiles are ready yet. Use the form below to add one.</div>
+                                {% endif %}
+                                {{ evaluator_search_options|json_script:"evaluatorSearchOptions" }}
+                                <button class="btn btn-primary" type="submit">Save Evaluator Mapping</button>
+                            </form>
+
+                            <div class="border rounded p-3">
+                                <div class="fw-semibold mb-2">Add New Evaluator</div>
+                                <form method="post" class="row g-2 align-items-end">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="create_faculty_account">
+                                    <input type="hidden" name="redirect_anchor" value="evaluator-management">
+                                    <div class="col-md-2">
+                                        <label class="form-label small">Short Code</label>
+                                        <input name="short_code" class="form-control" placeholder="ABC" required>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label small">Full Name</label>
+                                        <input name="full_name" class="form-control" placeholder="Faculty name">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label small">Email</label>
+                                        <input name="email" class="form-control" placeholder="Email (optional)">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label small">Password</label>
+                                        <input name="password" type="text" class="form-control" placeholder="Password" required>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <button class="btn btn-outline-dark w-100" type="submit">Create Evaluator</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -366,6 +651,12 @@
                         {% csrf_token %}
                         <input type="hidden" name="action" value="create_entry">
                         <input type="hidden" name="session_id" value="{{ selected_session.id }}">
+                        <div class="grid-shell is-compact">
+                            <div class="grid-head">
+                                <div class="fw-semibold">Create Subject Timetable</div>
+                                <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid"><span class="grid-toggle-icon"></span></button>
+                            </div>
+                            <div class="grid-body">
                         <div class="table-responsive">
                             <table class="table table-sm table-bordered align-middle">
                                 <thead class="table-light">
@@ -396,15 +687,15 @@
                                         <td class="small">
                                             <div class="form-check">
                                                 <input class="form-check-input" type="radio" name="entry_mode" value="offline" id="mode-offline-new" checked>
-                                                <label class="form-check-label" for="mode-offline-new">Only Offline</label>
+                                                <label class="form-check-label" for="mode-offline-new">Offline</label>
                                             </div>
                                             <div class="form-check">
                                                 <input class="form-check-input" type="radio" name="entry_mode" value="both" id="mode-both-new">
-                                                <label class="form-check-label" for="mode-both-new">Also Online</label>
+                                                <label class="form-check-label" for="mode-both-new">Both</label>
                                             </div>
                                             <div class="form-check">
                                                 <input class="form-check-input" type="radio" name="entry_mode" value="online" id="mode-online-new">
-                                                <label class="form-check-label" for="mode-online-new">Only Online</label>
+                                                <label class="form-check-label" for="mode-online-new">Online</label>
                                             </div>
                                         </td>
                                         <td><input type="date" name="exam_date" class="form-control" required></td>
@@ -419,6 +710,8 @@
                                     </tr>
                                 </tbody>
                             </table>
+                        </div>
+                            </div>
                         </div>
                         {% if not available_subjects %}
                         <div class="small text-muted mb-2">All subjects already have an exam entry for this test.</div>
@@ -453,16 +746,36 @@
                     {% if entry.published_upload %}
                     <a class="btn btn-sm btn-outline-secondary" href="/view-results/?test={{ entry.session.test_name }}&subject={{ entry.subject.id }}">View Published</a>
                     {% endif %}
+                    <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid"><span class="grid-toggle-icon"></span></button>
                 </div>
             </div>
-
+            <div class="subject-entry-shell is-compact">
+                <div class="subject-entry-body">
             <div class="row g-2 mb-3">
                 <div class="col-md-2"><div class="border rounded p-2 small">Total: <strong>{{ stats.total_students }}</strong></div></div>
                 <div class="col-md-2"><div class="border rounded p-2 small">Entered: <strong>{{ stats.entered_students }}</strong></div></div>
                 <div class="col-md-2"><div class="border rounded p-2 small">Absent: <strong>{{ stats.absent_students }}</strong></div></div>
                 <div class="col-md-2"><div class="border rounded p-2 small">Fail: <strong>{{ stats.failed_students }}</strong></div></div>
                 <div class="col-md-2"><div class="border rounded p-2 small">Pending: <strong>{{ stats.pending_students }}</strong></div></div>
+                <div class="col-md-2"><div class="border rounded p-2 small">Blocks Done: <strong>{{ stats.completed_blocks }}</strong></div></div>
+                <div class="col-md-2"><div class="border rounded p-2 small">Blocks Pending: <strong>{{ stats.pending_blocks }}</strong></div></div>
             </div>
+
+            {% if card.completed_blocks %}
+            <div class="alert alert-success py-2 small">
+                Completed blocks:
+                {% for row in card.completed_blocks %}
+                    <span class="me-2">Block {{ row.block.block_number|default:row.block.id }} by {{ row.block.evaluator.username }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if can_manage_exam %}
+            <div class="d-flex flex-wrap gap-2 mb-3">
+                <a class="btn btn-sm btn-outline-success" href="/exam-section/export/{{ entry.id }}/excel/">Compiled Excel</a>
+                <a class="btn btn-sm btn-outline-danger" href="/exam-section/export/{{ entry.id }}/pdf/">Compiled PDF</a>
+            </div>
+            {% endif %}
 
             {% if can_manage_exam %}
             <form method="post" class="row g-2 mb-3">
@@ -474,15 +787,15 @@
                         <div class="small fw-semibold mb-1">Mode</div>
                         <div class="form-check">
                             <input class="form-check-input" type="radio" name="entry_mode" value="offline" id="mode-offline-{{ entry.id }}" {% if entry.mode == "offline" %}checked{% endif %}>
-                            <label class="form-check-label" for="mode-offline-{{ entry.id }}">Only Offline</label>
+                            <label class="form-check-label" for="mode-offline-{{ entry.id }}">Offline</label>
                         </div>
                         <div class="form-check">
                             <input class="form-check-input" type="radio" name="entry_mode" value="both" id="mode-both-{{ entry.id }}" {% if entry.mode == "both" %}checked{% endif %}>
-                            <label class="form-check-label" for="mode-both-{{ entry.id }}">Also Online</label>
+                            <label class="form-check-label" for="mode-both-{{ entry.id }}">Both</label>
                         </div>
                         <div class="form-check">
                             <input class="form-check-input" type="radio" name="entry_mode" value="online" id="mode-online-{{ entry.id }}" {% if entry.mode == "online" %}checked{% endif %}>
-                            <label class="form-check-label" for="mode-online-{{ entry.id }}">Only Online</label>
+                            <label class="form-check-label" for="mode-online-{{ entry.id }}">Online</label>
                         </div>
                     </div>
                 </div>
@@ -506,8 +819,8 @@
                 <input type="hidden" name="timetable_entry_id" value="{{ entry.id }}">
                 <div class="col-md-3">
                     <select name="evaluator_user_id" class="form-select" required>
-                        <option value="">Evaluator</option>
-                        {% for profile in profiles %}
+                        <option value="">{% if card.allowed_evaluators %}Evaluator{% else %}Map evaluator first{% endif %}</option>
+                        {% for profile in card.allowed_evaluators %}
                         <option value="{{ profile.user_id }}">{{ profile.short_code }}{% if profile.full_name %} - {{ profile.full_name }}{% endif %}</option>
                         {% endfor %}
                     </select>
@@ -522,10 +835,16 @@
                         {% endfor %}
                     </select>
                 </div>
-                <div class="col-md-2"><button class="btn btn-outline-primary w-100" type="submit">Assign</button></div>
+                <div class="col-md-2"><button class="btn btn-outline-primary w-100" type="submit" {% if not card.allowed_evaluators %}disabled{% endif %}>Assign</button></div>
             </form>
             {% endif %}
 
+            <div class="grid-shell is-compact">
+                <div class="grid-head">
+                    <div class="fw-semibold">Assigned Evaluator Blocks</div>
+                    <button class="grid-toggle js-grid-toggle" type="button" aria-label="Toggle grid"><span class="grid-toggle-icon"></span></button>
+                </div>
+                <div class="grid-body">
             <div class="table-responsive">
                 <table class="table table-sm table-bordered align-middle">
                     <thead>
@@ -536,12 +855,15 @@
                             <th>Room/Lab</th>
                             <th>Evaluator</th>
                             <th>Students</th>
+                            <th>Done</th>
+                            <th>Pending</th>
                             <th>Type</th>
                             <th>Action</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for block in blocks %}
+                        {% for status_row in card.block_status_rows %}
+                        {% with block=status_row.block %}
                         <tr>
                             <td>{{ block.name }}</td>
                             <td>{{ block.get_delivery_mode_display }}</td>
@@ -555,14 +877,19 @@
                             </td>
                             <td>{{ block.evaluator.username }}</td>
                             <td>{{ block.student_links.count }}</td>
+                            <td>{{ status_row.completed_count }}</td>
+                            <td>{{ status_row.stats.pending }}</td>
                             <td>{{ block.get_block_type_display }}</td>
                             <td><a class="btn btn-sm btn-outline-dark" href="/exam-section/marks/{{ block.id }}/">Open</a></td>
                         </tr>
+                        {% endwith %}
                         {% empty %}
-                        <tr><td colspan="8" class="text-muted">No evaluator blocks yet.</td></tr>
+                        <tr><td colspan="10" class="text-muted">No evaluator blocks yet.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
+            </div>
+                </div>
             </div>
 
             {% if can_manage_exam %}
@@ -581,6 +908,8 @@
                 </form>
             </div>
             {% endif %}
+                </div>
+            </div>
         </div>
     </div>
     {% endwith %}
@@ -636,13 +965,93 @@
     }
 })();
 
+const resolveToggleShell = (btn) => {
+    const directShell = btn.closest('.grid-shell, .subject-entry-shell');
+    if (directShell) return directShell;
+    const card = btn.closest('.card, .card-body');
+    if (!card) return null;
+    return card.querySelector('.subject-entry-shell, .grid-shell');
+};
+
+const previewEnrollmentChoices = (() => {
+    const el = document.getElementById('previewEnrollmentChoices');
+    return el ? JSON.parse(el.textContent || '[]') : [];
+})();
+const previewEnrollmentBranches = (() => {
+    const el = document.getElementById('previewEnrollmentBranches');
+    return el ? JSON.parse(el.textContent || '{}') : {};
+})();
+
+const updatePreviewBranchSummary = (row) => {
+    if (!row) return;
+    const startInput = row.querySelector('.js-preview-start');
+    const endInput = row.querySelector('.js-preview-end');
+    const manualInput = row.querySelector('input[name="manual_enrollments"]');
+    const startIndex = previewEnrollmentChoices.indexOf(startInput ? startInput.value : '');
+    const endIndex = previewEnrollmentChoices.indexOf(endInput ? endInput.value : '');
+    const counts = {};
+
+    if (startIndex >= 0 && endIndex >= startIndex) {
+        previewEnrollmentChoices.slice(startIndex, endIndex + 1).forEach((enrollment) => {
+            const label = previewEnrollmentBranches[enrollment] || 'GEN';
+            counts[label] = (counts[label] || 0) + 1;
+        });
+    }
+
+    const manualValues = (manualInput && manualInput.value ? manualInput.value : '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+    manualValues.forEach((enrollment) => {
+        const label = previewEnrollmentBranches[enrollment] || 'GEN';
+        counts[label] = (counts[label] || 0) + 1;
+    });
+
+    const lines = Object.entries(counts)
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([label, count]) => `${label}-${String(count).padStart(2, '0')}`);
+    const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
+
+    const countCell = row.querySelector('.js-preview-count');
+    if (countCell) countCell.textContent = String(total);
+    const branchCell = row.querySelector('.js-preview-branches');
+    if (branchCell) branchCell.textContent = lines.join('\n');
+};
+
+const refreshPreviewRows = (mode, sizes) => {
+    let cursor = 0;
+    const updatedRows = Array.from(document.querySelectorAll('.js-preview-row')).filter(row => (row.dataset.mode || '') === mode);
+    updatedRows.forEach((row, idx) => {
+        const size = sizes[idx];
+        const start = previewEnrollmentChoices[cursor] || '';
+        const end = previewEnrollmentChoices[cursor + size - 1] || start;
+        cursor += size;
+        const startInput = row.querySelector('.js-preview-start');
+        const endInput = row.querySelector('.js-preview-end');
+        if (startInput) startInput.value = start;
+        if (endInput) endInput.value = end;
+        updatePreviewBranchSummary(row);
+    });
+
+    const hint = document.getElementById('previewDirtyHint');
+    if (hint) hint.classList.remove('d-none');
+};
+
+document.querySelectorAll('.js-preview-row').forEach((row) => {
+    ['.js-preview-start', '.js-preview-end', 'input[name="manual_enrollments"]'].forEach((selector) => {
+        const input = row.querySelector(selector);
+        if (input) {
+            input.addEventListener('input', () => updatePreviewBranchSummary(row));
+            input.addEventListener('change', () => updatePreviewBranchSummary(row));
+        }
+    });
+    updatePreviewBranchSummary(row);
+});
+
 document.querySelectorAll('.preview-shift-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         const rows = Array.from(document.querySelectorAll('.js-preview-row'));
-        const enrollmentsEl = document.getElementById('previewEnrollmentChoices');
-        if (!rows.length || !enrollmentsEl) return;
-        const enrollments = JSON.parse(enrollmentsEl.textContent || '[]');
-        if (!enrollments.length) return;
+        if (!rows.length || !previewEnrollmentChoices.length) return;
 
         const blockId = btn.dataset.blockId || '';
         const delta = parseInt(btn.dataset.delta || '0', 10);
@@ -655,7 +1064,7 @@ document.querySelectorAll('.preview-shift-btn').forEach(btn => {
         const rowIndex = modeRows.indexOf(clickedRow);
         if (rowIndex < 0) return;
 
-        const getIndex = (value) => enrollments.indexOf(value);
+        const getIndex = (value) => previewEnrollmentChoices.indexOf(value);
         const sizes = [];
         let cursor = 0;
 
@@ -673,7 +1082,6 @@ document.querySelectorAll('.preview-shift-btn').forEach(btn => {
 
         const removedIds = window.previewRemovedIds || [];
         const capacity = (mode === 'online') ? 12 : 20;
-        let createdRow = null;
         if (delta === 1) {
             if (sizes[sizes.length - 1] <= 1) {
                 const lastRow = modeRows[modeRows.length - 1];
@@ -732,7 +1140,7 @@ document.querySelectorAll('.preview-shift-btn').forEach(btn => {
                         blockNum.value = String(nextNum);
                     }
                     sourceRow.parentElement.insertBefore(cloned, sourceRow.nextSibling);
-                    createdRow = cloned;
+                    updatePreviewBranchSummary(cloned);
                 }
             }
         }
@@ -765,28 +1173,13 @@ document.querySelectorAll('.preview-shift-btn').forEach(btn => {
                             blockNum.value = String(nextNum);
                         }
                         sourceRow.parentElement.insertBefore(cloned, sourceRow.nextSibling);
-                        createdRow = cloned;
+                        updatePreviewBranchSummary(cloned);
                     }
                 }
             }
         }
-        cursor = 0;
-        const updatedRows = Array.from(document.querySelectorAll('.js-preview-row')).filter(row => (row.dataset.mode || '') === mode);
-        updatedRows.forEach((row, idx) => {
-            const size = sizes[idx];
-            const start = enrollments[cursor] || '';
-            const end = enrollments[cursor + size - 1] || start;
-            cursor += size;
-            const startInput = row.querySelector('.js-preview-start');
-            const endInput = row.querySelector('.js-preview-end');
-            if (startInput) startInput.value = start;
-            if (endInput) endInput.value = end;
-            const countCell = row.querySelector('.js-preview-count');
-            if (countCell) countCell.textContent = String(size);
-        });
 
-        const hint = document.getElementById('previewDirtyHint');
-        if (hint) hint.classList.remove('d-none');
+        refreshPreviewRows(mode, sizes);
     });
 });
 
@@ -821,5 +1214,116 @@ const previewBulkSubmit = document.getElementById('previewBulkSubmit');
                 document.getElementById('previewBulkForm').submit();
             });
         }
+
+document.querySelectorAll('.js-subject-evaluator-row').forEach((row) => {
+    const inputs = Array.from(row.querySelectorAll('.js-evaluator-slot'));
+    const options = (() => {
+        const el = document.getElementById('evaluatorSearchOptions');
+        return el ? JSON.parse(el.textContent || '[]') : [];
+    })();
+    const findOption = (value) => {
+        const normalized = (value || '').trim().toUpperCase();
+        return options.find((option) => {
+            const shortCode = (option.short_code || '').trim().toUpperCase();
+            const fullName = (option.full_name || '').trim().toUpperCase();
+            const label = (option.label || '').trim().toUpperCase();
+            return normalized && [shortCode, fullName, label].includes(normalized);
+        });
+    };
+    const renderSuggestions = (input) => {
+        const wrap = input.closest('.eval-search-wrap');
+        const box = wrap ? wrap.querySelector('.js-evaluator-suggestions') : null;
+        const chip = wrap ? wrap.querySelector('.js-evaluator-chip') : null;
+        if (!box) return;
+        const query = (input.value || '').trim().toUpperCase();
+        const selectedValues = inputs
+            .filter((el) => el !== input)
+            .map((el) => (el.value || '').trim().toUpperCase())
+            .filter(Boolean);
+        const exact = findOption(input.value);
+        if (chip) {
+            chip.textContent = exact ? exact.label : '';
+        }
+        if (!query) {
+            box.innerHTML = '';
+            box.classList.remove('is-open');
+            return;
+        }
+        const matches = options.filter((option) => {
+            const shortCode = (option.short_code || '').trim().toUpperCase();
+            const fullName = (option.full_name || '').trim().toUpperCase();
+            const label = (option.label || '').trim().toUpperCase();
+            return (
+                !selectedValues.includes(shortCode) &&
+                (shortCode.includes(query) || fullName.includes(query) || label.includes(query))
+            );
+        }).slice(0, 8);
+        if (!matches.length) {
+            box.innerHTML = '';
+            box.classList.remove('is-open');
+            return;
+        }
+        box.innerHTML = matches.map((option) => (
+            `<button class="eval-suggestion-item" type="button" data-short-code="${option.short_code}">${option.label}</button>`
+        )).join('');
+        box.classList.add('is-open');
+        box.querySelectorAll('.eval-suggestion-item').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                input.value = btn.dataset.shortCode || '';
+                box.classList.remove('is-open');
+                refreshEvaluatorInputs();
+                renderSuggestions(input);
+            });
+        });
+    };
+    const refreshEvaluatorInputs = () => {
+        const selectedValues = inputs
+            .map((input) => (input.value || '').trim().toUpperCase())
+            .filter(Boolean);
+        inputs.forEach((input) => {
+            input.value = (input.value || '').trim().toUpperCase();
+            const current = input.value;
+            const duplicateCount = selectedValues.filter((value) => value === current).length;
+            if (current && duplicateCount > 1) {
+                input.setCustomValidity('Same evaluator cannot be selected twice in one subject.');
+            } else {
+                input.setCustomValidity('');
+            }
+            renderSuggestions(input);
+        });
+    };
+    inputs.forEach((input) => {
+        input.addEventListener('input', refreshEvaluatorInputs);
+        input.addEventListener('change', refreshEvaluatorInputs);
+        input.addEventListener('focus', () => renderSuggestions(input));
+        input.addEventListener('blur', () => {
+            window.setTimeout(() => {
+                const wrap = input.closest('.eval-search-wrap');
+                const box = wrap ? wrap.querySelector('.js-evaluator-suggestions') : null;
+                if (box) box.classList.remove('is-open');
+            }, 120);
+        });
+    });
+    refreshEvaluatorInputs();
+});
+
+const syncExamGridToggleIcons = () => {
+    document.querySelectorAll('.js-grid-toggle').forEach((btn) => {
+        const shell = resolveToggleShell(btn);
+        if (!shell) return;
+        const isCompact = shell.classList.contains('is-compact');
+        btn.innerHTML = `<span class="grid-toggle-icon">${isCompact ? '▸' : '▾'}</span>`;
+    });
+};
+
+syncExamGridToggleIcons();
+document.querySelectorAll('.js-grid-toggle').forEach((btn) => {
+    btn.addEventListener('click', () => {
+        const shell = resolveToggleShell(btn);
+        if (!shell) return;
+        shell.classList.toggle('is-compact');
+        syncExamGridToggleIcons();
+    });
+});
 </script>
 {% endblock %}
