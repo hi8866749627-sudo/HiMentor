@@ -7318,6 +7318,7 @@ def view_timetable(request):
             )
         if action == "bulk_replace_faculty":
             source_faculty = (request.POST.get("replace_source_faculty") or "").strip()
+            custom_new_faculty = (request.POST.get("custom_new_faculty") or "").strip()
             selected_ids_raw = request.POST.getlist("replace_entry_ids")
             selected_ids = []
             for raw_id in selected_ids_raw:
@@ -7332,6 +7333,19 @@ def view_timetable(request):
             if not selected_ids:
                 messages.error(request, "Select at least one lecture/batch row.")
                 return redirect_response
+            if custom_new_faculty and custom_new_faculty.lower() == source_faculty.lower():
+                messages.error(request, "Custom new faculty cannot be same as original faculty.")
+                return redirect_response
+
+            custom_new_faculty_obj = None
+            if custom_new_faculty:
+                custom_new_faculty_obj = Mentor.objects.filter(name__iexact=custom_new_faculty).first()
+                if not custom_new_faculty_obj:
+                    custom_new_faculty_obj = Mentor.objects.create(
+                        name=custom_new_faculty,
+                        full_name=custom_new_faculty,
+                        status="Working",
+                    )
 
             selected_entries = list(
                 TimetableEntry.objects.filter(
@@ -7354,6 +7368,11 @@ def view_timetable(request):
                     invalid_source_rows.append(f"{entry.get_day_of_week_display()} L{entry.lecture_no} {entry.batch}")
                     continue
                 target_faculty = (request.POST.get(f"replace_faculty_{entry.id}") or "").strip()
+                if target_faculty == "__custom__":
+                    if not custom_new_faculty:
+                        missing_target_rows.append(f"{entry.get_day_of_week_display()} L{entry.lecture_no} {entry.batch} (custom missing)")
+                        continue
+                    target_faculty = custom_new_faculty
                 if not target_faculty:
                     missing_target_rows.append(f"{entry.get_day_of_week_display()} L{entry.lecture_no} {entry.batch}")
                     continue
@@ -7415,6 +7434,8 @@ def view_timetable(request):
                     TimetableChangeLog.objects.bulk_create(logs)
 
             msg = f"Faculty replaced for {len(update_payload)} lecture rows."
+            if custom_new_faculty_obj:
+                msg += f" Added/used custom faculty: {custom_new_faculty_obj.name}."
             if unchanged_rows:
                 msg += f" {unchanged_rows} rows were unchanged."
             messages.success(request, msg)

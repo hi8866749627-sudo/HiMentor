@@ -188,7 +188,7 @@
         <div class="card mb-3">
             <div class="card-header fw-semibold">Multi-target Faculty Replace</div>
             <div class="card-body">
-                <form method="post">
+                <form method="post" id="bulk-replace-form">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="bulk_replace_faculty">
                     <div class="row g-2 align-items-end mb-3">
@@ -201,7 +201,12 @@
                                 {% endfor %}
                             </select>
                         </div>
-                        <div class="col-md-8 small text-muted">
+                        <div class="col-md-4">
+                            <label class="form-label">Custom New Faculty</label>
+                            <input type="text" name="custom_new_faculty" id="custom-new-faculty" class="form-control" placeholder="e.g. ABC">
+                            <div class="form-text">If new, it will be added to Faculty Master.</div>
+                        </div>
+                        <div class="col-md-4 small text-muted">
                             Select rows for that faculty, set replacement faculty row-wise (can be different per batch/lecture), then Apply.
                         </div>
                     </div>
@@ -236,6 +241,7 @@
                                     <td>
                                         <select name="replace_faculty_{{ item.id }}" class="form-select form-select-sm">
                                             <option value="">Select</option>
+                                            <option value="__custom__">Custom New Faculty</option>
                                             {% for f in replace_faculty_choices %}
                                                 {% if f != item.faculty %}
                                                     <option value="{{ f }}">{{ f }}</option>
@@ -504,6 +510,26 @@ document.addEventListener("DOMContentLoaded", function(){
                 const chk = row.querySelector(".replace-row-check");
                 if (chk) chk.checked = false;
             });
+        });
+    }
+
+    const bulkReplaceForm = document.getElementById("bulk-replace-form");
+    if (bulkReplaceForm) {
+        bulkReplaceForm.addEventListener("submit", function(e) {
+            const customInput = document.getElementById("custom-new-faculty");
+            const customName = (customInput ? customInput.value : "").trim();
+            const selectedRows = replaceRows.filter(row => {
+                const chk = row.querySelector(".replace-row-check");
+                return chk && chk.checked;
+            });
+            const needsCustom = selectedRows.some(row => {
+                const sel = row.querySelector('select[name^="replace_faculty_"]');
+                return sel && sel.value === "__custom__";
+            });
+            if (needsCustom && !customName) {
+                e.preventDefault();
+                alert("Enter Custom New Faculty name.");
+            }
         });
     }
 });
