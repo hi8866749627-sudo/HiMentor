@@ -2949,7 +2949,8 @@ def upload_students(request):
 def upload_faculty(request):
     if request.session.get("mentor"):
         return redirect("/mentor-dashboard/")
-    if not has_staff_panel_access(request.user):
+    has_coordinator_access = CoordinatorModuleAccess.objects.filter(coordinator=request.user).exists()
+    if not has_staff_panel_access(request.user) and not has_coordinator_access:
         return redirect("/reports/")
     module, module_choices, invalid_module = _selected_allowed_module(request)
     if invalid_module:
@@ -3041,7 +3042,8 @@ def upload_faculty(request):
 def download_faculty_sample(request):
     if request.session.get("mentor"):
         return redirect("/mentor-dashboard/")
-    if not has_staff_panel_access(request.user):
+    has_coordinator_access = CoordinatorModuleAccess.objects.filter(coordinator=request.user).exists()
+    if not has_staff_panel_access(request.user) and not has_coordinator_access:
         return redirect("/reports/")
 
     wb = Workbook()
