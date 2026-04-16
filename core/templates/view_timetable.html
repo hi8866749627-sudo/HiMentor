@@ -185,6 +185,81 @@
             </div>
         </form>
         <div class="form-text mb-2">Changes here update the timetable permanently and do not create proxy/swap badges.</div>
+        <div class="card mb-3">
+            <div class="card-header fw-semibold">Multi-target Faculty Replace</div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="bulk_replace_faculty">
+                    <div class="row g-2 align-items-end mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Resigned/Original Faculty</label>
+                            <select name="replace_source_faculty" id="replace-source-faculty" class="form-select">
+                                <option value="">Select</option>
+                                {% for f in replace_faculty_choices %}
+                                    <option value="{{ f }}">{{ f }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-8 small text-muted">
+                            Select rows for that faculty, set replacement faculty row-wise (can be different per batch/lecture), then Apply.
+                        </div>
+                    </div>
+                    <div class="table-responsive border rounded">
+                        <table class="table table-sm table-bordered mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width:50px;">Do</th>
+                                    <th>Day</th>
+                                    <th>Lec</th>
+                                    <th>Time</th>
+                                    <th>Batch</th>
+                                    <th>Subject</th>
+                                    <th>Current Faculty</th>
+                                    <th>Room</th>
+                                    <th>Replace With</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in replace_rows %}
+                                <tr class="replace-row" data-current-faculty="{{ item.faculty|lower }}">
+                                    <td class="text-center">
+                                        <input type="checkbox" name="replace_entry_ids" value="{{ item.id }}" class="form-check-input replace-row-check">
+                                    </td>
+                                    <td>{{ item.day_label }}</td>
+                                    <td>L{{ item.lecture_no }}</td>
+                                    <td>{{ item.time_slot }}</td>
+                                    <td>{{ item.batch }}</td>
+                                    <td>{{ item.subject }}</td>
+                                    <td class="fw-semibold">{{ item.faculty }}</td>
+                                    <td>{{ item.room }}</td>
+                                    <td>
+                                        <select name="replace_faculty_{{ item.id }}" class="form-select form-select-sm">
+                                            <option value="">Select</option>
+                                            {% for f in replace_faculty_choices %}
+                                                {% if f != item.faculty %}
+                                                    <option value="{{ f }}">{{ f }}</option>
+                                                {% endif %}
+                                            {% endfor %}
+                                        </select>
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="9" class="text-muted">No timetable rows available for replacement in current filter.</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="mt-2 d-flex gap-2">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="replace-select-visible">Select Visible</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="replace-clear-select">Clear</button>
+                        <button type="submit" class="btn btn-primary btn-sm">Apply Replacement</button>
+                    </div>
+                </form>
+            </div>
+        </div>
         {% for row in rows %}
         <div class="card mb-3">
             <div class="card-header">
@@ -391,6 +466,46 @@ document.addEventListener("DOMContentLoaded", function(){
         swapSelect.addEventListener('change', updateLabels);
         updateLabels();
     });
+
+    const sourceFaculty = document.getElementById("replace-source-faculty");
+    const replaceRows = Array.from(document.querySelectorAll(".replace-row"));
+    const selectVisibleBtn = document.getElementById("replace-select-visible");
+    const clearSelectBtn = document.getElementById("replace-clear-select");
+
+    function applyReplaceFilter() {
+        if (!sourceFaculty || !replaceRows.length) return;
+        const selected = (sourceFaculty.value || "").trim().toLowerCase();
+        replaceRows.forEach(row => {
+            const currentFaculty = (row.getAttribute("data-current-faculty") || "").trim().toLowerCase();
+            const visible = !selected || currentFaculty === selected;
+            row.style.display = visible ? "" : "none";
+            if (!visible) {
+                const chk = row.querySelector(".replace-row-check");
+                if (chk) chk.checked = false;
+            }
+        });
+    }
+    if (sourceFaculty) {
+        sourceFaculty.addEventListener("change", applyReplaceFilter);
+        applyReplaceFilter();
+    }
+    if (selectVisibleBtn) {
+        selectVisibleBtn.addEventListener("click", function() {
+            replaceRows.forEach(row => {
+                if (row.style.display === "none") return;
+                const chk = row.querySelector(".replace-row-check");
+                if (chk) chk.checked = true;
+            });
+        });
+    }
+    if (clearSelectBtn) {
+        clearSelectBtn.addEventListener("click", function() {
+            replaceRows.forEach(row => {
+                const chk = row.querySelector(".replace-row-check");
+                if (chk) chk.checked = false;
+            });
+        });
+    }
 });
 </script>
 

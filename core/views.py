@@ -26,7 +26,7 @@ from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.models import User
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
-from django.db import close_old_connections
+from django.db import close_old_connections, transaction
 from django.db.utils import OperationalError, ProgrammingError
 from django.db.models import Count
 from django.contrib.auth.decorators import login_required
@@ -7316,6 +7316,109 @@ def view_timetable(request):
                 "/view-timetable/",
                 ["module_id", "year_scope_id", "day", "lecture_no", "batch", "subject", "faculty", "room", "editor_date", "editor_faculty", "recent", "updated", "highlight", "last_key"],
             )
+        if action == "bulk_replace_faculty":
+            source_faculty = (request.POST.get("replace_source_faculty") or "").strip()
+            selected_ids_raw = request.POST.getlist("replace_entry_ids")
+            selected_ids = []
+            for raw_id in selected_ids_raw:
+                try:
+                    selected_ids.append(int(raw_id))
+                except Exception:
+                    continue
+            selected_ids = sorted(set(selected_ids))
+            if not source_faculty:
+                messages.error(request, "Select the resigned/original faculty.")
+                return redirect_response
+            if not selected_ids:
+                messages.error(request, "Select at least one lecture/batch row.")
+                return redirect_response
+
+            selected_entries = list(
+                TimetableEntry.objects.filter(
+                    id__in=selected_ids,
+                    module=module,
+                    is_active=True,
+                ).order_by("day_of_week", "lecture_no", "batch")
+            )
+            if len(selected_entries) != len(selected_ids):
+                messages.error(request, "Some selected timetable rows are invalid.")
+                return redirect_response
+
+            source_key = source_faculty.lower()
+            update_payload = []
+            invalid_source_rows = []
+            missing_target_rows = []
+            unchanged_rows = 0
+            for entry in selected_entries:
+                if (entry.faculty or "").strip().lower() != source_key:
+                    invalid_source_rows.append(f"{entry.get_day_of_week_display()} L{entry.lecture_no} {entry.batch}")
+                    continue
+                target_faculty = (request.POST.get(f"replace_faculty_{entry.id}") or "").strip()
+                if not target_faculty:
+                    missing_target_rows.append(f"{entry.get_day_of_week_display()} L{entry.lecture_no} {entry.batch}")
+                    continue
+                if target_faculty.lower() == source_key:
+                    unchanged_rows += 1
+                    continue
+                update_payload.append((entry, target_faculty))
+
+            if invalid_source_rows:
+                messages.error(
+                    request,
+                    "Some rows do not match selected source faculty: "
+                    + ", ".join(invalid_source_rows[:5])
+                    + ("..." if len(invalid_source_rows) > 5 else ""),
+                )
+                return redirect_response
+            if missing_target_rows:
+                messages.error(
+                    request,
+                    "Choose replacement faculty for all selected rows. Missing: "
+                    + ", ".join(missing_target_rows[:5])
+                    + ("..." if len(missing_target_rows) > 5 else ""),
+                )
+                return redirect_response
+            if not update_payload:
+                messages.info(request, "No rows changed.")
+                return redirect_response
+
+            change_group = uuid.uuid4().hex
+            with transaction.atomic():
+                logs = []
+                for entry, target_faculty in update_payload:
+                    fixed_time = _fixed_time_for_lecture(entry.lecture_no, entry.time_slot)
+                    logs.append(
+                        TimetableChangeLog(
+                            module=module,
+                            timetable_entry=entry,
+                            change_group=change_group,
+                            change_type=TimetableChangeLog.TYPE_PROXY,
+                            day_of_week=entry.day_of_week,
+                            lecture_no=entry.lecture_no,
+                            batch=entry.batch,
+                            prev_subject=entry.subject,
+                            prev_faculty=entry.faculty,
+                            prev_room=entry.room,
+                            prev_time_slot=entry.time_slot,
+                            new_subject=entry.subject,
+                            new_faculty=target_faculty,
+                            new_room=entry.room,
+                            new_time_slot=fixed_time,
+                            created_by=request.user.username,
+                        )
+                    )
+                    TimetableEntry.objects.filter(id=entry.id, module=module, is_active=True).update(
+                        faculty=target_faculty,
+                        time_slot=fixed_time,
+                    )
+                if logs:
+                    TimetableChangeLog.objects.bulk_create(logs)
+
+            msg = f"Faculty replaced for {len(update_payload)} lecture rows."
+            if unchanged_rows:
+                msg += f" {unchanged_rows} rows were unchanged."
+            messages.success(request, msg)
+            return redirect_response
         if action == "undo_change":
             change_group = (request.POST.get("change_group") or "").strip()
             changes = list(
@@ -7395,8 +7498,33 @@ def view_timetable(request):
         qs = qs.filter(room__iexact=room_filter)
 
     day_choices = TimetableEntry.DAY_CHOICES
+    filtered_entries = list(qs)
+    replace_rows = [
+        {
+            "id": entry.id,
+            "day_key": entry.day_of_week,
+            "day_label": dict(day_choices).get(entry.day_of_week, str(entry.day_of_week)),
+            "lecture_no": entry.lecture_no,
+            "time_slot": _fixed_time_for_lecture(entry.lecture_no, entry.time_slot),
+            "batch": entry.batch,
+            "subject": entry.subject,
+            "faculty": entry.faculty,
+            "room": entry.room,
+        }
+        for entry in filtered_entries
+        if (entry.faculty or "").strip()
+    ]
+    replace_faculty_choices = sorted(
+        {
+            (name or "").strip()
+            for name in list(choice_lists["faculty_choices"])
+            + list(Mentor.objects.exclude(name="").values_list("name", flat=True))
+            if (name or "").strip()
+        }
+    )
+
     grouped = {}
-    for entry in qs:
+    for entry in filtered_entries:
         day_key = entry.day_of_week
         grouped.setdefault(day_key, []).append(entry)
 
@@ -7516,6 +7644,8 @@ def view_timetable(request):
             "editor_date": editor_date,
             "editor_faculty": editor_faculty,
             "rows": rows,
+            "replace_rows": replace_rows,
+            "replace_faculty_choices": replace_faculty_choices,
             "recent_changes": recent_changes,
             "recent_mode": recent_mode,
         },
