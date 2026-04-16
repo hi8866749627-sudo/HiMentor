@@ -7381,7 +7381,8 @@ def view_timetable(request):
                 if target_faculty.lower() == source_key:
                     unchanged_rows += 1
                     continue
-                update_payload.append((entry, target_faculty))
+                target_room = (request.POST.get(f"replace_room_{entry.id}") or "").strip() or (entry.room or "")
+                update_payload.append((entry, target_faculty, target_room))
 
             if invalid_source_rows:
                 messages.error(
@@ -7406,7 +7407,7 @@ def view_timetable(request):
             change_group = uuid.uuid4().hex
             with transaction.atomic():
                 logs = []
-                for entry, target_faculty in update_payload:
+                for entry, target_faculty, target_room in update_payload:
                     fixed_time = _fixed_time_for_lecture(entry.lecture_no, entry.time_slot)
                     logs.append(
                         TimetableChangeLog(
@@ -7423,13 +7424,14 @@ def view_timetable(request):
                             prev_time_slot=entry.time_slot,
                             new_subject=entry.subject,
                             new_faculty=target_faculty,
-                            new_room=entry.room,
+                            new_room=target_room,
                             new_time_slot=fixed_time,
                             created_by=request.user.username,
                         )
                     )
                     TimetableEntry.objects.filter(id=entry.id, module=module, is_active=True).update(
                         faculty=target_faculty,
+                        room=target_room,
                         time_slot=fixed_time,
                     )
                 if logs:
@@ -7537,6 +7539,14 @@ def view_timetable(request):
         for entry in filtered_entries
         if (entry.faculty or "").strip()
     ]
+    replace_room_choices = sorted(
+        {
+            (name or "").strip()
+            for name in list(choice_lists["room_choices"])
+            + list(Room.objects.filter(module=module, is_active=True).values_list("name", flat=True))
+            if (name or "").strip()
+        }
+    )
     replace_faculty_choices = sorted(
         {
             (name or "").strip()
@@ -7668,6 +7678,7 @@ def view_timetable(request):
             "editor_faculty": editor_faculty,
             "rows": rows,
             "replace_rows": replace_rows,
+            "replace_room_choices": replace_room_choices,
             "replace_faculty_choices": replace_faculty_choices,
             "recent_changes": recent_changes,
             "recent_mode": recent_mode,

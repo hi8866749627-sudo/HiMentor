@@ -221,8 +221,8 @@
                                     <th>Batch</th>
                                     <th>Subject</th>
                                     <th>Current Faculty</th>
-                                    <th>Room</th>
                                     <th>Replace With</th>
+                                    <th>Room</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -237,7 +237,6 @@
                                     <td>{{ item.batch }}</td>
                                     <td>{{ item.subject }}</td>
                                     <td class="fw-semibold">{{ item.faculty }}</td>
-                                    <td>{{ item.room }}</td>
                                     <td>
                                         <select name="replace_faculty_{{ item.id }}" class="form-select form-select-sm">
                                             <option value="">Select</option>
@@ -245,6 +244,16 @@
                                             {% for f in replace_faculty_choices %}
                                                 {% if f != item.faculty %}
                                                     <option value="{{ f }}">{{ f }}</option>
+                                                {% endif %}
+                                            {% endfor %}
+                                        </select>
+                                    </td>
+                                    <td>
+                                        <select name="replace_room_{{ item.id }}" class="form-select form-select-sm">
+                                            <option value="{{ item.room }}" selected>{{ item.room|default:"-" }}</option>
+                                            {% for r in replace_room_choices %}
+                                                {% if r != item.room %}
+                                                    <option value="{{ r }}">{{ r }}</option>
                                                 {% endif %}
                                             {% endfor %}
                                         </select>
