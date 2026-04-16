@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<h4>Year Coordinators</h4>
+{% if selected_year_scope %}
+<p class="text-muted mb-3">
+    Scope: {{ selected_year_scope.college.university.name }} / {{ selected_year_scope.college.name }} / {{ selected_year_scope.year_code }}
+</p>
+{% endif %}
+
+<div class="row g-2 mb-3">
+    <div class="col-md-3"><div class="card p-2"><strong>Year Scopes</strong><div>{{ summary.year_scopes }}</div></div></div>
+    <div class="col-md-3"><div class="card p-2"><strong>Modules</strong><div>{{ summary.modules }}</div></div></div>
+    <div class="col-md-3"><div class="card p-2"><strong>Coordinators</strong><div>{{ summary.coordinators }}</div></div></div>
+</div>
+
+<div class="card p-3" id="year-coordinator-table">
+    <h5>Coordinator List</h5>
+    <div class="table-responsive">
+        <table class="table table-sm table-bordered mb-0">
+            <thead><tr><th>Coordinator</th><th>Modules</th></tr></thead>
+            <tbody>
+                {% for row in coordinator_rows %}
+                <tr>
+                    <td>{{ row.user.username }}</td>
+                    <td>
+                        {% for name in row.module_names %}{{ name }}{% if not forloop.last %}, {% endif %}{% empty %}-{% endfor %}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="2" class="text-muted">No coordinators found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

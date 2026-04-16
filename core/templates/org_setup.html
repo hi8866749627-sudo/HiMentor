@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+<h4>Organization Setup</h4>
+
+<form method="get" class="row g-2 mb-3">
+    <div class="col-md-3">
+        <label class="form-label">University</label>
+        <select class="form-select" name="university_id">
+            <option value="">All</option>
+            {% for uni in filter_universities %}
+            <option value="{{ uni.id }}" {% if filters.university_id == uni.id|stringformat:"s" %}selected{% endif %}>{{ uni.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">College</label>
+        <select class="form-select" name="college_id">
+            <option value="">All</option>
+            {% for c in filter_colleges %}
+            <option value="{{ c.id }}" {% if filters.college_id == c.id|stringformat:"s" %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">Year</label>
+        <select class="form-select" name="year_scope_id">
+            <option value="">All</option>
+            {% for ys in filter_year_scopes %}
+            <option value="{{ ys.id }}" {% if filters.year_scope_id == ys.id|stringformat:"s" %}selected{% endif %}>{{ ys.year_code }} - {{ ys.college.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-md-3 d-flex align-items-end">
+        <button class="btn btn-primary w-100">Apply</button>
+    </div>
+</form>
+
+<div class="row g-2 mb-3">
+    <div class="col-md-2"><div class="card p-2"><strong>Universities</strong><div>{{ org_summary.universities }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Colleges</strong><div>{{ org_summary.colleges }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Years</strong><div>{{ org_summary.year_scopes }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Modules</strong><div>{{ org_summary.modules }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Coordinators</strong><div>{{ org_summary.coordinators }}</div></div></div>
+</div>
+
+<div class="card p-3">
+    <h5>Scoped Modules</h5>
+    <ul class="mb-0">
+        {% for m in scoped_modules %}
+        <li>{{ m.name }} (year_scope_id={{ m.year_scope_id }})</li>
+        {% empty %}
+        <li class="text-muted">No modules in current scope.</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endblock %}

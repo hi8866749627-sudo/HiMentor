@@ -4,6 +4,8 @@
 <h3>Mentor Followup Sheet</h3>
 
 <form method="get" action="/mentor-view-sif/" class="row g-2 align-items-end mb-3" id="mentor-view-sif-filters">
+    <input type="hidden" name="module_id" value="{{ selected_module_id }}">
+    {% if selected_year_scope_id %}<input type="hidden" name="year_scope_id" value="{{ selected_year_scope_id }}">{% endif %}
     <div class="col-md-6">
         <label class="form-label">Student</label>
         <select name="enrollment" class="form-select" onchange="this.form.submit()">
@@ -19,10 +21,10 @@
     </div>
     {% if selected_student %}
     <div class="col-md-2">
-        <a href="/mentor-prefilled-sif/{{ selected_student.enrollment }}/" class="btn btn-primary w-100">Download PDF</a>
+        <a href="/mentor-prefilled-sif/{{ selected_student.enrollment }}/?module_id={{ selected_module_id }}{% if selected_year_scope_id %}&year_scope_id={{ selected_year_scope_id }}{% endif %}" class="btn btn-primary w-100">Download PDF</a>
     </div>
     <div class="col-md-2">
-        <a href="/mentor-prefilled-sif-all/" class="btn btn-success w-100">Download All Student PDF</a>
+        <a href="/mentor-prefilled-sif-all/?module_id={{ selected_module_id }}{% if selected_year_scope_id %}&year_scope_id={{ selected_year_scope_id }}{% endif %}" class="btn btn-success w-100">Download All Student PDF</a>
     </div>
     {% endif %}
 </form>

@@ -4,8 +4,8 @@
 
 <h4>PRINT SIF - {{ mentor.name }}</h4>
 <div class="mb-3">
-<a href="/mentor-prefilled-sif-all/" class="btn btn-sm btn-success">Download All Pre-filled SIF (ZIP)</a>
-<a href="/mentor-sif-marks/" class="btn btn-sm btn-primary">Open SIF Marks ENTRY</a>
+<a href="/mentor-prefilled-sif-all/?module_id={{ selected_module_id }}{% if selected_year_scope_id %}&year_scope_id={{ selected_year_scope_id }}{% endif %}" class="btn btn-sm btn-success">Download All Pre-filled SIF (ZIP)</a>
+<a href="/mentor-sif-marks/?module_id={{ selected_module_id }}{% if selected_year_scope_id %}&year_scope_id={{ selected_year_scope_id }}{% endif %}" class="btn btn-sm btn-primary">Open SIF Marks ENTRY</a>
 </div>
 
 <input type="text" id="search" class="form-control mb-3" placeholder="Search student...">
@@ -46,7 +46,7 @@ value="{{ s.father_mobile|e164_in }}">
 <a target="_blank" href="/print-student/{{ s.enrollment }}/" class="btn btn-sm btn-lj">Print</a>
 </td>
 <td>
-<a href="/mentor-prefilled-sif/{{ s.enrollment }}/" class="btn btn-sm btn-primary">Download Pre-filled SIF</a>
+<a href="/mentor-prefilled-sif/{{ s.enrollment }}/?module_id={{ selected_module_id }}{% if selected_year_scope_id %}&year_scope_id={{ selected_year_scope_id }}{% endif %}" class="btn btn-sm btn-primary">Download Pre-filled SIF</a>
 </td>
 </tr>
 {% endfor %}

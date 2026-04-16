@@ -2,6 +2,11 @@
 {% block content %}
 
 <h3>Manage Subjects</h3>
+{% if module and module.year_scope %}
+<div class="text-muted mb-2">
+    Scope: {{ module.year_scope.college.university.name }} / {{ module.year_scope.college.name }} / {{ module.year_scope.year_code }} / {{ module.name }}
+</div>
+{% endif %}
 
 {% if messages %}
     {% for message in messages %}

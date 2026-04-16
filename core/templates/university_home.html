@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block content %}
+<nav class="mb-3 small">
+    <a href="/org-setup/" class="text-decoration-none">Organization Setup</a>
+    <span class="text-muted"> / </span>
+    <a href="/university-home/" class="text-decoration-none">University Home</a>
+    <span class="text-muted"> / </span>
+    <a href="/college-home/" class="text-decoration-none">College Home</a>
+</nav>
+
+<h4>University Overview</h4>
+<p class="text-muted mb-2">Scope: {{ scope_summary.universities }} ({{ summary.universities }} universities)</p>
+<p class="text-muted">University / College</p>
+<p class="small text-muted mb-3">Signed in as {{ request.user.username }}</p>
+
+<div class="row g-2 mb-3">
+    <div class="col-md-2"><div class="card p-2"><strong>Universities</strong><div>{{ summary.universities }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>University Heads</strong><div>{{ summary.university_heads }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Years</strong><div>{{ summary.year_scopes }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Modules</strong><div>{{ summary.modules }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Coordinators</strong><div>{{ summary.coordinators }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Students</strong><div>{{ summary.students }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Subjects</strong><div>{{ summary.subjects }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Timetable Entries</strong><div>{{ summary.timetable_entries }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Active Calendars</strong><div>{{ summary.active_calendars }}</div></div></div>
+</div>
+
+<div class="card p-3 mb-3">
+    <h5>University Ownership</h5>
+    <div class="table-responsive">
+        <table class="table table-sm table-bordered mb-0">
+            <thead><tr><th>University</th><th>Heads</th></tr></thead>
+            <tbody>
+                {% for row in university_rows_page %}
+                <tr>
+                    <td>{{ row.university.name }}</td>
+                    <td>
+                        {% for head in row.heads %}{{ head.username }}{% if not forloop.last %}, {% endif %}{% empty %}-{% endfor %}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="2" class="text-muted">No universities found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="small text-muted mt-2">Page {{ university_rows_page.number }} of {{ university_rows_page.paginator.num_pages }}</div>
+</div>
+
+<div class="card p-3" id="college-assignments">
+    <h5>College Rollup</h5>
+    <div class="table-responsive">
+        <table class="table table-sm table-bordered mb-0">
+            <thead><tr><th>College</th><th>Links</th></tr></thead>
+            <tbody>
+                {% for row in college_rows_page %}
+                <tr>
+                    <td>{{ row.college.name }}</td>
+                    <td>
+                        <a href="/college-home/?college_id={{ row.college.id }}">College Home</a> |
+                        <a href="/college-home/?college_id={{ row.college.id }}#year-ownership">Year Ownership</a> |
+                        <a href="/year-home/?college_id={{ row.college.id }}#module-ownership">Module Ownership</a> |
+                        <a href="/year-home/?college_id={{ row.college.id }}#coordinator-ownership">Coordinator Ownership</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="2" class="text-muted">No colleges found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="small text-muted mt-2">Page {{ college_rows_page.number }} of {{ college_rows_page.paginator.num_pages }}</div>
+</div>
+{% endblock %}

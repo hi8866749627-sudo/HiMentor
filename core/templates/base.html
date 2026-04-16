@@ -900,6 +900,10 @@
 
             <div class="col-md-10 col-12 p-2 p-md-4 lj-main">
                 <div class="lj-card">
+                    {% firstof selected_year_scope_id filters.year_scope_id "" as scope_id_value %}
+                    {% firstof selected_module_id filters.module_id module.id "" as module_id_value %}
+                    {% if scope_id_value %}<input type="hidden" name="year_scope_id" value="{{ scope_id_value }}">{% endif %}
+                    {% if module_id_value %}<input type="hidden" name="module_id" value="{{ module_id_value }}">{% endif %}
                     {% if current_scope and request.user.is_authenticated and not request.session.mentor %}
                     <div class="scope-bar">
                         <span class="scope-label">Current Scope</span>

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+<h4>Year Home</h4>
+<p class="text-muted mb-3">Module Readiness</p>
+
+<div class="row g-2 mb-3">
+    <div class="col-md-2"><div class="card p-2"><strong>Years</strong><div>{{ summary.year_scopes }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Modules</strong><div>{{ summary.modules }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Coordinators</strong><div>{{ summary.coordinators }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Students</strong><div>{{ summary.students }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Subjects</strong><div>{{ summary.subjects }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Timetable Entries</strong><div>{{ summary.timetable_entries }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Active Calendars</strong><div>{{ summary.active_calendars }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Result Uploads</strong><div>{{ summary.result_uploads }}</div></div></div>
+</div>
+
+<div class="card p-3 mb-3" id="coordinator-ownership">
+    <h5>Year Scopes</h5>
+    <div class="table-responsive">
+        <table class="table table-sm table-bordered mb-0">
+            <thead><tr><th>Year</th><th>Actions</th></tr></thead>
+            <tbody>
+                {% for row in year_scope_rows %}
+                <tr>
+                    <td>{{ row.year_scope.year_code }}</td>
+                    <td>
+                        <a href="/modules/?year_scope_id={{ row.year_scope.id }}">Modules</a> |
+                        <a href="/year-coordinators/?year_scope_id={{ row.year_scope.id }}">Year Coordinators</a> |
+                        <a href="/year-coordinators/?year_scope_id={{ row.year_scope.id }}#year-coordinator-table">Coordinator Table</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="2" class="text-muted">No year scopes found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card p-3" id="module-ownership">
+    <h5>Module Readiness</h5>
+    <div class="table-responsive">
+        <table class="table table-sm table-bordered mb-0">
+            <thead><tr><th>Module</th><th>Actions</th></tr></thead>
+            <tbody>
+                {% for row in module_rows %}
+                <tr>
+                    <td>{{ row.module.name }}</td>
+                    <td>
+                        <a href="/upload-students/?module_id={{ row.module.id }}">Students</a> |
+                        <a href="/upload-faculty/?module_id={{ row.module.id }}">Faculty</a> |
+                        <a href="/subjects/?module_id={{ row.module.id }}&year_scope_id={{ row.module.year_scope_id }}">Subjects</a> |
+                        <a href="/view-timetable/?module_id={{ row.module.id }}&year_scope_id={{ row.module.year_scope_id }}">Timetable</a> |
+                        <a href="/academic-calendar/?module_id={{ row.module.id }}&year_scope_id={{ row.module.year_scope_id }}">Calendar</a> |
+                        <a href="/upload-results/?module_id={{ row.module.id }}&year_scope_id={{ row.module.year_scope_id }}">Results</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="2" class="text-muted">No modules found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

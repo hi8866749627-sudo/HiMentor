@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block content %}
+<nav class="mb-3 small">
+    <a href="/university-home/" class="text-decoration-none">University Home</a>
+    <span class="text-muted"> / </span>
+    <a href="/college-home/" class="text-decoration-none">College Home</a>
+    <span class="text-muted"> / </span>
+    <a href="/home/" class="text-decoration-none">Home</a>
+    <span class="text-muted"> / </span>
+    <a href="/year-home/" class="text-decoration-none">Year Home</a>
+    <span class="text-muted"> / </span>
+    <a href="/org-setup/" class="text-decoration-none">Organization Setup</a>
+</nav>
+
+<h4>College Overview</h4>
+<p class="text-muted mb-2">Scope: {{ scope_summary.colleges }}</p>
+<p class="text-muted">University / College / Year</p>
+<p class="small text-muted mb-3">{{ request.user.username }}</p>
+
+<div class="row g-2 mb-3">
+    <div class="col-md-2"><div class="card p-2"><strong>Colleges</strong><div>{{ summary.colleges }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>College Heads</strong><div>{{ summary.college_heads }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Year Heads</strong><div>{{ summary.year_heads }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Modules</strong><div>{{ summary.modules }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Coordinators</strong><div>{{ summary.coordinators }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Students</strong><div>{{ summary.students }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Subjects</strong><div>{{ summary.subjects }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Timetable Entries</strong><div>{{ summary.timetable_entries }}</div></div></div>
+    <div class="col-md-2"><div class="card p-2"><strong>Active Calendars</strong><div>{{ summary.active_calendars }}</div></div></div>
+</div>
+
+<div class="card p-3 mb-3" id="college-ownership">
+    <h5>College Ownership</h5>
+    <div class="table-responsive">
+        <table class="table table-sm table-bordered mb-0">
+            <thead><tr><th>College</th><th>Heads</th></tr></thead>
+            <tbody>
+                {% for row in college_rows_page %}
+                <tr>
+                    <td>{{ row.college.name }}</td>
+                    <td>{% for head in row.heads %}{{ head.username }}{% if not forloop.last %}, {% endif %}{% empty %}-{% endfor %}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="2" class="text-muted">No colleges found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card p-3" id="year-ownership">
+    <h5>Year Heads</h5>
+    <div class="table-responsive">
+        <table class="table table-sm table-bordered mb-0">
+            <thead><tr><th>Year</th><th>College</th><th>Actions</th></tr></thead>
+            <tbody>
+                {% for row in year_scope_rows_page %}
+                <tr>
+                    <td>{{ row.year_scope.year_code }}</td>
+                    <td>{{ row.year_scope.college.name }}</td>
+                    <td>
+                        <a href="/modules/?year_scope_id={{ row.year_scope.id }}">Modules</a> |
+                        <a href="/year-coordinators/?year_scope_id={{ row.year_scope.id }}#year-coordinator-table">Coordinators</a> |
+                        <a href="/upload-students/?module_id={{ row.primary_module_id }}">Students</a> |
+                        <a href="/subjects/?module_id={{ row.primary_module_id }}&year_scope_id={{ row.year_scope.id }}">Subjects</a> |
+                        <a href="/view-timetable/?module_id={{ row.primary_module_id }}&year_scope_id={{ row.year_scope.id }}">Timetable</a> |
+                        <a href="/academic-calendar/?module_id={{ row.primary_module_id }}&year_scope_id={{ row.year_scope.id }}">Calendar</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="3" class="text-muted">No years found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="small text-muted mt-2">Page {{ year_scope_rows_page.number }} of {{ year_scope_rows_page.paginator.num_pages }}</div>
+</div>
+{% endblock %}

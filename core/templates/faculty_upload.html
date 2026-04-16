@@ -4,6 +4,11 @@
 
 <h3>Faculty Master Upload</h3>
 <div class="text-muted mb-2">Upload faculty details for direct account creation.</div>
+{% if module and module.year_scope %}
+<div class="text-muted mb-3">
+    Scope: {{ module.year_scope.college.university.name }} / {{ module.year_scope.college.name }} / {{ module.year_scope.year_code }} / {{ module.name }}
+</div>
+{% endif %}
 
 <div class="card mb-3">
     <div class="card-body">

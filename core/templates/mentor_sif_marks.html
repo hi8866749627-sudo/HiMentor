@@ -9,6 +9,8 @@
 
 <div class="mb-3 d-flex gap-2 flex-wrap" id="mentor-sif-actions">
     <form method="get" id="mentorStudentSelectForm" class="d-flex gap-2 flex-wrap">
+        <input type="hidden" name="module_id" value="{{ selected_module_id }}">
+        {% if selected_year_scope_id %}<input type="hidden" name="year_scope_id" value="{{ selected_year_scope_id }}">{% endif %}
         <select name="enrollment" id="mentorStudentSelect" class="form-control">
             {% for s in students %}
             <option value="{{s.enrollment}}" {% if s.enrollment == selected_enrollment %}selected{% endif %}>
@@ -19,9 +21,9 @@
         <button class="btn btn-lj">View</button>
     </form>
     {% if selected_student %}
-    <a href="/mentor-sif-marks-pdf/{{selected_student.enrollment}}/" class="btn btn-primary">Download PDF</a>
+    <a href="/mentor-sif-marks-pdf/{{selected_student.enrollment}}/?module_id={{ selected_module_id }}{% if selected_year_scope_id %}&year_scope_id={{ selected_year_scope_id }}{% endif %}" class="btn btn-primary">Download PDF</a>
     {% endif %}
-    <a href="/mentor-sif-marks-pdf-all/" class="btn btn-success">Download All Student PDF</a>
+    <a href="/mentor-sif-marks-pdf-all/?module_id={{ selected_module_id }}{% if selected_year_scope_id %}&year_scope_id={{ selected_year_scope_id }}{% endif %}" class="btn btn-success">Download All Student PDF</a>
 </div>
 
 {% if selected_student %}
