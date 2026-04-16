@@ -151,6 +151,9 @@ class Student(models.Model):
     mother_mobile = models.CharField(max_length=15, blank=True)
     student_mobile_updated_by_mentor = models.BooleanField(default=False)
     father_mobile_updated_by_mentor = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    left_from_date = models.DateField(null=True, blank=True)
+    left_reason = models.CharField(max_length=120, blank=True)
 
     class Meta:
         unique_together = ("module", "enrollment")

@@ -24,6 +24,38 @@
     <div class="alert alert-info mt-2">{{message}}</div>
     {% endif %}
 
+    <hr>
+    <form method="post" class="row g-2 align-items-end">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="mark_student_left">
+        <div class="col-md-3">
+            <label class="form-label">Enrollment</label>
+            <input type="text" name="left_enrollment" class="form-control form-control-sm" placeholder="Enrollment no." required>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Left From Date</label>
+            <input type="date" name="left_from_date" class="form-control form-control-sm" required>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Reason</label>
+            <input type="text" name="left_reason" class="form-control form-control-sm" value="ADC">
+        </div>
+        <div class="col-md-3 d-flex gap-2">
+            <button class="btn btn-warning btn-sm" type="submit">Mark Left</button>
+        </div>
+    </form>
+    <form method="post" class="row g-2 align-items-end mt-1">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="reactivate_student">
+        <div class="col-md-3">
+            <label class="form-label">Enrollment</label>
+            <input type="text" name="left_enrollment" class="form-control form-control-sm" placeholder="Enrollment no." required>
+        </div>
+        <div class="col-md-3">
+            <button class="btn btn-outline-success btn-sm" type="submit">Reactivate Student</button>
+        </div>
+    </form>
+
 </div>
 
 {% if skipped_rows %}
@@ -67,6 +99,9 @@
                 <th>Enrollment ↑↓</th>
                 <th>Name ↑↓</th>
                 <th>Mentor ↑↓</th>
+                <th>Status</th>
+                <th>Left From</th>
+                <th>Reason</th>
                 <th>Student Mobile ↑↓</th>
                 <th>Father Mobile ↑↓</th>
             </tr>
@@ -77,6 +112,9 @@
                 <th><input id="f_enrollment" class="form-control form-control-sm" placeholder="Filter"></th>
                 <th><input id="f_name" class="form-control form-control-sm" placeholder="Filter"></th>
                 <th><select id="f_mentor" class="form-select form-select-sm"><option value="">All</option></select></th>
+                <th></th>
+                <th></th>
+                <th></th>
                 <th><input id="f_student_mobile" class="form-control form-control-sm" placeholder="Filter"></th>
                 <th>
                     <div class="d-flex gap-1">
@@ -96,6 +134,9 @@
                 <td>{{s.enrollment}}</td>
                 <td>{{s.name}}</td>
                 <td>{{s.mentor.name}}</td>
+                <td>{% if s.is_active and not s.left_from_date %}Active{% elif s.is_active and s.left_from_date %}Left{% else %}Inactive{% endif %}</td>
+                <td>{{s.left_from_date|date:"d-M-Y"|default:"-"}}</td>
+                <td>{{s.left_reason|default:"-"}}</td>
                 <td>{{s.student_mobile|e164_in|default:"-"}}</td>
                 <td>{{s.father_mobile|e164_in|default:"-"}}</td>
             </tr>
@@ -150,7 +191,7 @@
 
             rows.forEach(function (row) {
                 const cols = row.querySelectorAll("td");
-                if (cols.length < 8) { return; }
+                if (cols.length < 11) { return; }
                 const data = {
                     roll: norm(cols[0].innerText),
                     batch: norm(cols[1].innerText),
@@ -158,8 +199,8 @@
                     enrollment: norm(cols[3].innerText),
                     name: norm(cols[4].innerText),
                     mentor: norm(cols[5].innerText),
-                    student_mobile: norm(cols[6].innerText),
-                    father_mobile: norm(cols[7].innerText)
+                    student_mobile: norm(cols[9].innerText),
+                    father_mobile: norm(cols[10].innerText)
                 };
                 const ok =
                     (!q.roll || data.roll.includes(q.roll)) &&

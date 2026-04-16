@@ -2910,6 +2910,36 @@ def upload_students(request):
         if request.POST.get("action") == "clear_module_students":
             deleted_count, _ = Student.objects.filter(module=module).delete()
             message = f"Deleted student master data for module '{module.name}'. Records removed: {deleted_count}"
+        elif request.POST.get("action") == "mark_student_left":
+            enrollment = (request.POST.get("left_enrollment") or "").strip()
+            left_date_raw = (request.POST.get("left_from_date") or "").strip()
+            left_reason = (request.POST.get("left_reason") or "ADC").strip()
+            student = Student.objects.filter(module=module, enrollment__iexact=enrollment).first()
+            if not student:
+                message = "Student enrollment not found in current module."
+            elif not left_date_raw:
+                message = "Left from date is required."
+            else:
+                try:
+                    left_date = datetime.strptime(left_date_raw, "%Y-%m-%d").date()
+                    student.is_active = True
+                    student.left_from_date = left_date
+                    student.left_reason = left_reason
+                    student.save(update_fields=["is_active", "left_from_date", "left_reason"])
+                    message = f"{student.enrollment} marked inactive from {left_date:%d-%b-%Y}."
+                except Exception:
+                    message = "Invalid date format."
+        elif request.POST.get("action") == "reactivate_student":
+            enrollment = (request.POST.get("left_enrollment") or "").strip()
+            student = Student.objects.filter(module=module, enrollment__iexact=enrollment).first()
+            if not student:
+                message = "Student enrollment not found in current module."
+            else:
+                student.is_active = True
+                student.left_from_date = None
+                student.left_reason = ""
+                student.save(update_fields=["is_active", "left_from_date", "left_reason"])
+                message = f"{student.enrollment} reactivated."
         else:
             form = UploadFileForm(request.POST, request.FILES)
             if form.is_valid():
@@ -2927,7 +2957,7 @@ def upload_students(request):
     students = Student.objects.select_related("mentor").filter(module=module).order_by("roll_no")
     scope_summary = _module_scope_summary(
         module,
-        students=students.count(),
+        students=students.filter(is_active=True).count(),
         mentors=Mentor.objects.filter(student__module=module).distinct().count(),
         skipped=len(skipped_rows),
     )
@@ -4362,10 +4392,16 @@ def mentor_dashboard(request):
     attendance_map = {}
     actionable_student_ids = []
     if selected_week:
+        as_of_date = _as_of_date_for_week(module, selected_week)
+        active_student_ids = set(
+            _active_students_for_date(module, as_of_date, mentor=mentor).values_list("id", flat=True)
+        )
         atts = Attendance.objects.filter(week_no=selected_week, student__mentor=mentor, student__module=module).filter(
             Q(call_required=True) | Q(week_percentage__lt=80) | Q(overall_percentage__lt=80)
         )
         for a in atts:
+            if a.student_id not in active_student_ids:
+                continue
             attendance_map[a.student_id] = a
             actionable_student_ids.append(a.student_id)
     
@@ -4408,7 +4444,7 @@ def mentor_other_calls(request):
     if not mentor:
         return redirect("/")
     module = _active_module(request)
-    students = Student.objects.filter(module=module, mentor=mentor).order_by("roll_no", "name")
+    students = _active_students_for_date(module, timezone.localdate(), mentor=mentor).order_by("roll_no", "name")
 
     qs = (
         OtherCallRecord.objects.filter(mentor=mentor, student__module=module, student__in=students)
@@ -4453,10 +4489,8 @@ def save_other_call(request):
     module = _active_module(request)
 
     raw_id = request.POST.get("id")
-    student = Student.objects.select_related("mentor").filter(
+    student = _active_students_for_date(module, timezone.localdate(), mentor=mentor).select_related("mentor").filter(
         id=raw_id,
-        module=module,
-        mentor=mentor,
     ).first()
     if not student:
         # Backward compatibility: old UI may still send call record id.
@@ -4568,7 +4602,7 @@ def save_call(request):
         except Exception:
             week_no = None
 
-        student = Student.objects.filter(id=raw_id, module=module).first()
+        student = _active_students_for_date(module, timezone.localdate()).filter(id=raw_id).first()
         if not student:
             # Backward compatibility: old payload may still send call record id.
             prev_call = CallRecord.objects.select_related("student").filter(id=raw_id, student__module=module).first()
@@ -4612,7 +4646,7 @@ def mark_message(request):
         except Exception:
             week_no = None
 
-        student = Student.objects.filter(id=raw_id, module=module).first()
+        student = _active_students_for_date(module, timezone.localdate()).filter(id=raw_id).first()
         source_call = None
         if not student:
             source_call = CallRecord.objects.select_related("student").filter(id=raw_id, student__module=module).first()
@@ -4666,14 +4700,18 @@ def mentor_report(request):
         )
 
     week = int(week)
+    as_of_date = _as_of_date_for_week(module, week)
+    active_qs = _active_students_for_date(module, as_of_date, mentor=mentor_obj)
+    active_ids = set(active_qs.values_list("id", flat=True))
 
-    students = Student.objects.filter(module=module, mentor=mentor_obj).count()
+    students = active_qs.count()
 
     below80 = Attendance.objects.filter(
         week_no=week, student__mentor=mentor_obj, student__module=module, call_required=True
-    ).count()
+    ).filter(student_id__in=active_ids).count()
 
     latest_calls = _latest_attendance_calls_map(module, week, mentor=mentor_obj)
+    latest_calls = {sid: call for sid, call in latest_calls.items() if sid in active_ids}
     calls_done = len([c for c in latest_calls.values() if c.final_status in {"received", "not_received"}])
     received = len([c for c in latest_calls.values() if c.final_status == "received"])
     not_received = len([c for c in latest_calls.values() if c.final_status == "not_received"])
@@ -4734,6 +4772,8 @@ def mentor_result_calls(request):
     not_connected = []
     if selected_upload:
         fail_student_ids = _upload_fail_student_ids(selected_upload)
+        active_ids = set(_active_students_for_date(module, timezone.localdate(), mentor=mentor).values_list("id", flat=True))
+        fail_student_ids = {sid for sid in fail_student_ids if sid in active_ids}
         latest_map = _latest_result_calls_map(
             selected_upload,
             mentor=mentor,
@@ -4779,10 +4819,8 @@ def save_result_call(request):
     upload_id = request.POST.get("upload_id")
     upload = ResultUpload.objects.filter(id=upload_id, module=module).first() if upload_id else None
 
-    student = Student.objects.select_related("mentor").filter(
+    student = _active_students_for_date(module, timezone.localdate(), mentor=mentor).select_related("mentor").filter(
         id=raw_id,
-        mentor=mentor,
-        module=module,
     ).first()
     source_call = None
     if not student:
@@ -4846,10 +4884,8 @@ def mark_result_message(request):
     upload_id = request.POST.get("upload_id")
     upload = ResultUpload.objects.filter(id=upload_id, module=module).first() if upload_id else None
 
-    student = Student.objects.select_related("mentor").filter(
+    student = _active_students_for_date(module, timezone.localdate(), mentor=mentor).select_related("mentor").filter(
         id=raw_id,
-        mentor=mentor,
-        module=module,
     ).first()
     source_call = None
     if not student:
@@ -9102,7 +9138,7 @@ def _build_attendance_batch_rows(module, selected_date, mentor=None, allow_overr
             if (adj.batch, adj.lecture_no) not in adj_by_key:
                 continue
 
-    students_all = list(Student.objects.filter(module=module).order_by("roll_no", "name"))
+    students_all = list(_active_students_for_date(module, selected_date).order_by("roll_no", "name"))
     students_by_batch = {}
     for student in students_all:
         for key in {_norm_batch_key(student.batch), _norm_batch_key(student.division)}:
@@ -10391,7 +10427,12 @@ def mentor_daily_absentees(request):
 
     sessions = LectureSession.objects.filter(module=module, date=date_val)
     absences = (
-        LectureAbsence.objects.filter(session__in=sessions, student__mentor=mentor)
+        LectureAbsence.objects.filter(
+            session__in=sessions,
+            student__mentor=mentor,
+            student__is_active=True,
+        )
+        .filter(Q(student__left_from_date__isnull=True) | Q(student__left_from_date__gt=date_val))
         .select_related("student", "session")
         .order_by("student__roll_no", "session__lecture_no")
     )
@@ -10711,7 +10752,7 @@ def save_lecture_attendance(request):
 
     if roll_numbers:
         batch_key = _norm_batch_key(batch)
-        students = list(Student.objects.filter(module=module, roll_no__in=roll_numbers))
+        students = list(_active_students_for_date(module, date_val).filter(roll_no__in=roll_numbers))
         student_map = {}
         for s in students:
             if not batch_key or batch_key in _student_batch_keys(s):
@@ -10761,7 +10802,7 @@ def attendance_analytics(request):
     batch_choices = sorted(
         {
             ((student.division or "").strip() or (student.batch or "").strip())
-            for student in Student.objects.filter(module=module).only("batch", "division")
+            for student in _active_students_for_date(module, timezone.localdate()).only("batch", "division")
             if ((student.division or "").strip() or (student.batch or "").strip())
         }
     )
@@ -10822,7 +10863,7 @@ def attendance_analytics(request):
 
     batch_filter_key = _norm_batch_key(batch_filter)
 
-    students_qs = Student.objects.filter(module=module)
+    students_qs = _active_students_for_date(module, range_end)
     if search:
         search_q = Q(name__icontains=search) | Q(enrollment__icontains=search)
         if search.isdigit():
@@ -11625,6 +11666,41 @@ def _student_batch_keys(student):
     }
 
 
+def _is_student_active_on(student, on_date):
+    if not student:
+        return False
+    if not getattr(student, "is_active", True):
+        return False
+    left_from = getattr(student, "left_from_date", None)
+    if left_from and on_date and left_from <= on_date:
+        return False
+    return True
+
+
+def _active_students_for_date(module, on_date, mentor=None):
+    qs = Student.objects.filter(module=module, is_active=True)
+    if mentor is not None:
+        qs = qs.filter(mentor=mentor)
+    if on_date:
+        qs = qs.filter(Q(left_from_date__isnull=True) | Q(left_from_date__gt=on_date))
+    return qs
+
+
+def _as_of_date_for_week(module, week_no):
+    calendar = _calendar_for_module(module)
+    if not calendar or not week_no:
+        return timezone.localdate()
+    max_date = None
+    for d in LectureSession.objects.filter(module=module).values_list("date", flat=True).distinct():
+        phase, wk = week_for_date(calendar, d)
+        if not phase or wk is None:
+            continue
+        if _normalize_week_no(phase, wk) == int(week_no):
+            if max_date is None or d > max_date:
+                max_date = d
+    return max_date or timezone.localdate()
+
+
 def _ordered_subject_names_for_module(module, sessions):
     alias_map = _subject_alias_map(module)
     session_subjects = {
@@ -11667,7 +11743,7 @@ def _weekly_export_data(module, calendar, phase, week_no, batch_filter=""):
     batch_filter_key = _norm_batch_key(batch_filter)
 
     students = list(
-        Student.objects.filter(module=module)
+        _active_students_for_date(module, range_end)
         .select_related("mentor")
         .order_by("batch", "roll_no", "name")
     )
