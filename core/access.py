@@ -1,4 +1,5 @@
 from django.db.models import Q
+from django.db.models import Q
 
 from .models import AcademicModule, College, CoordinatorModuleAccess, RoleAssignment, University, YearScope
 

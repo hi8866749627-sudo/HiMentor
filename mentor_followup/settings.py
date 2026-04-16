@@ -148,7 +148,8 @@ if REDIS_URL:
         }
     }
     if env_bool("USE_CACHE_SESSIONS", False):
-        SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+        # Keep DB as source of truth so auth sessions survive cache hiccups.
+        SESSION_ENGINE = "django.contrib.sessions.backends.cached_db"
         SESSION_CACHE_ALIAS = "default"
 
 
