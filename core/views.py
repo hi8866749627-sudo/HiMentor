@@ -8651,6 +8651,58 @@ def _cancel_adjustment_with_pair(adjustment, cancelled_by):
     )
 
 
+def _effective_slot_conflict(faculty_name, selected_date, lecture_no, exclude_slot=None):
+    faculty_key = (faculty_name or "").strip().lower()
+    if not faculty_key:
+        return None
+    active_modules = list(AcademicModule.objects.filter(is_active=True).only("id", "name", "variant", "year_level"))
+    if not active_modules:
+        return None
+    active_module_ids = [m.id for m in active_modules]
+    entries = list(
+        TimetableEntry.objects.filter(
+            module_id__in=active_module_ids,
+            day_of_week=selected_date.weekday(),
+            lecture_no=lecture_no,
+            is_active=True,
+        )
+        .exclude(faculty="")
+        .select_related("module")
+    )
+    adjustments = list(
+        LectureAdjustment.objects.filter(
+            module_id__in=active_module_ids,
+            date=selected_date,
+            lecture_no=lecture_no,
+            status=LectureAdjustment.STATUS_ACTIVE,
+        ).select_related("proxy_faculty")
+    )
+    adjustment_by_slot = {
+        (a.module_id, (a.batch or "").strip(), a.lecture_no): a
+        for a in adjustments
+    }
+    for entry in entries:
+        slot_key = (entry.module_id, (entry.batch or "").strip(), entry.lecture_no)
+        if exclude_slot and slot_key == exclude_slot:
+            continue
+        adj = adjustment_by_slot.get(slot_key)
+        effective_faculty = (entry.faculty or "").strip()
+        if adj:
+            if adj.adjustment_type == LectureAdjustment.TYPE_PROXY and adj.proxy_faculty:
+                effective_faculty = (adj.proxy_faculty.name or "").strip()
+            elif adj.adjustment_type in {LectureAdjustment.TYPE_SWAP, LectureAdjustment.TYPE_ROOM}:
+                effective_faculty = (adj.original_faculty or effective_faculty).strip()
+        if effective_faculty.lower() != faculty_key:
+            continue
+        effective_room = (adj.room if adj and adj.room else entry.room) or ""
+        return {
+            "entry": entry,
+            "adjustment": adj,
+            "room": effective_room,
+        }
+    return None
+
+
 def _swap_partner_choices(
     module,
     selected_date,
@@ -8918,10 +8970,6 @@ def _build_adjustment_rows(
         .select_related("module")
         .only("module__id", "module__name", "module__variant", "module__year_level", "lecture_no", "faculty", "room")
     )
-    conflict_entries_by_lecture = {}
-    for conflict_entry in conflict_entries_all:
-        conflict_entries_by_lecture.setdefault(conflict_entry.lecture_no, []).append(conflict_entry)
-
     conflict_adjustments_all = list(
         LectureAdjustment.objects.filter(
             module_id__in=active_module_ids,
@@ -8938,6 +8986,29 @@ def _build_adjustment_rows(
         if item.module_id == module.id:
             slot_adjustments_by_lecture.setdefault(item.lecture_no, []).append(item)
     active_adjustment_keys = {(item.batch, item.lecture_no) for item in active_adjustments}
+    conflict_adjustment_by_slot = {
+        (item.module_id, (item.batch or "").strip(), item.lecture_no): item
+        for item in conflict_adjustments_all
+    }
+    effective_conflict_entries_by_lecture = {}
+    for conflict_entry in conflict_entries_all:
+        slot_key = (conflict_entry.module_id, (conflict_entry.batch or "").strip(), conflict_entry.lecture_no)
+        adj = conflict_adjustment_by_slot.get(slot_key)
+        effective_faculty = (conflict_entry.faculty or "").strip()
+        if adj:
+            if adj.adjustment_type == LectureAdjustment.TYPE_PROXY and adj.proxy_faculty:
+                effective_faculty = (adj.proxy_faculty.name or "").strip()
+            elif adj.adjustment_type in {LectureAdjustment.TYPE_SWAP, LectureAdjustment.TYPE_ROOM}:
+                effective_faculty = (adj.original_faculty or effective_faculty).strip()
+        if not effective_faculty:
+            continue
+        effective_conflict_entries_by_lecture.setdefault(conflict_entry.lecture_no, []).append(
+            {
+                "faculty": effective_faculty,
+                "room": (adj.room if adj and adj.room else conflict_entry.room) or "",
+                "module": conflict_entry.module,
+            }
+        )
 
     def _format_adjustment_message(entry_obj, adj_obj, date_val):
         if not adj_obj:
@@ -8981,27 +9052,18 @@ def _build_adjustment_rows(
         adj = adjustment_map.get((entry.batch, entry.lecture_no))
         slot_started = _slot_has_started(selected_date, (adj.time_slot if adj and adj.time_slot else entry.time_slot))
         slot_faculty_subjects = slot_faculty_subjects_by_lecture.get(entry.lecture_no, {})
-        conflict_entries = conflict_entries_by_lecture.get(entry.lecture_no, [])
-        conflict_adjustments = conflict_adjustments_by_lecture.get(entry.lecture_no, [])
-        conflict_faculties = set(e.faculty for e in conflict_entries if e.faculty)
+        conflict_entries = effective_conflict_entries_by_lecture.get(entry.lecture_no, [])
+        conflict_faculties = {e["faculty"] for e in conflict_entries if e.get("faculty")}
         conflict_depts = {
-            str(e.faculty).strip().lower(): _dept_label_from_module(e.module)
+            str(e["faculty"]).strip().lower(): _dept_label_from_module(e["module"])
             for e in conflict_entries
-            if e.faculty
+            if e.get("faculty")
         }
         conflict_rooms = {
-            str(e.faculty).strip().lower(): e.room
+            str(e["faculty"]).strip().lower(): e.get("room", "")
             for e in conflict_entries
-            if e.faculty and e.room
+            if e.get("faculty")
         }
-        for item in conflict_adjustments:
-            faculty_name = (item.proxy_faculty.name if item.proxy_faculty else item.original_faculty or "").strip()
-            if not faculty_name:
-                continue
-            conflict_faculties.add(faculty_name)
-            conflict_depts.setdefault(faculty_name.lower(), _dept_label_from_module(item.module))
-            if item.room:
-                conflict_rooms[faculty_name.lower()] = item.room
 
         batch_faculties = []
         for fac in faculty_choices:
@@ -9131,6 +9193,11 @@ def _build_attendance_batch_rows(module, selected_date, mentor=None, allow_overr
         )
 
     if mentor:
+        existing_slots = {
+            (_norm_batch_key(batch), item["entry"].lecture_no)
+            for batch, items in batch_map.items()
+            for item in items
+        }
         for adj in adjustments:
             if adj.proxy_faculty and adj.proxy_faculty.name.lower() == mentor.name.lower():
                 proxy_entry = TimetableEntry(
@@ -9144,6 +9211,33 @@ def _build_attendance_batch_rows(module, selected_date, mentor=None, allow_overr
                     room=adj.room,
                 )
                 batch_map.setdefault(adj.batch, []).append({"entry": proxy_entry, "adjustment": adj})
+                existing_slots.add((_norm_batch_key(adj.batch), adj.lecture_no))
+            elif (
+                adj.adjustment_type == LectureAdjustment.TYPE_SWAP
+                and (adj.original_faculty or "").strip().lower() == mentor.name.lower()
+            ):
+                slot_key = (_norm_batch_key(adj.batch), adj.lecture_no)
+                if slot_key in existing_slots:
+                    continue
+                base_entry = TimetableEntry.objects.filter(
+                    module=module,
+                    day_of_week=day_of_week,
+                    lecture_no=adj.lecture_no,
+                    batch=adj.batch,
+                    is_active=True,
+                ).first()
+                swap_entry = TimetableEntry(
+                    module=module,
+                    day_of_week=day_of_week,
+                    lecture_no=adj.lecture_no,
+                    time_slot=adj.time_slot or (base_entry.time_slot if base_entry else ""),
+                    batch=adj.batch,
+                    subject=adj.subject or (base_entry.subject if base_entry else ""),
+                    faculty=mentor.name,
+                    room=adj.room or (base_entry.room if base_entry else ""),
+                )
+                batch_map.setdefault(adj.batch, []).append({"entry": swap_entry, "adjustment": adj})
+                existing_slots.add(slot_key)
     else:
         for adj in adjustments:
             if (adj.batch, adj.lecture_no) not in adj_by_key:
@@ -9207,10 +9301,20 @@ def _build_attendance_batch_rows(module, selected_date, mentor=None, allow_overr
                 entry.room = adj.room or entry.room
                 if adj.adjustment_type == LectureAdjustment.TYPE_PROXY and adj.proxy_faculty:
                     entry.faculty = adj.proxy_faculty.name
+                elif adj.adjustment_type == LectureAdjustment.TYPE_SWAP:
+                    entry.faculty = adj.original_faculty or entry.faculty
             if mentor:
                 merge_room = merge_room_by_proxy.get((selected_date, entry.lecture_no, mentor.name.lower()), "")
                 if merge_room and entry.faculty.lower() == mentor.name.lower():
                     entry.room = merge_room
+            can_edit = True
+            if not allow_override and mentor:
+                can_edit = (entry.faculty or "").strip().lower() == mentor.name.lower()
+                if adj and adj.adjustment_type == LectureAdjustment.TYPE_PROXY and adj.proxy_faculty:
+                    can_edit = bool(
+                        adj.proxy_faculty.name.lower() == mentor.name.lower()
+                        or adj.merge_room
+                    )
             session = session_map.get((batch, entry.lecture_no))
             absent_rolls = absent_rolls_by_session.get(session.id, set()) if session and prefill_absent else set()
             slots.append(
@@ -9222,7 +9326,7 @@ def _build_attendance_batch_rows(module, selected_date, mentor=None, allow_overr
                     "form_id": f"form-{_norm_batch_key(batch)}-{entry.lecture_no}",
                     "adjustment": adj,
                     "is_merge": bool(adj and adj.merge_room) or (batch, entry.lecture_no) in merge_keys,
-                    "can_edit": allow_override or not (adj and adj.adjustment_type == LectureAdjustment.TYPE_PROXY and adj.proxy_faculty and mentor and adj.proxy_faculty.name != mentor.name),
+                    "can_edit": can_edit,
                 }
             )
         slots.sort(key=lambda s: (_slot_sort_key(s["entry"].time_slot), s["entry"].lecture_no))
@@ -9313,30 +9417,17 @@ def mentor_load_adjustment(request):
 
             room = merge_room or room_custom or room_select or entry.room
             active_modules = AcademicModule.objects.filter(is_active=True)
-            conflict = TimetableEntry.objects.filter(
-                module__in=active_modules,
-                day_of_week=day_of_week,
-                lecture_no=entry.lecture_no,
-                faculty__iexact=proxy.name,
-                is_active=True,
-            ).exists()
-            conflict_entry = TimetableEntry.objects.filter(
-                module__in=active_modules,
-                day_of_week=day_of_week,
-                lecture_no=entry.lecture_no,
-                faculty__iexact=proxy.name,
-                is_active=True,
-            ).first()
+            conflict_info = _effective_slot_conflict(
+                proxy.name,
+                selected_date,
+                entry.lecture_no,
+                exclude_slot=(module.id, (entry.batch or "").strip(), entry.lecture_no),
+            )
+            conflict = bool(conflict_info)
+            conflict_entry = conflict_info["entry"] if conflict_info else None
             conflict_room = ""
-            if conflict_entry:
-                conflict_adj = LectureAdjustment.objects.filter(
-                    module=conflict_entry.module,
-                    date=selected_date,
-                    batch=conflict_entry.batch,
-                    lecture_no=conflict_entry.lecture_no,
-                    status=LectureAdjustment.STATUS_ACTIVE,
-                ).first()
-                conflict_room = (conflict_adj.room if conflict_adj and conflict_adj.room else conflict_entry.room) or ""
+            if conflict_info:
+                conflict_room = conflict_info.get("room", "") or ""
             if conflict and not merge_room:
                 if room_custom:
                     merge_room = room_custom
@@ -9468,22 +9559,15 @@ def mentor_load_adjustment(request):
             conflict_room = ""
             if entry:
                 active_modules = AcademicModule.objects.filter(is_active=True)
-                conflict_entry = TimetableEntry.objects.filter(
-                    module__in=active_modules,
-                    day_of_week=adj.date.weekday(),
-                    lecture_no=adj.lecture_no,
-                    faculty__iexact=proxy.name,
-                    is_active=True,
-                ).first()
-                if conflict_entry:
-                    conflict_adj = LectureAdjustment.objects.filter(
-                        module=conflict_entry.module,
-                        date=adj.date,
-                        batch=conflict_entry.batch,
-                        lecture_no=conflict_entry.lecture_no,
-                        status=LectureAdjustment.STATUS_ACTIVE,
-                    ).first()
-                    conflict_room = (conflict_adj.room if conflict_adj and conflict_adj.room else conflict_entry.room) or ""
+                conflict_info = _effective_slot_conflict(
+                    proxy.name,
+                    adj.date,
+                    adj.lecture_no,
+                    exclude_slot=(module.id, (adj.batch or "").strip(), adj.lecture_no),
+                )
+                if conflict_info:
+                    conflict_entry = conflict_info.get("entry")
+                    conflict_room = conflict_info.get("room", "") or ""
             if conflict_entry and not merge_room:
                 if room_custom:
                     merge_room = room_custom
@@ -9751,30 +9835,17 @@ def coordinator_load_adjustment(request):
 
             room = merge_room or room_custom or room_select or entry.room
             active_modules = AcademicModule.objects.filter(is_active=True)
-            conflict = TimetableEntry.objects.filter(
-                module__in=active_modules,
-                day_of_week=day_of_week,
-                lecture_no=entry.lecture_no,
-                faculty__iexact=proxy.name,
-                is_active=True,
-            ).exists()
-            conflict_entry = TimetableEntry.objects.filter(
-                module__in=active_modules,
-                day_of_week=day_of_week,
-                lecture_no=entry.lecture_no,
-                faculty__iexact=proxy.name,
-                is_active=True,
-            ).first()
+            conflict_info = _effective_slot_conflict(
+                proxy.name,
+                selected_date,
+                entry.lecture_no,
+                exclude_slot=(module.id, (entry.batch or "").strip(), entry.lecture_no),
+            )
+            conflict = bool(conflict_info)
+            conflict_entry = conflict_info["entry"] if conflict_info else None
             conflict_room = ""
-            if conflict_entry:
-                conflict_adj = LectureAdjustment.objects.filter(
-                    module=conflict_entry.module,
-                    date=selected_date,
-                    batch=conflict_entry.batch,
-                    lecture_no=conflict_entry.lecture_no,
-                    status=LectureAdjustment.STATUS_ACTIVE,
-                ).first()
-                conflict_room = (conflict_adj.room if conflict_adj and conflict_adj.room else conflict_entry.room) or ""
+            if conflict_info:
+                conflict_room = conflict_info.get("room", "") or ""
             if conflict and not merge_room:
                 if room_custom:
                     merge_room = room_custom
@@ -9975,22 +10046,15 @@ def coordinator_load_adjustment(request):
             conflict_room = ""
             if entry:
                 active_modules = AcademicModule.objects.filter(is_active=True)
-                conflict_entry = TimetableEntry.objects.filter(
-                    module__in=active_modules,
-                    day_of_week=adj.date.weekday(),
-                    lecture_no=adj.lecture_no,
-                    faculty__iexact=proxy.name,
-                    is_active=True,
-                ).first()
-                if conflict_entry:
-                    conflict_adj = LectureAdjustment.objects.filter(
-                        module=conflict_entry.module,
-                        date=adj.date,
-                        batch=conflict_entry.batch,
-                        lecture_no=conflict_entry.lecture_no,
-                        status=LectureAdjustment.STATUS_ACTIVE,
-                    ).first()
-                    conflict_room = (conflict_adj.room if conflict_adj and conflict_adj.room else conflict_entry.room) or ""
+                conflict_info = _effective_slot_conflict(
+                    proxy.name,
+                    adj.date,
+                    adj.lecture_no,
+                    exclude_slot=(module.id, (adj.batch or "").strip(), adj.lecture_no),
+                )
+                if conflict_info:
+                    conflict_entry = conflict_info.get("entry")
+                    conflict_room = conflict_info.get("room", "") or ""
             if conflict_entry and not merge_room:
                 if room_custom:
                     merge_room = room_custom
