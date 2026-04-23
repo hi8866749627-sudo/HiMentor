@@ -9326,6 +9326,15 @@ def _build_attendance_batch_rows(module, selected_date, mentor=None, allow_overr
                     "form_id": f"form-{_norm_batch_key(batch)}-{entry.lecture_no}",
                     "adjustment": adj,
                     "is_merge": bool(adj and adj.merge_room) or (batch, entry.lecture_no) in merge_keys,
+                    "is_swap": bool(adj and adj.adjustment_type == LectureAdjustment.TYPE_SWAP),
+                    "swap_with": (
+                        f"{adj.swap_batch} L{adj.swap_lecture_no}"
+                        if adj
+                        and adj.adjustment_type == LectureAdjustment.TYPE_SWAP
+                        and adj.swap_batch
+                        and adj.swap_lecture_no
+                        else ""
+                    ),
                     "can_edit": can_edit,
                 }
             )

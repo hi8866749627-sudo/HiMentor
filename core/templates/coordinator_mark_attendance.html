@@ -159,6 +159,12 @@
                         <div>{{ slot.subject_display|default:slot.entry.subject }}</div>
                         <div class="slot-sub">
                             {{ slot.entry.faculty }} · {{ slot.entry.room }}
+                            {% if slot.is_swap %}
+                                · <span class="badge bg-info text-dark">Swap</span>
+                                {% if slot.swap_with %}
+                                    <span class="small text-muted">{{ slot.swap_with }}</span>
+                                {% endif %}
+                            {% endif %}
                             {% if slot.adjustment and slot.adjustment.proxy_faculty %}
                                 · <span class="badge bg-warning text-dark">Proxy</span>
                             {% endif %}
