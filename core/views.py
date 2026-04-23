@@ -8864,7 +8864,19 @@ def _build_adjustment_rows(
     if faculty_filter:
         entries_qs = entries_qs.filter(faculty__iexact=faculty_filter)
     entries = list(entries_qs.order_by("lecture_no", "batch", "faculty"))
-    lecture_numbers = sorted({entry.lecture_no for entry in entries})
+    # Use all lecture slots of the day (module-wide), not only the filtered faculty slots.
+    # This allows same-batch cross-slot swaps like L1 <-> L2 in the dropdown.
+    lecture_numbers = sorted(
+        {
+            no
+            for no in TimetableEntry.objects.filter(
+                module=module,
+                day_of_week=day_of_week,
+                is_active=True,
+            ).values_list("lecture_no", flat=True)
+            if no is not None
+        }
+    )
 
     rooms_base = set(
         list(Room.objects.filter(module=module, is_active=True).values_list("name", flat=True))
