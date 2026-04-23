@@ -71,7 +71,9 @@ def has_superadmin_panel_access(user):
 def get_staff_home_url(user):
     if not user or not user.is_authenticated:
         return "/"
-    if is_erp_owner(user) or is_year_head(user) or is_legacy_admin_user(user):
+    if is_erp_owner(user) or is_legacy_admin_user(user):
+        return "/coordinator-mark-attendance/"
+    if is_year_head(user):
         return "/home/"
     if is_university_head(user):
         return "/university-home/"
@@ -79,7 +81,7 @@ def get_staff_home_url(user):
         return "/college-home/"
     if has_exam_section_access(user):
         return "/exam-section/"
-    return "/reports/" if not has_staff_panel_access(user) else "/home/"
+    return "/coordinator-mark-attendance/" if not has_staff_panel_access(user) else "/home/"
 
 
 def get_staff_role_name(user):

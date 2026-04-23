@@ -68,6 +68,9 @@
                         Partner lecture: <strong>{{ row.adjustment.swap_batch }}</strong> · <strong>L{{ row.adjustment.swap_lecture_no }}</strong>
                         {% if row.adjustment.swap_time_slot %} · {{ row.adjustment.swap_time_slot }}{% endif %}
                     {% endif %}
+                    {% if row.adjustment.original_faculty %}
+                        <div class="small mt-1">This lecture to be taken by: <strong>{{ row.adjustment.original_faculty }}</strong></div>
+                    {% endif %}
                     {% if row.adjustment.remarks %}<div class="small mt-1">Remarks: {{ row.adjustment.remarks }}</div>{% endif %}
                 </div>
             {% elif row.adjustment.adjustment_type == "room" %}
